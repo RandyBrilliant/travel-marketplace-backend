@@ -1,0 +1,48 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Django stuff
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/
+
+# Environment and dependency directories
+env/
+.venv/
+venv/
+.env
+.env.*
+
+# Logs
+*.log
+logs/
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.pytest_cache/
+
+# IDEs / Editors
+.vscode/
+.idea/
+*.code-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Static asset builds
+staticfiles/
+
+
