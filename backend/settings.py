@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     "django_filters",
 
     "account.apps.AccountConfig",
+    "travel.apps.TravelConfig",
 ]
 
 MIDDLEWARE = [
