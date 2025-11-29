@@ -3,53 +3,13 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 
-class Supplier(models.Model):
-    """
-    Company or individual providing tour products.
-    """
-
-    user = models.OneToOneField(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="supplier_profile",
-    )
-    name = models.CharField(max_length=255)
-    description = models.TextField(blank=True)
-    website = models.URLField(blank=True)
-
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self) -> str:
-        return self.name
-
-
-class Reseller(models.Model):
-    """
-    Partner who sells/markets supplier products.
-    """
-
-    user = models.OneToOneField(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="reseller_profile",
-    )
-    company_name = models.CharField(max_length=255, blank=True)
-
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self) -> str:
-        return self.company_name or self.user.full_name
-
-
 class TourPackage(models.Model):
     """
     A tour product listed by a supplier (e.g. '3D2N Bali Getaway').
     """
 
     supplier = models.ForeignKey(
-        Supplier,
+        "account.SupplierProfile",
         on_delete=models.CASCADE,
         related_name="packages",
     )
@@ -134,7 +94,7 @@ class Booking(models.Model):
     """
 
     reseller = models.ForeignKey(
-        Reseller,
+        "account.ResellerProfile",
         on_delete=models.CASCADE,
         related_name="bookings",
     )
@@ -220,3 +180,43 @@ class Payment(models.Model):
 
     def __str__(self) -> str:
         return f"Payment for booking #{self.booking_id} - {self.amount} {self.currency}"
+
+
+class ResellerCommission(models.Model):
+    """
+    Commission entries per reseller per booking.
+
+    This supports:
+    - the reseller who made the booking (level 0), and
+    - their uplines (level 1, 2, ...) for override commissions.
+    """
+
+    booking = models.ForeignKey(
+        Booking,
+        on_delete=models.CASCADE,
+        related_name="commissions",
+    )
+    reseller = models.ForeignKey(
+        "account.ResellerProfile",
+        on_delete=models.CASCADE,
+        related_name="commissions",
+    )
+    level = models.PositiveSmallIntegerField(
+        default=0,
+        help_text=_("0 = booking owner, 1 = direct upline, 2+ = higher levels."),
+    )
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Reseller Commission"
+        verbose_name_plural = "Reseller Commissions"
+        indexes = [
+            models.Index(fields=["reseller", "level"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"Commission {self.amount} for {self.reseller} (booking #{self.booking_id}, level {self.level})"
