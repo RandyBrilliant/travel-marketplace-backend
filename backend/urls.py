@@ -11,6 +11,10 @@ from account.views import (
     SupplierProfileViewSet,
     ResellerProfileViewSet,
     StaffProfileViewSet,
+    AdminSupplierProfileViewSet,
+    AdminResellerProfileViewSet,
+    AdminStaffProfileViewSet,
+    AdminCustomerProfileViewSet,
 )
 
 router = DefaultRouter()
@@ -18,6 +22,20 @@ router.register(r"users", UserViewSet, basename="user")
 router.register(r"suppliers/me/profile", SupplierProfileViewSet, basename="supplier-profile")
 router.register(r"resellers/me/profile", ResellerProfileViewSet, basename="reseller-profile")
 router.register(r"staff/me/profile", StaffProfileViewSet, basename="staff-profile")
+
+# Admin-only endpoints for managing all profiles
+router.register(
+    r"admin/suppliers", AdminSupplierProfileViewSet, basename="admin-supplier-profile"
+)
+router.register(
+    r"admin/resellers", AdminResellerProfileViewSet, basename="admin-reseller-profile"
+)
+router.register(
+    r"admin/staff", AdminStaffProfileViewSet, basename="admin-staff-profile"
+)
+router.register(
+    r"admin/customers", AdminCustomerProfileViewSet, basename="admin-customer-profile"
+)
 
 urlpatterns = [
     path("", include(router.urls)),

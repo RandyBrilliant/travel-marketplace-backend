@@ -1,13 +1,28 @@
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
+import secrets
+import string
 
 from account.models import (
     CustomUser,
     SupplierProfile,
     ResellerProfile,
     StaffProfile,
+    CustomerProfile,
     UserRole,
 )
+
+
+def generate_unique_referral_code(length=8):
+    """
+    Generate a unique referral code for resellers.
+    Uses uppercase letters and numbers.
+    """
+    characters = string.ascii_uppercase + string.digits
+    while True:
+        code = ''.join(secrets.choice(characters) for _ in range(length))
+        if not ResellerProfile.objects.filter(referral_code=code).exists():
+            return code
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -16,15 +31,24 @@ class UserSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "email",
-            "full_name",
+            "phone_number",
             "role",
+            "email_verified",
+            "email_verified_at",
             "is_active",
             "is_staff",
             "is_superuser",
             "last_login",
             "date_joined",
         ]
-        read_only_fields = ["is_staff", "is_superuser", "last_login", "date_joined"]
+        read_only_fields = [
+            "is_staff",
+            "is_superuser",
+            "email_verified",
+            "email_verified_at",
+            "last_login",
+            "date_joined",
+        ]
 
 
 class SupplierProfileSerializer(serializers.ModelSerializer):
@@ -40,6 +64,7 @@ class SupplierProfileSerializer(serializers.ModelSerializer):
             "contact_phone",
             "address",
             "tax_id",
+            "status",
             "created_at",
             "updated_at",
         ]
@@ -53,6 +78,12 @@ class ResellerProfileSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
+    sponsor_referral_code = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+        help_text="Referral code of the sponsor (if joining under someone).",
+    )
 
     class Meta:
         model = ResellerProfile
@@ -64,9 +95,14 @@ class ResellerProfileSerializer(serializers.ModelSerializer):
             "address",
             "referral_code",
             "sponsor",
+            "sponsor_referral_code",
             "group_root",
             "own_commission_rate",
             "upline_commission_rate",
+            "status",
+            "bank_name",
+            "bank_account_name",
+            "bank_account_number",
             "direct_downline_count",
             "created_at",
             "updated_at",
@@ -80,6 +116,17 @@ class ResellerProfileSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
 
+    def validate_sponsor_referral_code(self, value):
+        """Validate that sponsor referral code exists if provided."""
+        if value:
+            try:
+                ResellerProfile.objects.get(referral_code=value)
+            except ResellerProfile.DoesNotExist:
+                raise serializers.ValidationError(
+                    f"Sponsor with referral code '{value}' does not exist."
+                )
+        return value
+
 
 class StaffProfileSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(read_only=True)
@@ -89,9 +136,40 @@ class StaffProfileSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "user",
+            "name",
             "job_title",
             "department",
             "contact_phone",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "user", "created_at", "updated_at"]
+
+
+class CustomerProfileSerializer(serializers.ModelSerializer):
+    user = serializers.PrimaryKeyRelatedField(read_only=True)
+    full_name = serializers.ReadOnlyField(source="full_name")
+
+    class Meta:
+        model = CustomerProfile
+        fields = [
+            "id",
+            "user",
+            "first_name",
+            "last_name",
+            "full_name",
+            "phone_number",
+            "address",
+            "city",
+            "country",
+            "postal_code",
+            "date_of_birth",
+            "gender",
+            "preferred_language",
+            "preferred_currency",
+            "emergency_contact_name",
+            "emergency_contact_phone",
+            "travel_interests",
             "created_at",
             "updated_at",
         ]
@@ -122,23 +200,25 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
     supplier_profile = SupplierProfileSerializer(required=False, write_only=True)
     reseller_profile = ResellerProfileSerializer(required=False, write_only=True)
     staff_profile = StaffProfileSerializer(required=False, write_only=True)
+    customer_profile = CustomerProfileSerializer(required=False, write_only=True)
 
     class Meta:
         model = CustomUser
         fields = [
             "email",
-            "full_name",
+            "phone_number",
             "password",
             "password_confirm",
             "role",
             "supplier_profile",
             "reseller_profile",
             "staff_profile",
+            "customer_profile",
         ]
         extra_kwargs = {
             "email": {"required": True},
-            "full_name": {"required": True},
             "role": {"required": True},
+            "phone_number": {"required": False},
         }
 
     def validate(self, attrs):
@@ -158,22 +238,28 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         supplier_profile = attrs.get("supplier_profile")
         reseller_profile = attrs.get("reseller_profile")
         staff_profile = attrs.get("staff_profile")
+        customer_profile = attrs.get("customer_profile")
 
         # Validate that profile data matches the role
         if role == UserRole.SUPPLIER:
-            if reseller_profile or staff_profile:
+            if reseller_profile or staff_profile or customer_profile:
                 raise serializers.ValidationError(
-                    "Cannot provide reseller_profile or staff_profile when role is SUPPLIER."
+                    "Cannot provide reseller_profile, staff_profile, or customer_profile when role is SUPPLIER."
                 )
         elif role == UserRole.RESELLER:
-            if supplier_profile or staff_profile:
+            if supplier_profile or staff_profile or customer_profile:
                 raise serializers.ValidationError(
-                    "Cannot provide supplier_profile or staff_profile when role is RESELLER."
+                    "Cannot provide supplier_profile, staff_profile, or customer_profile when role is RESELLER."
                 )
         elif role == UserRole.STAFF:
-            if supplier_profile or reseller_profile:
+            if supplier_profile or reseller_profile or customer_profile:
                 raise serializers.ValidationError(
-                    "Cannot provide supplier_profile or reseller_profile when role is STAFF."
+                    "Cannot provide supplier_profile, reseller_profile, or customer_profile when role is STAFF."
+                )
+        elif role == UserRole.CUSTOMER:
+            if supplier_profile or reseller_profile or staff_profile:
+                raise serializers.ValidationError(
+                    "Cannot provide supplier_profile, reseller_profile, or staff_profile when role is CUSTOMER."
                 )
 
         return attrs
@@ -198,6 +284,10 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         supplier_profile_data = validated_data.pop("supplier_profile", None)
         reseller_profile_data = validated_data.pop("reseller_profile", None)
         staff_profile_data = validated_data.pop("staff_profile", None)
+        customer_profile_data = validated_data.pop("customer_profile", None)
+
+        # Extract phone_number if provided
+        phone_number = validated_data.pop("phone_number", None)
 
         # Remove password_confirm (not needed for user creation)
         validated_data.pop("password_confirm", None)
@@ -206,17 +296,94 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         # Create the user
         user = CustomUser.objects.create_user(
             email=validated_data["email"],
-            full_name=validated_data["full_name"],
             password=password,
             role=validated_data.get("role", UserRole.RESELLER),
         )
+        
+        # Set phone_number if provided
+        if phone_number:
+            user.phone_number = phone_number
+            user.save()
 
         # Create profile based on role
         if user.role == UserRole.SUPPLIER and supplier_profile_data:
             SupplierProfile.objects.create(user=user, **supplier_profile_data)
         elif user.role == UserRole.RESELLER and reseller_profile_data:
+            # Handle reseller profile creation with referral code and sponsor
+            sponsor_referral_code = reseller_profile_data.pop("sponsor_referral_code", None)
+            
+            # Generate referral_code if not provided
+            if "referral_code" not in reseller_profile_data or not reseller_profile_data.get("referral_code"):
+                reseller_profile_data["referral_code"] = generate_unique_referral_code()
+            
+            # Look up sponsor by referral code if provided
+            sponsor = None
+            if sponsor_referral_code:
+                try:
+                    sponsor = ResellerProfile.objects.get(referral_code=sponsor_referral_code)
+                    reseller_profile_data["sponsor"] = sponsor
+                except ResellerProfile.DoesNotExist:
+                    # This should not happen due to validation, but handle gracefully
+                    pass
+            
             ResellerProfile.objects.create(user=user, **reseller_profile_data)
         elif user.role == UserRole.STAFF and staff_profile_data:
             StaffProfile.objects.create(user=user, **staff_profile_data)
+        elif user.role == UserRole.CUSTOMER and customer_profile_data:
+            CustomerProfile.objects.create(user=user, **customer_profile_data)
 
         return user
+
+
+# ==================== ADMIN SERIALIZERS ====================
+# Admin serializers that allow setting the user field
+
+
+class AdminSupplierProfileSerializer(SupplierProfileSerializer):
+    """Admin serializer that allows setting the user field."""
+
+    user = serializers.PrimaryKeyRelatedField(
+        queryset=CustomUser.objects.filter(role=UserRole.SUPPLIER)
+    )
+
+    class Meta(SupplierProfileSerializer.Meta):
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class AdminResellerProfileSerializer(ResellerProfileSerializer):
+    """Admin serializer that allows setting the user field."""
+
+    user = serializers.PrimaryKeyRelatedField(
+        queryset=CustomUser.objects.filter(role=UserRole.RESELLER)
+    )
+
+    class Meta(ResellerProfileSerializer.Meta):
+        read_only_fields = [
+            "id",
+            "group_root",
+            "direct_downline_count",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class AdminStaffProfileSerializer(StaffProfileSerializer):
+    """Admin serializer that allows setting the user field."""
+
+    user = serializers.PrimaryKeyRelatedField(
+        queryset=CustomUser.objects.filter(role=UserRole.STAFF)
+    )
+
+    class Meta(StaffProfileSerializer.Meta):
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class AdminCustomerProfileSerializer(CustomerProfileSerializer):
+    """Admin serializer that allows setting the user field."""
+
+    user = serializers.PrimaryKeyRelatedField(
+        queryset=CustomUser.objects.filter(role=UserRole.CUSTOMER)
+    )
+
+    class Meta(CustomerProfileSerializer.Meta):
+        read_only_fields = ["id", "created_at", "updated_at"]

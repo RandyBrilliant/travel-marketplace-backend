@@ -13,17 +13,31 @@ class UserRole(models.TextChoices):
     - SUPPLIER: Provides travel products (e.g., tours, stays, transport).
     - RESELLER: Sells/markets products, often under their own brand.
     - STAFF: Internal operations/admin staff, non-superuser by default.
+    - CUSTOMER: Regular customer of the marketplace.
     """
 
     SUPPLIER = "SUPPLIER", _("Supplier")
     RESELLER = "RESELLER", _("Reseller")
     STAFF = "STAFF", _("Admin staff")
+    CUSTOMER = "CUSTOMER", _("Customer")
+
+
+class ProfileStatus(models.TextChoices):
+    """
+    Status for supplier and reseller profiles.
+    
+    - PENDING: Awaiting verification/approval
+    - ACTIVE: Approved and active
+    - SUSPENDED: Temporarily suspended
+    """
+
+    PENDING = "PENDING", _("Pending Verification")
+    ACTIVE = "ACTIVE", _("Active")
+    SUSPENDED = "SUSPENDED", _("Suspended")
 
 
 class CustomUser(AbstractUser):
     email = models.EmailField(verbose_name="Email Address", unique=True)
-    full_name = models.CharField(max_length=255, verbose_name="Full Name")
-
     role = models.CharField(
         max_length=20,
         choices=UserRole.choices,
@@ -31,7 +45,23 @@ class CustomUser(AbstractUser):
         verbose_name="Role",
         help_text=_("High-level role used for permissions and routing."),
     )
-
+    phone_number = models.CharField(
+        max_length=20,
+        blank=True,
+        verbose_name="Phone Number",
+        help_text=_("Contact phone number."),
+    )
+    email_verified = models.BooleanField(
+        default=False,
+        verbose_name="Email Verified",
+        help_text=_("Whether the email address has been verified."),
+    )
+    email_verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Email Verified At",
+        help_text=_("Timestamp when email was verified."),
+    )
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
     created_by = models.ForeignKey(
         "self",
@@ -58,12 +88,12 @@ class CustomUser(AbstractUser):
     last_name = None
 
     USERNAME_FIELD = "email"
-    REQUIRED_FIELDS = ["full_name"]
+    REQUIRED_FIELDS = []
 
     objects = CustomUserManager()
 
     def __str__(self):
-        return f"{self.email} | {self.full_name} ({self.role})"
+        return f"{self.email} | ({self.role})"
 
     @property
     def is_supplier(self) -> bool:
@@ -79,8 +109,11 @@ class CustomUser(AbstractUser):
         Convenience flag for your code to distinguish marketplace staff.
         Note: Django's `is_staff` is still used for admin-site access.
         """
-
         return self.role == UserRole.STAFF
+    
+    @property
+    def is_customer(self) -> bool:
+        return self.role == UserRole.CUSTOMER
 
     class Meta:
         ordering = ["-is_active", "email"]
@@ -106,11 +139,34 @@ class SupplierProfile(models.Model):
         related_name="supplier_profile",
         limit_choices_to={"role": UserRole.SUPPLIER},
     )
-    company_name = models.CharField(max_length=255)
-    contact_person = models.CharField(max_length=255, blank=True)
-    contact_phone = models.CharField(max_length=50, blank=True)
-    address = models.TextField(blank=True)
-    tax_id = models.CharField(max_length=100, blank=True)
+    company_name = models.CharField(
+        max_length=255,
+        help_text=_("Official company/business name."),
+    )
+    contact_person = models.CharField(
+        max_length=255,
+        help_text=_("Primary contact person name."),
+    )
+    contact_phone = models.CharField(
+        max_length=50,
+        help_text=_("Primary contact phone number."),
+    )
+    address = models.TextField(
+        blank=True,
+        help_text=_("Business address."),
+    )
+    tax_id = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text=_("Tax identification number."),
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=ProfileStatus.choices,
+        default=ProfileStatus.PENDING,
+        verbose_name="Status",
+        help_text=_("Supplier account status (pending verification, active, or suspended)."),
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -120,17 +176,11 @@ class SupplierProfile(models.Model):
         verbose_name_plural = "Supplier Profiles"
         indexes = [
             models.Index(fields=["company_name"]),
+            models.Index(fields=["status"]),
         ]
 
     def __str__(self) -> str:
         return f"{self.company_name} ({self.user.email})"
-
-    def clean(self):
-        # Ensure the linked user has the correct role.
-        if self.user and self.user.role != UserRole.SUPPLIER:
-            raise ValidationError(
-                {"user": _("Linked user must have role SUPPLIER for SupplierProfile.")}
-            )
 
 
 class ResellerProfile(models.Model):
@@ -150,7 +200,10 @@ class ResellerProfile(models.Model):
         help_text=_("Public / brand name shown to customers."),
     )
     contact_phone = models.CharField(max_length=50, blank=True)
-    address = models.TextField(blank=True)
+    address = models.TextField(
+        blank=True,
+        help_text=_("Business address."),
+    )
 
     # Verification / referral code used to invite new resellers into a group.
     referral_code = models.CharField(
@@ -201,6 +254,33 @@ class ResellerProfile(models.Model):
             "if your business logic uses it."
         ),
     )
+    status = models.CharField(
+        max_length=20,
+        choices=ProfileStatus.choices,
+        default=ProfileStatus.PENDING,
+        verbose_name="Status",
+        help_text=_("Reseller account status (pending verification, active, or suspended)."),
+    )
+    
+    # Banking information for commission payouts
+    bank_name = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Bank Name",
+        help_text=_("Bank name for commission payouts."),
+    )
+    bank_account_name = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Bank Account Name",
+        help_text=_("Account holder name for commission payouts."),
+    )
+    bank_account_number = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name="Bank Account Number",
+        help_text=_("Bank account number for commission payouts."),
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -210,16 +290,12 @@ class ResellerProfile(models.Model):
         verbose_name_plural = "Reseller Profiles"
         indexes = [
             models.Index(fields=["display_name"]),
+            models.Index(fields=["status"]),
+            models.Index(fields=["referral_code"]),
         ]
 
     def __str__(self) -> str:
         return f"{self.display_name} ({self.user.email})"
-
-    def clean(self):
-        if self.user and self.user.role != UserRole.RESELLER:
-            raise ValidationError(
-                {"user": _("Linked user must have role RESELLER for ResellerProfile.")}
-            )
 
     def save(self, *args, **kwargs):
         """
@@ -227,11 +303,22 @@ class ResellerProfile(models.Model):
         - If there is no sponsor, this reseller is the root of their own group.
         - If there is a sponsor, inherit the sponsor's group_root (or sponsor themselves).
         """
+        # Determine group_root based on sponsor
         if self.sponsor:
+            # If sponsor exists, inherit their group_root (or use sponsor if no group_root)
             self.group_root = self.sponsor.group_root or self.sponsor
-        else:
-            self.group_root = self
+        # else: group_root will be set after save if this is a new instance
+        
+        # Save the instance first
         super().save(*args, **kwargs)
+        
+        # If no sponsor, this reseller is their own group root
+        # Set it after save to avoid self-reference issues with new instances
+        if not self.sponsor and not self.group_root:
+            # Update only the group_root field using queryset to avoid recursion
+            type(self).objects.filter(pk=self.pk).update(group_root_id=self.pk)
+            # Refresh from DB to get updated group_root
+            self.refresh_from_db()
 
     @property
     def direct_downline_count(self) -> int:
@@ -257,9 +344,25 @@ class StaffProfile(models.Model):
         related_name="staff_profile",
         limit_choices_to={"role": UserRole.STAFF},
     )
-    job_title = models.CharField(max_length=255, blank=True)
-    department = models.CharField(max_length=255, blank=True)
-    contact_phone = models.CharField(max_length=50, blank=True)
+    name = models.CharField(
+        max_length=255,
+        help_text=_("Full name of the staff member."),
+    )
+    job_title = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text=_("Job title or position."),
+    )
+    department = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text=_("Department or division."),
+    )
+    contact_phone = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text=_("Contact phone number."),
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -269,10 +372,135 @@ class StaffProfile(models.Model):
         verbose_name_plural = "Staff Profiles"
 
     def __str__(self) -> str:
-        return f"{self.user.full_name} - {self.job_title or 'Staff'}"
+        return f"{self.name} ({self.user.email})"
 
-    def clean(self):
-        if self.user and self.user.role != UserRole.STAFF:
-            raise ValidationError(
-                {"user": _("Linked user must have role STAFF for StaffProfile.")}
-            )
+
+class CustomerProfile(models.Model):
+    """
+    Profile for regular customers of the marketplace.
+    
+    Stores customer-specific information including contact details,
+    travel preferences, and emergency contacts.
+    """
+
+    user = models.OneToOneField(
+        "CustomUser",
+        on_delete=models.CASCADE,
+        related_name="customer_profile",
+        limit_choices_to={"role": UserRole.CUSTOMER},
+    )
+    first_name = models.CharField(
+        max_length=255,
+        verbose_name="First Name",
+        help_text=_("Customer's first name."),
+    )
+    last_name = models.CharField(
+        max_length=255,
+        verbose_name="Last Name",
+        help_text=_("Customer's last name."),
+    )
+    phone_number = models.CharField(
+        max_length=50,
+        blank=True,
+        verbose_name="Phone Number",
+        help_text=_("Primary contact phone number."),
+    )
+    
+    # Address information
+    address = models.TextField(
+        blank=True,
+        verbose_name="Address",
+        help_text=_("Street address."),
+    )
+    city = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name="City",
+        help_text=_("City name."),
+    )
+    country = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name="Country",
+        help_text=_("Country name."),
+    )
+    postal_code = models.CharField(
+        max_length=20,
+        blank=True,
+        verbose_name="Postal Code",
+        help_text=_("Postal/ZIP code."),
+    )
+    
+    # Personal information
+    date_of_birth = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name="Date of Birth",
+        help_text=_("Customer's date of birth."),
+    )
+    gender = models.CharField(
+        max_length=10,
+        choices=[
+            ("MALE", _("Male")),
+            ("FEMALE", _("Female")),
+            ("OTHER", _("Other")),
+        ],
+        blank=True,
+        verbose_name="Gender",
+        help_text=_("Gender identity."),
+    )
+    
+    # Preferences
+    preferred_language = models.CharField(
+        max_length=10,
+        default="en",
+        verbose_name="Preferred Language",
+        help_text=_("Preferred language code (e.g., 'en', 'id')."),
+    )
+    preferred_currency = models.CharField(
+        max_length=10,
+        default="IDR",
+        verbose_name="Preferred Currency",
+        help_text=_("Preferred currency code (e.g., 'IDR', 'USD')."),
+    )
+    
+    # Emergency contact
+    emergency_contact_name = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Emergency Contact Name",
+        help_text=_("Name of emergency contact person."),
+    )
+    emergency_contact_phone = models.CharField(
+        max_length=50,
+        blank=True,
+        verbose_name="Emergency Contact Phone",
+        help_text=_("Phone number of emergency contact."),
+    )
+    
+    # Travel preferences (stored as JSON for flexibility)
+    travel_interests = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name="Travel Interests",
+        help_text=_("List of travel interests/preferences (e.g., ['beach', 'adventure'])."),
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Customer Profile"
+        verbose_name_plural = "Customer Profiles"
+        indexes = [
+            models.Index(fields=["first_name", "last_name"]),
+            models.Index(fields=["phone_number"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.first_name} {self.last_name} ({self.user.email})"
+    
+    @property
+    def full_name(self) -> str:
+        """Return the customer's full name."""
+        return f"{self.first_name} {self.last_name}".strip()
