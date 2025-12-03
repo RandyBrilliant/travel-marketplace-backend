@@ -148,7 +148,7 @@ class StaffProfileSerializer(serializers.ModelSerializer):
 
 class CustomerProfileSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(read_only=True)
-    full_name = serializers.ReadOnlyField(source="full_name")
+    full_name = serializers.ReadOnlyField()
 
     class Meta:
         model = CustomerProfile
