@@ -1,5 +1,7 @@
 from django.contrib import admin
 from django.urls import path, include
+from django.conf import settings
+from django.conf.urls.static import static
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
@@ -12,7 +14,6 @@ from account.views import (
     AdminSupplierProfileViewSet,
     AdminResellerProfileViewSet,
     AdminStaffProfileViewSet,
-    AdminCustomerProfileViewSet,
 )
 
 router = DefaultRouter()
@@ -31,9 +32,6 @@ router.register(
 router.register(
     r"admin/staff", AdminStaffProfileViewSet, basename="admin-staff-profile"
 )
-router.register(
-    r"admin/customers", AdminCustomerProfileViewSet, basename="admin-customer-profile"
-)
 
 urlpatterns = [
     path("", include(router.urls)),
@@ -42,3 +40,7 @@ urlpatterns = [
     path("api/token/", CustomTokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
 ]
+
+# Serve media files in development
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

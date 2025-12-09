@@ -13,13 +13,11 @@ class UserRole(models.TextChoices):
     - SUPPLIER: Provides travel products (e.g., tours, stays, transport).
     - RESELLER: Sells/markets products, often under their own brand.
     - STAFF: Internal operations/admin staff, non-superuser by default.
-    - CUSTOMER: Regular customer of the marketplace.
     """
 
     SUPPLIER = "SUPPLIER", _("Supplier")
     RESELLER = "RESELLER", _("Reseller")
     STAFF = "STAFF", _("Admin staff")
-    CUSTOMER = "CUSTOMER", _("Customer")
 
 
 class ProfileStatus(models.TextChoices):
@@ -111,9 +109,6 @@ class CustomUser(AbstractUser):
         """
         return self.role == UserRole.STAFF
     
-    @property
-    def is_customer(self) -> bool:
-        return self.role == UserRole.CUSTOMER
 
     class Meta:
         ordering = ["-is_active", "email"]
@@ -166,6 +161,13 @@ class SupplierProfile(models.Model):
         default=ProfileStatus.PENDING,
         verbose_name="Status",
         help_text=_("Supplier account status (pending verification, active, or suspended)."),
+    )
+    photo = models.ImageField(
+        upload_to="profile_photos/suppliers/",
+        blank=True,
+        null=True,
+        verbose_name="Profile Photo",
+        help_text=_("Supplier profile photo."),
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -281,6 +283,13 @@ class ResellerProfile(models.Model):
         verbose_name="Bank Account Number",
         help_text=_("Bank account number for commission payouts."),
     )
+    photo = models.ImageField(
+        upload_to="profile_photos/resellers/",
+        blank=True,
+        null=True,
+        verbose_name="Profile Photo",
+        help_text=_("Reseller profile photo."),
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -363,6 +372,13 @@ class StaffProfile(models.Model):
         blank=True,
         help_text=_("Contact phone number."),
     )
+    photo = models.ImageField(
+        upload_to="profile_photos/staff/",
+        blank=True,
+        null=True,
+        verbose_name="Profile Photo",
+        help_text=_("Staff profile photo."),
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -375,132 +391,3 @@ class StaffProfile(models.Model):
         return f"{self.name} ({self.user.email})"
 
 
-class CustomerProfile(models.Model):
-    """
-    Profile for regular customers of the marketplace.
-    
-    Stores customer-specific information including contact details,
-    travel preferences, and emergency contacts.
-    """
-
-    user = models.OneToOneField(
-        "CustomUser",
-        on_delete=models.CASCADE,
-        related_name="customer_profile",
-        limit_choices_to={"role": UserRole.CUSTOMER},
-    )
-    first_name = models.CharField(
-        max_length=255,
-        verbose_name="First Name",
-        help_text=_("Customer's first name."),
-    )
-    last_name = models.CharField(
-        max_length=255,
-        verbose_name="Last Name",
-        help_text=_("Customer's last name."),
-    )
-    phone_number = models.CharField(
-        max_length=50,
-        blank=True,
-        verbose_name="Phone Number",
-        help_text=_("Primary contact phone number."),
-    )
-    
-    # Address information
-    address = models.TextField(
-        blank=True,
-        verbose_name="Address",
-        help_text=_("Street address."),
-    )
-    city = models.CharField(
-        max_length=100,
-        blank=True,
-        verbose_name="City",
-        help_text=_("City name."),
-    )
-    country = models.CharField(
-        max_length=100,
-        blank=True,
-        verbose_name="Country",
-        help_text=_("Country name."),
-    )
-    postal_code = models.CharField(
-        max_length=20,
-        blank=True,
-        verbose_name="Postal Code",
-        help_text=_("Postal/ZIP code."),
-    )
-    
-    # Personal information
-    date_of_birth = models.DateField(
-        null=True,
-        blank=True,
-        verbose_name="Date of Birth",
-        help_text=_("Customer's date of birth."),
-    )
-    gender = models.CharField(
-        max_length=10,
-        choices=[
-            ("MALE", _("Male")),
-            ("FEMALE", _("Female")),
-            ("OTHER", _("Other")),
-        ],
-        blank=True,
-        verbose_name="Gender",
-        help_text=_("Gender identity."),
-    )
-    
-    # Preferences
-    preferred_language = models.CharField(
-        max_length=10,
-        default="en",
-        verbose_name="Preferred Language",
-        help_text=_("Preferred language code (e.g., 'en', 'id')."),
-    )
-    preferred_currency = models.CharField(
-        max_length=10,
-        default="IDR",
-        verbose_name="Preferred Currency",
-        help_text=_("Preferred currency code (e.g., 'IDR', 'USD')."),
-    )
-    
-    # Emergency contact
-    emergency_contact_name = models.CharField(
-        max_length=255,
-        blank=True,
-        verbose_name="Emergency Contact Name",
-        help_text=_("Name of emergency contact person."),
-    )
-    emergency_contact_phone = models.CharField(
-        max_length=50,
-        blank=True,
-        verbose_name="Emergency Contact Phone",
-        help_text=_("Phone number of emergency contact."),
-    )
-    
-    # Travel preferences (stored as JSON for flexibility)
-    travel_interests = models.JSONField(
-        default=list,
-        blank=True,
-        verbose_name="Travel Interests",
-        help_text=_("List of travel interests/preferences (e.g., ['beach', 'adventure'])."),
-    )
-
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name = "Customer Profile"
-        verbose_name_plural = "Customer Profiles"
-        indexes = [
-            models.Index(fields=["first_name", "last_name"]),
-            models.Index(fields=["phone_number"]),
-        ]
-
-    def __str__(self) -> str:
-        return f"{self.first_name} {self.last_name} ({self.user.email})"
-    
-    @property
-    def full_name(self) -> str:
-        """Return the customer's full name."""
-        return f"{self.first_name} {self.last_name}".strip()

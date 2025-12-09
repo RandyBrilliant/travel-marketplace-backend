@@ -1,10 +1,10 @@
 from django.contrib import admin
+from django.utils.html import format_html
 from .models import (
     CustomUser,
     SupplierProfile,
     ResellerProfile,
     StaffProfile,
-    CustomerProfile,
     ProfileStatus,
 )
 
@@ -46,7 +46,7 @@ class SupplierProfileAdmin(admin.ModelAdmin):
     list_display = ('user', 'company_name', 'contact_person', 'contact_phone', 'status')
     list_filter = ('status', 'user__role')
     search_fields = ('user__email', 'company_name', 'contact_person', 'tax_id')
-    readonly_fields = ('created_at', 'updated_at')
+    readonly_fields = ('photo_preview', 'created_at', 'updated_at')
     
     fieldsets = (
         ('User', {
@@ -55,6 +55,9 @@ class SupplierProfileAdmin(admin.ModelAdmin):
         ('Company Information', {
             'fields': ('company_name', 'contact_person', 'contact_phone', 'address', 'tax_id')
         }),
+        ('Profile Photo', {
+            'fields': ('photo', 'photo_preview')
+        }),
         ('Status', {
             'fields': ('status',)
         }),
@@ -62,6 +65,16 @@ class SupplierProfileAdmin(admin.ModelAdmin):
             'fields': ('created_at', 'updated_at')
         }),
     )
+    
+    def photo_preview(self, obj):
+        """Display photo preview in admin."""
+        if obj.photo:
+            return format_html(
+                '<img src="{}" style="max-height: 200px; max-width: 200px;" />',
+                obj.photo.url
+            )
+        return "No photo"
+    photo_preview.short_description = "Photo Preview"
 
 
 @admin.register(ResellerProfile)
@@ -82,7 +95,7 @@ class ResellerProfileAdmin(admin.ModelAdmin):
         'bank_account_name',
         'bank_account_number',
     )
-    readonly_fields = ('group_root', 'direct_downline_count', 'created_at', 'updated_at')
+    readonly_fields = ('photo_preview', 'group_root', 'direct_downline_count', 'created_at', 'updated_at')
     
     fieldsets = (
         ('User', {
@@ -90,6 +103,9 @@ class ResellerProfileAdmin(admin.ModelAdmin):
         }),
         ('Basic Information', {
             'fields': ('display_name', 'contact_phone', 'address')
+        }),
+        ('Profile Photo', {
+            'fields': ('photo', 'photo_preview')
         }),
         ('MLM Structure', {
             'fields': ('referral_code', 'sponsor', 'group_root', 'direct_downline_count')
@@ -108,13 +124,23 @@ class ResellerProfileAdmin(admin.ModelAdmin):
             'fields': ('created_at', 'updated_at')
         }),
     )
+    
+    def photo_preview(self, obj):
+        """Display photo preview in admin."""
+        if obj.photo:
+            return format_html(
+                '<img src="{}" style="max-height: 200px; max-width: 200px;" />',
+                obj.photo.url
+            )
+        return "No photo"
+    photo_preview.short_description = "Photo Preview"
 
 @admin.register(StaffProfile)
 class StaffProfileAdmin(admin.ModelAdmin):
     list_display = ('user', 'name', 'job_title', 'department')
     list_filter = ('user__role', 'department')
     search_fields = ('user__email', 'name', 'department', 'job_title')
-    readonly_fields = ('created_at', 'updated_at')
+    readonly_fields = ('photo_preview', 'created_at', 'updated_at')
     
     fieldsets = (
         ('User', {
@@ -123,56 +149,20 @@ class StaffProfileAdmin(admin.ModelAdmin):
         ('Staff Information', {
             'fields': ('name', 'job_title', 'department', 'contact_phone')
         }),
+        ('Profile Photo', {
+            'fields': ('photo', 'photo_preview')
+        }),
         ('Timestamps', {
             'fields': ('created_at', 'updated_at')
         }),
     )
-
-
-@admin.register(CustomerProfile)
-class CustomerProfileAdmin(admin.ModelAdmin):
-    list_display = (
-        'user',
-        'first_name',
-        'last_name',
-        'phone_number',
-        'city',
-        'country',
-    )
-    list_filter = ('country', 'gender')
-    search_fields = (
-        'user__email',
-        'first_name',
-        'last_name',
-        'phone_number',
-        'city',
-        'country',
-    )
-    readonly_fields = ('full_name', 'created_at', 'updated_at')
     
-    fieldsets = (
-        ('User', {
-            'fields': ('user', 'full_name')
-        }),
-        ('Personal Information', {
-            'fields': (
-                'first_name',
-                'last_name',
-                'phone_number',
-                'date_of_birth',
-                'gender',
+    def photo_preview(self, obj):
+        """Display photo preview in admin."""
+        if obj.photo:
+            return format_html(
+                '<img src="{}" style="max-height: 200px; max-width: 200px;" />',
+                obj.photo.url
             )
-        }),
-        ('Address', {
-            'fields': ('address', 'city', 'country', 'postal_code')
-        }),
-        ('Preferences', {
-            'fields': ('preferred_language', 'preferred_currency', 'travel_interests')
-        }),
-        ('Emergency Contact', {
-            'fields': ('emergency_contact_name', 'emergency_contact_phone')
-        }),
-        ('Timestamps', {
-            'fields': ('created_at', 'updated_at')
-        }),
-    )
+        return "No photo"
+    photo_preview.short_description = "Photo Preview"

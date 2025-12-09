@@ -1,70 +1,109 @@
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from django.conf import settings
 
 from account.models import UserRole
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     """
-    Extend the default SimpleJWT serializer to embed extra user info
-    into both:
-    - the JWT payload (so backend can read it from request.user if using custom user claims)
-    - the login response body (so frontend can easily access without decoding)
+    Extend the default SimpleJWT serializer to embed extra user info in the JWT token payload.
+    
+    Token payload includes: full_name, email, role, profile_picture_url
+    Response body only includes: access, refresh tokens
     """
+
+    @classmethod
+    def _get_profile_info(cls, user):
+        """
+        Get profile information (full name and photo URL) based on user role.
+        Returns tuple: (full_name, photo_url)
+        """
+        full_name = None
+        photo_url = None
+        
+        try:
+            if user.role == UserRole.SUPPLIER and hasattr(user, "supplier_profile"):
+                profile = user.supplier_profile
+                full_name = profile.company_name
+                if profile.photo:
+                    photo_url = profile.photo.url
+            elif user.role == UserRole.RESELLER and hasattr(user, "reseller_profile"):
+                profile = user.reseller_profile
+                full_name = profile.display_name
+                if profile.photo:
+                    photo_url = profile.photo.url
+            elif user.role == UserRole.STAFF and hasattr(user, "staff_profile"):
+                profile = user.staff_profile
+                full_name = profile.name
+                if profile.photo:
+                    photo_url = profile.photo.url
+        except Exception:
+            # If anything goes wrong, just skip to avoid breaking auth
+            pass
+        
+        return full_name or user.email, photo_url
+
+    @classmethod
+    def _build_absolute_url(cls, relative_url, request=None):
+        """
+        Build absolute URL from relative path.
+        If request is provided, uses it. Otherwise tries Site framework or settings.
+        """
+        if not relative_url:
+            return None
+        
+        if relative_url.startswith('http'):
+            return relative_url
+        
+        # Ensure it starts with /
+        if not relative_url.startswith('/'):
+            relative_url = '/' + relative_url
+        
+        # Use request if available (most reliable)
+        if request:
+            return request.build_absolute_uri(relative_url)
+        
+        # Try to use Site framework
+        from django.contrib.sites.models import Site
+        try:
+            current_site = Site.objects.get_current()
+            protocol = 'https' if not settings.DEBUG else 'http'
+            return f"{protocol}://{current_site.domain}{relative_url}"
+        except Exception:
+            # Fallback for development
+            if settings.DEBUG:
+                return f"http://localhost:8000{relative_url}"
+            # Production fallback
+            return relative_url
 
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)
 
-        # Basic role and email are always safe to expose
-        token["role"] = user.role
+        # Always include email and role in token payload
         token["email"] = user.email
+        token["role"] = user.role
 
-        # Determine a display name depending on role/profile
-        display_name = None
-        try:
-            if user.role == UserRole.SUPPLIER and hasattr(user, "supplier_profile"):
-                display_name = user.supplier_profile.company_name
-            elif user.role == UserRole.RESELLER and hasattr(user, "reseller_profile"):
-                display_name = user.reseller_profile.display_name
-            elif user.role == UserRole.STAFF and hasattr(user, "staff_profile"):
-                display_name = user.staff_profile.name
-            elif user.role == UserRole.CUSTOMER and hasattr(user, "customer_profile"):
-                display_name = user.customer_profile.full_name
-        except Exception:
-            # If anything goes wrong, just skip display_name to avoid breaking auth
-            display_name = None
-
-        if display_name:
-            token["name"] = display_name
+        # Get full name and profile picture URL
+        full_name, photo_url = cls._get_profile_info(user)
+        
+        token["full_name"] = full_name
+        
+        if photo_url:
+            # Build absolute URL (no request available in get_token, so use fallback)
+            absolute_url = cls._build_absolute_url(photo_url)
+            if absolute_url:
+                token["profile_picture_url"] = absolute_url
 
         return token
 
     def validate(self, attrs):
         """
-        Add the same extra fields into the serialized response body so the
-        frontend can read them without decoding the JWT.
+        Return only access and refresh tokens.
+        All user info (email, role, full_name, profile_picture_url) is in the token payload.
         """
         data = super().validate(attrs)
-
-        user = self.user
-        data["role"] = user.role
-
-        # Default name to email if we cannot resolve a nicer display name
-        name = None
-        try:
-            if user.role == UserRole.SUPPLIER and hasattr(user, "supplier_profile"):
-                name = user.supplier_profile.company_name
-            elif user.role == UserRole.RESELLER and hasattr(user, "reseller_profile"):
-                name = user.reseller_profile.display_name
-            elif user.role == UserRole.STAFF and hasattr(user, "staff_profile"):
-                name = user.staff_profile.name
-            elif user.role == UserRole.CUSTOMER and hasattr(user, "customer_profile"):
-                name = user.customer_profile.full_name
-        except Exception:
-            name = None
-
-        data["name"] = name or user.email
-
+        # Return only tokens - user info is in the JWT payload itself
         return data
 
 

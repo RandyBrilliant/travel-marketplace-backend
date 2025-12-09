@@ -7,7 +7,6 @@ from account.models import (
     SupplierProfile,
     ResellerProfile,
     StaffProfile,
-    CustomerProfile,
     UserRole,
 )
 from account.serializers import (
@@ -15,12 +14,10 @@ from account.serializers import (
     SupplierProfileSerializer,
     ResellerProfileSerializer,
     StaffProfileSerializer,
-    CustomerProfileSerializer,
     UserRegistrationSerializer,
     AdminSupplierProfileSerializer,
     AdminResellerProfileSerializer,
     AdminStaffProfileSerializer,
-    AdminCustomerProfileSerializer,
 )
 
 
@@ -127,6 +124,34 @@ class UserViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+    
+    @action(detail=False, methods=["get"], permission_classes=[permissions.IsAuthenticated])
+    def me(self, request):
+        """
+        Get current authenticated user information.
+        Returns user data with role and profile information.
+        """
+        user = request.user
+        serializer = self.get_serializer(user)
+        
+        response_data = serializer.data
+        response_data["role"] = user.role
+        
+        # Get display name based on profile
+        name = None
+        try:
+            if user.role == UserRole.SUPPLIER and hasattr(user, "supplier_profile"):
+                name = user.supplier_profile.company_name
+            elif user.role == UserRole.RESELLER and hasattr(user, "reseller_profile"):
+                name = user.reseller_profile.display_name
+            elif user.role == UserRole.STAFF and hasattr(user, "staff_profile"):
+                name = user.staff_profile.name
+        except Exception:
+            name = None
+        
+        response_data["name"] = name or user.email
+        
+        return Response(response_data, status=status.HTTP_200_OK)
 
 
 class BaseOwnProfileViewSet(viewsets.ModelViewSet):
@@ -255,22 +280,4 @@ class AdminStaffProfileViewSet(BaseAdminProfileViewSet):
     serializer_class = AdminStaffProfileSerializer
     filterset_fields = ["department", "user__is_active"]
     search_fields = ["name", "job_title", "department", "user__email"]
-
-
-class AdminCustomerProfileViewSet(BaseAdminProfileViewSet):
-    """
-    Admin-only CRUD (except delete) for managing all customer profiles.
-    """
-
-    queryset = CustomerProfile.objects.select_related("user").order_by("-created_at")
-    serializer_class = AdminCustomerProfileSerializer
-    filterset_fields = ["country", "gender", "user__is_active"]
-    search_fields = [
-        "first_name",
-        "last_name",
-        "user__email",
-        "phone_number",
-        "city",
-        "country",
-    ]
 

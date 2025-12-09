@@ -8,7 +8,6 @@ from account.models import (
     SupplierProfile,
     ResellerProfile,
     StaffProfile,
-    CustomerProfile,
     UserRole,
 )
 
@@ -65,6 +64,7 @@ class SupplierProfileSerializer(serializers.ModelSerializer):
             "address",
             "tax_id",
             "status",
+            "photo",
             "created_at",
             "updated_at",
         ]
@@ -104,6 +104,7 @@ class ResellerProfileSerializer(serializers.ModelSerializer):
             "bank_account_name",
             "bank_account_number",
             "direct_downline_count",
+            "photo",
             "created_at",
             "updated_at",
         ]
@@ -140,36 +141,7 @@ class StaffProfileSerializer(serializers.ModelSerializer):
             "job_title",
             "department",
             "contact_phone",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "user", "created_at", "updated_at"]
-
-
-class CustomerProfileSerializer(serializers.ModelSerializer):
-    user = serializers.PrimaryKeyRelatedField(read_only=True)
-    full_name = serializers.ReadOnlyField()
-
-    class Meta:
-        model = CustomerProfile
-        fields = [
-            "id",
-            "user",
-            "first_name",
-            "last_name",
-            "full_name",
-            "phone_number",
-            "address",
-            "city",
-            "country",
-            "postal_code",
-            "date_of_birth",
-            "gender",
-            "preferred_language",
-            "preferred_currency",
-            "emergency_contact_name",
-            "emergency_contact_phone",
-            "travel_interests",
+            "photo",
             "created_at",
             "updated_at",
         ]
@@ -200,7 +172,6 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
     supplier_profile = SupplierProfileSerializer(required=False, write_only=True)
     reseller_profile = ResellerProfileSerializer(required=False, write_only=True)
     staff_profile = StaffProfileSerializer(required=False, write_only=True)
-    customer_profile = CustomerProfileSerializer(required=False, write_only=True)
 
     class Meta:
         model = CustomUser
@@ -213,7 +184,6 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             "supplier_profile",
             "reseller_profile",
             "staff_profile",
-            "customer_profile",
         ]
         extra_kwargs = {
             "email": {"required": True},
@@ -238,28 +208,22 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         supplier_profile = attrs.get("supplier_profile")
         reseller_profile = attrs.get("reseller_profile")
         staff_profile = attrs.get("staff_profile")
-        customer_profile = attrs.get("customer_profile")
 
         # Validate that profile data matches the role
         if role == UserRole.SUPPLIER:
-            if reseller_profile or staff_profile or customer_profile:
+            if reseller_profile or staff_profile:
                 raise serializers.ValidationError(
-                    "Cannot provide reseller_profile, staff_profile, or customer_profile when role is SUPPLIER."
+                    "Cannot provide reseller_profile or staff_profile when role is SUPPLIER."
                 )
         elif role == UserRole.RESELLER:
-            if supplier_profile or staff_profile or customer_profile:
+            if supplier_profile or staff_profile:
                 raise serializers.ValidationError(
-                    "Cannot provide supplier_profile, staff_profile, or customer_profile when role is RESELLER."
+                    "Cannot provide supplier_profile or staff_profile when role is RESELLER."
                 )
         elif role == UserRole.STAFF:
-            if supplier_profile or reseller_profile or customer_profile:
+            if supplier_profile or reseller_profile:
                 raise serializers.ValidationError(
-                    "Cannot provide supplier_profile, reseller_profile, or customer_profile when role is STAFF."
-                )
-        elif role == UserRole.CUSTOMER:
-            if supplier_profile or reseller_profile or staff_profile:
-                raise serializers.ValidationError(
-                    "Cannot provide supplier_profile, reseller_profile, or staff_profile when role is CUSTOMER."
+                    "Cannot provide supplier_profile or reseller_profile when role is STAFF."
                 )
 
         return attrs
@@ -284,7 +248,6 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         supplier_profile_data = validated_data.pop("supplier_profile", None)
         reseller_profile_data = validated_data.pop("reseller_profile", None)
         staff_profile_data = validated_data.pop("staff_profile", None)
-        customer_profile_data = validated_data.pop("customer_profile", None)
 
         # Extract phone_number if provided
         phone_number = validated_data.pop("phone_number", None)
@@ -329,8 +292,6 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             ResellerProfile.objects.create(user=user, **reseller_profile_data)
         elif user.role == UserRole.STAFF and staff_profile_data:
             StaffProfile.objects.create(user=user, **staff_profile_data)
-        elif user.role == UserRole.CUSTOMER and customer_profile_data:
-            CustomerProfile.objects.create(user=user, **customer_profile_data)
 
         return user
 
@@ -377,13 +338,3 @@ class AdminStaffProfileSerializer(StaffProfileSerializer):
     class Meta(StaffProfileSerializer.Meta):
         read_only_fields = ["id", "created_at", "updated_at"]
 
-
-class AdminCustomerProfileSerializer(CustomerProfileSerializer):
-    """Admin serializer that allows setting the user field."""
-
-    user = serializers.PrimaryKeyRelatedField(
-        queryset=CustomUser.objects.filter(role=UserRole.CUSTOMER)
-    )
-
-    class Meta(CustomerProfileSerializer.Meta):
-        read_only_fields = ["id", "created_at", "updated_at"]
