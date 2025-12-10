@@ -7,7 +7,6 @@ from rest_framework_simplejwt.views import TokenRefreshView
 
 from account.token_views import CustomTokenObtainPairView
 from account.views import (
-    UserViewSet,
     SupplierProfileViewSet,
     ResellerProfileViewSet,
     StaffProfileViewSet,
@@ -17,7 +16,6 @@ from account.views import (
 )
 
 router = DefaultRouter()
-router.register(r"users", UserViewSet, basename="user")
 router.register(r"suppliers/me/profile", SupplierProfileViewSet, basename="supplier-profile")
 router.register(r"resellers/me/profile", ResellerProfileViewSet, basename="reseller-profile")
 router.register(r"admin/staff/me/profile", StaffProfileViewSet, basename="staff-profile")

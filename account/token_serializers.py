@@ -63,18 +63,25 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         if request:
             return request.build_absolute_uri(relative_url)
         
-        # Try to use Site framework
-        from django.contrib.sites.models import Site
+        # Try to use Site framework if available
         try:
-            current_site = Site.objects.get_current()
-            protocol = 'https' if not settings.DEBUG else 'http'
-            return f"{protocol}://{current_site.domain}{relative_url}"
-        except Exception:
-            # Fallback for development
+            # Check if sites app is installed before importing
+            if 'django.contrib.sites' in settings.INSTALLED_APPS:
+                from django.contrib.sites.models import Site
+                current_site = Site.objects.get_current()
+                protocol = 'https' if not settings.DEBUG else 'http'
+                return f"{protocol}://{current_site.domain}{relative_url}"
+            else:
+                raise ImportError("django.contrib.sites not in INSTALLED_APPS")
+        except (ImportError, RuntimeError, Exception):
+            # Fallback if sites framework not installed or other error
             if settings.DEBUG:
                 return f"http://localhost:8000{relative_url}"
-            # Production fallback
-            return relative_url
+            # Production fallback - return relative URL or use a default domain
+            # You can set a default domain in settings if needed
+            default_domain = getattr(settings, 'DEFAULT_DOMAIN', 'localhost:8000')
+            protocol = 'https' if not settings.DEBUG else 'http'
+            return f"{protocol}://{default_domain}{relative_url}"
 
     @classmethod
     def get_token(cls, user):

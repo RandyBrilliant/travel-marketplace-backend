@@ -1,6 +1,17 @@
 """
 Management command to create a superuser account with a staff profile.
 
+The created user will have:
+- Superuser privileges (is_staff=True, is_superuser=True)
+- STAFF role
+- Associated StaffProfile with name, job_title, department, and contact_phone
+
+When this user logs in via /api/token/, the JWT access token will include:
+- email: User's email address
+- role: STAFF
+- full_name: Staff profile name (or email if no profile)
+- profile_picture_url: Absolute URL to profile photo (if photo is uploaded later)
+
 Usage:
     python manage.py createsuperadmin
 """
@@ -143,6 +154,13 @@ class Command(BaseCommand):
                     self.stdout.write(f'  Job Title: {staff_profile.job_title}')
                 if staff_profile.department:
                     self.stdout.write(f'  Department: {staff_profile.department}')
+                
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        '\nNote: When this user logs in via /api/token/, the JWT access token '
+                        'will include email, role (STAFF), and full_name (from staff profile name).'
+                    )
+                )
 
         except ValidationError as e:
             raise CommandError(f'Validation error: {e}')

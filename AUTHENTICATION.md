@@ -1,6 +1,6 @@
 # Authentication Guide
 
-This project uses JWT (JSON Web Token) authentication via `djangorestframework-simplejwt`.
+This project uses JWT (JSON Web Token) authentication via `djangorestframework-simplejwt` with a custom token serializer that includes user information in the JWT payload.
 
 ## Token Endpoints
 
@@ -8,7 +8,7 @@ This project uses JWT (JSON Web Token) authentication via `djangorestframework-s
 
 **Endpoint:** `POST /api/token/`
 
-**Description:** Authenticate with email and password to receive both access and refresh tokens.
+**Description:** Authenticate with email and password to receive both access and refresh tokens. The JWT access token payload includes user information (email, role, full_name, profile_picture_url) for convenience.
 
 **Request:**
 ```bash
@@ -28,6 +28,12 @@ Content-Type: application/json
   "refresh": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
 }
 ```
+
+**Note:** The response only contains tokens. User information is embedded in the JWT access token payload itself. Decode the access token to get:
+- `email`: User's email address
+- `role`: User role (SUPPLIER, RESELLER, STAFF, CUSTOMER)
+- `full_name`: Full name from profile (company_name for suppliers, display_name for resellers, name for staff, email fallback)
+- `profile_picture_url`: Absolute URL to profile picture (if available)
 
 **cURL Example:**
 ```bash
@@ -167,6 +173,47 @@ if (tokens.refresh) {
 
 console.log('New Access Token:', newAccessToken);
 ```
+
+---
+
+## JWT Token Payload
+
+The access token includes user information in its payload. You can decode the JWT token to access:
+
+- `email`: User's email address
+- `role`: User role (`SUPPLIER`, `RESELLER`, `STAFF`, `CUSTOMER`)
+- `full_name`: Full name from profile:
+  - Suppliers: `company_name`
+  - Resellers: `display_name`
+  - Staff: `name`
+  - Fallback: `email` if no profile exists
+- `profile_picture_url`: Absolute URL to profile picture (if available)
+
+**Decoding JWT Token (JavaScript):**
+```javascript
+// Using jwt-decode library
+import jwt_decode from 'jwt-decode';
+
+const decoded = jwt_decode(accessToken);
+console.log('User email:', decoded.email);
+console.log('User role:', decoded.role);
+console.log('Full name:', decoded.full_name);
+console.log('Profile picture:', decoded.profile_picture_url);
+```
+
+**Decoding JWT Token (Python):**
+```python
+import jwt
+
+# Decode without verification (for reading payload only)
+decoded = jwt.decode(access_token, options={"verify_signature": False})
+print(f"User email: {decoded['email']}")
+print(f"User role: {decoded['role']}")
+print(f"Full name: {decoded['full_name']}")
+print(f"Profile picture: {decoded.get('profile_picture_url')}")
+```
+
+**Note:** The token payload is base64 encoded and can be decoded without the secret key. However, always verify the token signature on the server side before trusting the payload.
 
 ---
 
@@ -405,15 +452,17 @@ access_token = new_tokens['access']
 
 ## Summary
 
-1. **Get Refresh Token:** POST to `/api/token/` with email and password - you'll receive both `access` and `refresh` tokens in the response.
+1. **Get Tokens:** POST to `/api/token/` with email and password - you'll receive both `access` and `refresh` tokens in the response.
 
-2. **Use Refresh Token:** POST to `/api/token/refresh/` with the refresh token to get a new access token.
+2. **JWT Payload:** The access token contains user information (email, role, full_name, profile_picture_url) in its payload - decode it to access user info without additional API calls.
 
-3. **Use Access Token:** Include `Authorization: Bearer <access_token>` header in all authenticated API requests.
+3. **Use Refresh Token:** POST to `/api/token/refresh/` with the refresh token to get a new access token.
 
-4. **Token Lifetimes:**
+4. **Use Access Token:** Include `Authorization: Bearer <access_token>` header in all authenticated API requests.
+
+5. **Token Lifetimes:**
    - Access token: 5 minutes (default)
    - Refresh token: 7 days (default)
 
-5. **Token Rotation:** Enabled - old refresh tokens are blacklisted after use for security.
+6. **Token Rotation:** Enabled - old refresh tokens are blacklisted after use for security.
 

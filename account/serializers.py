@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 import secrets
 import string
 
@@ -148,177 +149,70 @@ class StaffProfileSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "user", "created_at", "updated_at"]
 
 
-class UserRegistrationSerializer(serializers.ModelSerializer):
-    """
-    Serializer for user registration.
-    Allows creating a new user account with optional profile creation.
-    """
+# ==================== ADMIN SERIALIZERS ====================
+# Admin serializers that allow setting the user field and include nested user data
 
+
+class BaseAdminProfileSerializer(serializers.ModelSerializer):
+    """Base admin serializer with common functionality for all profile types."""
+    
+    user_data = UserSerializer(source="user", read_only=True)
+    
+    # User creation fields (for auto-creating user when creating profile)
+    email = serializers.EmailField(write_only=True, required=False)
     password = serializers.CharField(
         write_only=True,
-        required=True,
+        required=False,
+        style={"input_type": "password"},
         validators=[validate_password],
-        style={"input_type": "password"},
-        help_text="Password must meet Django's password validation requirements.",
     )
-    password_confirm = serializers.CharField(
-        write_only=True,
-        required=True,
-        style={"input_type": "password"},
-        help_text="Enter the same password as above, for verification.",
-    )
-
-    # Optional profile data nested in registration
-    supplier_profile = SupplierProfileSerializer(required=False, write_only=True)
-    reseller_profile = ResellerProfileSerializer(required=False, write_only=True)
-    staff_profile = StaffProfileSerializer(required=False, write_only=True)
-
-    class Meta:
-        model = CustomUser
-        fields = [
-            "email",
-            "phone_number",
-            "password",
-            "password_confirm",
-            "role",
-            "supplier_profile",
-            "reseller_profile",
-            "staff_profile",
-        ]
-        extra_kwargs = {
-            "email": {"required": True},
-            "role": {"required": True},
-            "phone_number": {"required": False},
-        }
-
+    phone_number = serializers.CharField(write_only=True, required=False, max_length=20)
+    
     def validate(self, attrs):
-        """
-        Validate that password and password_confirm match.
-        Also validate that profile data matches the selected role.
-        """
+        """Validate that if creating new user, email and password are provided."""
+        email = attrs.get("email")
         password = attrs.get("password")
-        password_confirm = attrs.get("password_confirm")
-
-        if password != password_confirm:
-            raise serializers.ValidationError(
-                {"password_confirm": "Password fields didn't match."}
-            )
-
-        role = attrs.get("role")
-        supplier_profile = attrs.get("supplier_profile")
-        reseller_profile = attrs.get("reseller_profile")
-        staff_profile = attrs.get("staff_profile")
-
-        # Validate that profile data matches the role
-        if role == UserRole.SUPPLIER:
-            if reseller_profile or staff_profile:
+        user = attrs.get("user")
+        
+        # If user is not provided, email and password are required
+        if not user:
+            if email and not password:
                 raise serializers.ValidationError(
-                    "Cannot provide reseller_profile or staff_profile when role is SUPPLIER."
+                    {"password": "Password is required when creating a new user."}
                 )
-        elif role == UserRole.RESELLER:
-            if supplier_profile or staff_profile:
+            if password and not email:
                 raise serializers.ValidationError(
-                    "Cannot provide supplier_profile or staff_profile when role is RESELLER."
+                    {"email": "Email is required when creating a new user."}
                 )
-        elif role == UserRole.STAFF:
-            if supplier_profile or reseller_profile:
-                raise serializers.ValidationError(
-                    "Cannot provide supplier_profile or reseller_profile when role is STAFF."
-                )
-
+        
         return attrs
 
-    def validate_role(self, value):
-        """
-        Optionally restrict STAFF registration to admin-only.
-        For now, allow all roles to be registered publicly.
-        """
-        # Uncomment below if you want to restrict STAFF registration:
-        # if value == UserRole.STAFF:
-        #     raise serializers.ValidationError(
-        #         "STAFF role registration is not allowed. Please contact an administrator."
-        #     )
-        return value
 
-    def create(self, validated_data):
-        """
-        Create the user and optionally create the associated profile.
-        """
-        # Extract profile data (if any)
-        supplier_profile_data = validated_data.pop("supplier_profile", None)
-        reseller_profile_data = validated_data.pop("reseller_profile", None)
-        staff_profile_data = validated_data.pop("staff_profile", None)
-
-        # Extract phone_number if provided
-        phone_number = validated_data.pop("phone_number", None)
-
-        # Remove password_confirm (not needed for user creation)
-        validated_data.pop("password_confirm", None)
-        password = validated_data.pop("password")
-
-        # Create the user
-        user = CustomUser.objects.create_user(
-            email=validated_data["email"],
-            password=password,
-            role=validated_data.get("role", UserRole.RESELLER),
-        )
-        
-        # Set phone_number if provided
-        if phone_number:
-            user.phone_number = phone_number
-            user.save()
-
-        # Create profile based on role
-        if user.role == UserRole.SUPPLIER and supplier_profile_data:
-            SupplierProfile.objects.create(user=user, **supplier_profile_data)
-        elif user.role == UserRole.RESELLER and reseller_profile_data:
-            # Handle reseller profile creation with referral code and sponsor
-            sponsor_referral_code = reseller_profile_data.pop("sponsor_referral_code", None)
-            
-            # Generate referral_code if not provided
-            if "referral_code" not in reseller_profile_data or not reseller_profile_data.get("referral_code"):
-                reseller_profile_data["referral_code"] = generate_unique_referral_code()
-            
-            # Look up sponsor by referral code if provided
-            sponsor = None
-            if sponsor_referral_code:
-                try:
-                    sponsor = ResellerProfile.objects.get(referral_code=sponsor_referral_code)
-                    reseller_profile_data["sponsor"] = sponsor
-                except ResellerProfile.DoesNotExist:
-                    # This should not happen due to validation, but handle gracefully
-                    pass
-            
-            ResellerProfile.objects.create(user=user, **reseller_profile_data)
-        elif user.role == UserRole.STAFF and staff_profile_data:
-            StaffProfile.objects.create(user=user, **staff_profile_data)
-
-        return user
-
-
-# ==================== ADMIN SERIALIZERS ====================
-# Admin serializers that allow setting the user field
-
-
-class AdminSupplierProfileSerializer(SupplierProfileSerializer):
-    """Admin serializer that allows setting the user field."""
+class AdminSupplierProfileSerializer(BaseAdminProfileSerializer, SupplierProfileSerializer):
+    """Admin serializer that allows setting the user field and includes nested user data."""
 
     user = serializers.PrimaryKeyRelatedField(
-        queryset=CustomUser.objects.filter(role=UserRole.SUPPLIER)
+        queryset=CustomUser.objects.filter(role=UserRole.SUPPLIER),
+        required=False,
+        allow_null=True,
     )
 
     class Meta(SupplierProfileSerializer.Meta):
+        fields = SupplierProfileSerializer.Meta.fields + ["user_data", "email", "password", "phone_number"]
         read_only_fields = ["id", "created_at", "updated_at"]
 
 
-class AdminResellerProfileSerializer(ResellerProfileSerializer):
-    """Admin serializer that allows setting the user field."""
+class AdminResellerProfileSerializer(BaseAdminProfileSerializer, ResellerProfileSerializer):
+    """Admin serializer that allows setting the user field and includes nested user data."""
 
     user = serializers.PrimaryKeyRelatedField(
-        queryset=CustomUser.objects.filter(role=UserRole.RESELLER)
+        queryset=CustomUser.objects.filter(role=UserRole.RESELLER),
+        required=False,
+        allow_null=True,
     )
 
     class Meta(ResellerProfileSerializer.Meta):
+        fields = ResellerProfileSerializer.Meta.fields + ["user_data", "email", "password", "phone_number"]
         read_only_fields = [
             "id",
             "group_root",
@@ -328,13 +222,16 @@ class AdminResellerProfileSerializer(ResellerProfileSerializer):
         ]
 
 
-class AdminStaffProfileSerializer(StaffProfileSerializer):
-    """Admin serializer that allows setting the user field."""
+class AdminStaffProfileSerializer(BaseAdminProfileSerializer, StaffProfileSerializer):
+    """Admin serializer that allows setting the user field and includes nested user data."""
 
     user = serializers.PrimaryKeyRelatedField(
-        queryset=CustomUser.objects.filter(role=UserRole.STAFF)
+        queryset=CustomUser.objects.filter(role=UserRole.STAFF),
+        required=False,
+        allow_null=True,
     )
 
     class Meta(StaffProfileSerializer.Meta):
+        fields = StaffProfileSerializer.Meta.fields + ["user_data", "email", "password", "phone_number"]
         read_only_fields = ["id", "created_at", "updated_at"]
 
