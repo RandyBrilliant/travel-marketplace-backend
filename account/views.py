@@ -134,7 +134,6 @@ class BaseAdminProfileViewSet(viewsets.ModelViewSet):
         """Create user if email and password provided and user not set."""
         email = validated_data.pop("email", None)
         password = validated_data.pop("password", None)
-        phone_number = validated_data.pop("phone_number", None)
         user = validated_data.get("user")
         
         if not user and email and password:
@@ -143,7 +142,6 @@ class BaseAdminProfileViewSet(viewsets.ModelViewSet):
                     email=email,
                     password=password,
                     role=self.get_user_role(),
-                    phone_number=phone_number or "",
                     is_active=True,
                 )
                 validated_data["user"] = user
@@ -151,20 +149,17 @@ class BaseAdminProfileViewSet(viewsets.ModelViewSet):
         return validated_data
 
     def _update_user_data(self, instance, data):
-        """Update user email and phone_number if provided."""
+        """Update user email if provided."""
         email = data.pop("email", None)
-        phone_number = data.pop("phone_number", None)
         
-        if instance.user and (email is not None or phone_number is not None):
-            if email is not None and email != instance.user.email:
+        if instance.user and email is not None:
+            if email != instance.user.email:
                 if CustomUser.objects.filter(email=email).exclude(pk=instance.user.pk).exists():
                     raise serializers.ValidationError(
                         {"email": ["A user with this email already exists."]}
                     )
                 instance.user.email = email
-            if phone_number is not None:
-                instance.user.phone_number = phone_number
-            instance.user.save()
+                instance.user.save()
 
     def create(self, request, *args, **kwargs):
         """Create profile. If user doesn't exist and email/password provided, auto-create user."""
@@ -177,7 +172,6 @@ class BaseAdminProfileViewSet(viewsets.ModelViewSet):
         # Remove user creation fields from serializer's validated_data before saving
         serializer.validated_data.pop("email", None)
         serializer.validated_data.pop("password", None)
-        serializer.validated_data.pop("phone_number", None)
         
         # Update serializer's validated_data with the user (if created)
         if "user" in validated_data:

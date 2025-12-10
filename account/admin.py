@@ -14,7 +14,6 @@ from .models import (
 class CustomUserAdmin(admin.ModelAdmin):
     list_display = (
         'email',
-        'phone_number',
         'role',
         'email_verified',
         'is_active',
@@ -22,16 +21,13 @@ class CustomUserAdmin(admin.ModelAdmin):
         'is_superuser',
     )
     list_filter = ('role', 'is_active', 'is_staff', 'is_superuser', 'email_verified')
-    search_fields = ('email', 'phone_number')
+    search_fields = ('email',)
     ordering = ('email',)
     readonly_fields = ('email_verified_at', 'date_joined', 'last_login')
     
     fieldsets = (
         ('Authentication', {
             'fields': ('email', 'password', 'role', 'is_active', 'is_staff', 'is_superuser')
-        }),
-        ('Contact', {
-            'fields': ('phone_number',)
         }),
         ('Email Verification', {
             'fields': ('email_verified', 'email_verified_at')

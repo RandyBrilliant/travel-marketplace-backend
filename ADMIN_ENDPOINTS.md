@@ -15,6 +15,39 @@ Authorization: Bearer <your_jwt_token>
 
 **Note:** The JWT access token payload includes user information (`email`, `role`, `full_name`, `profile_picture_url`). You can decode the token to access this information without making additional API calls. See `AUTHENTICATION.md` for details on decoding JWT tokens.
 
+## User Management
+
+### Get Current User Information
+
+**Endpoint:** `GET /users/me/`
+
+**Permission:** Authenticated user (any role)
+
+**Description:** Get current authenticated user information including role and profile name.
+
+**Response (200 OK):**
+```json
+{
+  "id": 123,
+  "email": "supplier@example.com",
+  "role": "SUPPLIER",
+  "email_verified": true,
+  "email_verified_at": "2024-01-15T10:30:00Z",
+  "is_active": true,
+  "is_staff": false,
+  "is_superuser": false,
+  "last_login": "2024-01-20T08:00:00Z",
+  "date_joined": "2024-01-01T00:00:00Z",
+  "name": "ABC Travel Company"
+}
+```
+
+**Note:** The `name` field is derived from the user's profile:
+- Suppliers: `company_name` from SupplierProfile
+- Resellers: `display_name` from ResellerProfile  
+- Staff: `name` from StaffProfile
+- Fallback: `email` if no profile exists
+
 ---
 
 ## Admin Profile Management Endpoints
@@ -62,7 +95,6 @@ GET /admin/suppliers/?status=ACTIVE&user__is_active=true&search=Travel
       "user_data": {
         "id": 123,
         "email": "supplier@example.com",
-        "phone_number": "+1234567890",
         "role": "SUPPLIER",
         "email_verified": true,
         "email_verified_at": "2024-01-15T10:30:00Z",
@@ -71,7 +103,8 @@ GET /admin/suppliers/?status=ACTIVE&user__is_active=true&search=Travel
         "is_superuser": false,
         "last_login": "2024-01-20T08:00:00Z",
         "date_joined": "2024-01-01T00:00:00Z"
-      }
+      },
+      "photo": "http://localhost:8000/media/profile_photos/suppliers/photo.jpg"
     }
   ]
 }
@@ -101,19 +134,19 @@ GET /admin/suppliers/?status=ACTIVE&user__is_active=true&search=Travel
   "status": "ACTIVE",
   "created_at": "2024-01-01T00:00:00Z",
   "updated_at": "2024-01-15T10:30:00Z",
-  "user_data": {
-    "id": 123,
-    "email": "supplier@example.com",
-    "phone_number": "+1234567890",
-    "role": "SUPPLIER",
-    "email_verified": true,
-    "email_verified_at": "2024-01-15T10:30:00Z",
-    "is_active": true,
-    "is_staff": false,
-    "is_superuser": false,
-    "last_login": "2024-01-20T08:00:00Z",
-    "date_joined": "2024-01-01T00:00:00Z"
-  }
+      "user_data": {
+        "id": 123,
+        "email": "supplier@example.com",
+        "role": "SUPPLIER",
+        "email_verified": true,
+        "email_verified_at": "2024-01-15T10:30:00Z",
+        "is_active": true,
+        "is_staff": false,
+        "is_superuser": false,
+        "last_login": "2024-01-20T08:00:00Z",
+        "date_joined": "2024-01-01T00:00:00Z"
+      },
+      "photo": "http://localhost:8000/media/profile_photos/suppliers/photo.jpg"
 }
 ```
 
@@ -135,8 +168,7 @@ GET /admin/suppliers/?status=ACTIVE&user__is_active=true&search=Travel
   "tax_id": "TAX123456",
   "status": "PENDING",
   "email": "supplier@example.com",
-  "password": "SecurePassword123!",
-  "phone_number": "+1234567890"
+  "password": "SecurePassword123!"
 }
 ```
 
@@ -161,11 +193,11 @@ GET /admin/suppliers/?status=ACTIVE&user__is_active=true&search=Travel
 - `address` (optional, string): Business address
 - `tax_id` (optional, string): Tax identification number (max 100 chars)
 - `status` (optional, string): Status - `PENDING` (default), `ACTIVE`, or `SUSPENDED`
+- `photo` (optional, file): Profile photo (uploaded file, stored in `profile_photos/suppliers/`)
 
 **User Creation Fields (when `user` is not provided):**
 - `email` (required if creating user, string): Email address for the new user (must be unique)
 - `password` (required if creating user, string): Password for the new user (must meet Django's password validation)
-- `phone_number` (optional, string): Phone number for the user account (max 20 chars)
 
 **Validation Rules:**
 - If `user` is provided: User must exist and have `SUPPLIER` role, and must not already have a supplier profile
@@ -187,17 +219,16 @@ GET /admin/suppliers/?status=ACTIVE&user__is_active=true&search=Travel
   "status": "PENDING",
   "created_at": "2024-01-20T10:00:00Z",
   "updated_at": "2024-01-20T10:00:00Z",
-  "user_data": {
-    "id": 123,
-    "email": "supplier@example.com",
-    "phone_number": "+1234567890",
-    "role": "SUPPLIER",
-    "email_verified": false,
-    "email_verified_at": null,
-    "is_active": true,
-    "is_staff": false,
-    "is_superuser": false,
-    "last_login": null,
+      "user_data": {
+        "id": 123,
+        "email": "supplier@example.com",
+        "role": "SUPPLIER",
+        "email_verified": false,
+        "email_verified_at": null,
+        "is_active": true,
+        "is_staff": false,
+        "is_superuser": false,
+        "last_login": null,
     "date_joined": "2024-01-20T10:00:00Z"
   }
 }
@@ -209,7 +240,7 @@ GET /admin/suppliers/?status=ACTIVE&user__is_active=true&search=Travel
 - **Method:** `PUT` or `PATCH`
 - **Endpoint:** `/admin/suppliers/{id}/`
 - **Permission:** Admin-only
-- **Description:** Update supplier profile details. Can also update associated user data (email, phone_number).
+- **Description:** Update supplier profile details. Can also update associated user email.
 
 **Path Parameters:**
 - `id` (required): Supplier profile ID (integer)
@@ -232,14 +263,14 @@ GET /admin/suppliers/?status=ACTIVE&user__is_active=true&search=Travel
 {
   "status": "ACTIVE",
   "contact_phone": "+9876543210",
-  "email": "newemail@example.com",
-  "phone_number": "+9876543210"
+  "email": "newemail@example.com"
 }
 ```
 
 **User Update Fields:**
 - `email` (optional, string): Update the associated user's email address (must be unique)
-- `phone_number` (optional, string): Update the associated user's phone number (max 20 chars)
+
+**Note:** Phone numbers are stored in the profile (`contact_phone`), not in the user account.
 
 **Note:** `is_active` and `password` cannot be updated through this endpoint. Use dedicated endpoints for user status and password management.
 
@@ -264,7 +295,7 @@ GET /admin/suppliers/?status=ACTIVE&user__is_active=true&search=Travel
   "user_data": {
     "id": 123,
     "email": "newemail@example.com",
-    "phone_number": "+9876543210",
+,
     "role": "SUPPLIER",
     "email_verified": true,
     "email_verified_at": "2024-01-15T10:30:00Z",
@@ -344,7 +375,6 @@ GET /admin/resellers/?status=ACTIVE&user__is_active=true&search=Travel
       "user_data": {
         "id": 456,
         "email": "reseller@example.com",
-        "phone_number": "+1234567890",
         "role": "RESELLER",
         "email_verified": true,
         "email_verified_at": "2024-01-15T10:30:00Z",
@@ -393,7 +423,6 @@ GET /admin/resellers/?status=ACTIVE&user__is_active=true&search=Travel
   "user_data": {
     "id": 456,
     "email": "reseller@example.com",
-    "phone_number": "+1234567890",
     "role": "RESELLER",
     "email_verified": true,
     "email_verified_at": "2024-01-15T10:30:00Z",
@@ -430,7 +459,6 @@ GET /admin/resellers/?status=ACTIVE&user__is_active=true&search=Travel
   "bank_account_number": "1234567890",
   "email": "reseller@example.com",
   "password": "SecurePassword123!",
-  "phone_number": "+1234567890"
 }
 ```
 
@@ -469,7 +497,6 @@ GET /admin/resellers/?status=ACTIVE&user__is_active=true&search=Travel
 **User Creation Fields (when `user` is not provided):**
 - `email` (required if creating user, string): Email address for the new user (must be unique)
 - `password` (required if creating user, string): Password for the new user (must meet Django's password validation)
-- `phone_number` (optional, string): Phone number for the user account (max 20 chars)
 
 **Read-only Fields (auto-set):**
 - `group_root`: Automatically set based on sponsor hierarchy
@@ -508,7 +535,6 @@ GET /admin/resellers/?status=ACTIVE&user__is_active=true&search=Travel
   "user_data": {
     "id": 456,
     "email": "reseller@example.com",
-    "phone_number": "+1234567890",
     "role": "RESELLER",
     "email_verified": false,
     "email_verified_at": null,
@@ -527,7 +553,7 @@ GET /admin/resellers/?status=ACTIVE&user__is_active=true&search=Travel
 - **Method:** `PUT` or `PATCH`
 - **Endpoint:** `/admin/resellers/{id}/`
 - **Permission:** Admin-only
-- **Description:** Update reseller profile details. Can also update associated user data (email, phone_number).
+- **Description:** Update reseller profile details. Can also update associated user email.
 
 **Path Parameters:**
 - `id` (required): Reseller profile ID (integer)
@@ -556,13 +582,12 @@ GET /admin/resellers/?status=ACTIVE&user__is_active=true&search=Travel
   "status": "ACTIVE",
   "own_commission_rate": "20.00",
   "email": "newemail@example.com",
-  "phone_number": "+9876543210"
 }
 ```
 
 **User Update Fields:**
 - `email` (optional, string): Update the associated user's email address (must be unique)
-- `phone_number` (optional, string): Update the associated user's phone number (max 20 chars)
+**Note:** Phone numbers are stored in the profile (`contact_phone`), not in the user account.
 
 **Note:** `is_active` and `password` cannot be updated through this endpoint. Use dedicated endpoints for user status and password management.
 
@@ -596,7 +621,7 @@ GET /admin/resellers/?status=ACTIVE&user__is_active=true&search=Travel
   "user_data": {
     "id": 456,
     "email": "newemail@example.com",
-    "phone_number": "+9876543210",
+,
     "role": "RESELLER",
     "email_verified": true,
     "email_verified_at": "2024-01-15T10:30:00Z",
@@ -668,7 +693,6 @@ GET /admin/staff/?department=Operations&user__is_active=true&search=Manager
       "user_data": {
         "id": 789,
         "email": "jane.smith@example.com",
-        "phone_number": "+1234567890",
         "role": "STAFF",
         "email_verified": true,
         "email_verified_at": "2024-01-15T10:30:00Z",
@@ -709,7 +733,6 @@ GET /admin/staff/?department=Operations&user__is_active=true&search=Manager
   "user_data": {
     "id": 789,
     "email": "jane.smith@example.com",
-    "phone_number": "+1234567890",
     "role": "STAFF",
     "email_verified": true,
     "email_verified_at": "2024-01-15T10:30:00Z",
@@ -739,7 +762,6 @@ GET /admin/staff/?department=Operations&user__is_active=true&search=Manager
   "contact_phone": "+1234567890",
   "email": "jane.smith@example.com",
   "password": "SecurePassword123!",
-  "phone_number": "+1234567890"
 }
 ```
 
@@ -760,12 +782,12 @@ GET /admin/staff/?department=Operations&user__is_active=true&search=Manager
 - `job_title` (optional, string): Job title or position (max 255 chars)
 - `department` (optional, string): Department or division (max 255 chars)
 - `contact_phone` (optional, string): Contact phone number (max 50 chars)
+- `photo` (optional, file): Profile photo (uploaded file, stored in `profile_photos/staff/`)
 - `photo` (optional, file): Profile photo (uploaded file)
 
 **User Creation Fields (when `user` is not provided):**
 - `email` (required if creating user, string): Email address for the new user (must be unique)
 - `password` (required if creating user, string): Password for the new user (must meet Django's password validation)
-- `phone_number` (optional, string): Phone number for the user account (max 20 chars)
 
 **Validation Rules:**
 - If `user` is provided: User must exist and have `STAFF` role, and must not already have a staff profile
@@ -788,7 +810,6 @@ GET /admin/staff/?department=Operations&user__is_active=true&search=Manager
   "user_data": {
     "id": 789,
     "email": "jane.smith@example.com",
-    "phone_number": "+1234567890",
     "role": "STAFF",
     "email_verified": false,
     "email_verified_at": null,
@@ -807,7 +828,7 @@ GET /admin/staff/?department=Operations&user__is_active=true&search=Manager
 - **Method:** `PUT` or `PATCH`
 - **Endpoint:** `/admin/staff/{id}/`
 - **Permission:** Admin-only
-- **Description:** Update staff profile details. Can also update associated user data (email, phone_number).
+- **Description:** Update staff profile details. Can also update associated user email.
 
 **Path Parameters:**
 - `id` (required): Staff profile ID (integer)
@@ -820,8 +841,7 @@ GET /admin/staff/?department=Operations&user__is_active=true&search=Manager
   "job_title": "Senior Operations Manager",
   "department": "Senior Operations",
   "contact_phone": "+9876543210",
-  "email": "newemail@example.com",
-  "phone_number": "+9876543210"
+  "email": "newemail@example.com"
 }
 ```
 
@@ -829,14 +849,13 @@ GET /admin/staff/?department=Operations&user__is_active=true&search=Manager
 ```json
 {
   "name": "Jane Smith Updated",
-  "email": "newemail@example.com",
-  "phone_number": "+9876543210"
+  "email": "newemail@example.com"
 }
 ```
 
 **User Update Fields:**
 - `email` (optional, string): Update the associated user's email address (must be unique)
-- `phone_number` (optional, string): Update the associated user's phone number (max 20 chars)
+**Note:** Phone numbers are stored in the profile (`contact_phone`), not in the user account.
 
 **Note:** `is_active` and `password` cannot be updated through this endpoint. Use dedicated endpoints for user status and password management.
 
@@ -865,7 +884,7 @@ GET /admin/staff/?department=Operations&user__is_active=true&search=Manager
       "user_data": {
         "id": 789,
         "email": "newemail@example.com",
-        "phone_number": "+9876543210",
+,
         "role": "STAFF",
         "email_verified": true,
         "email_verified_at": "2024-01-15T10:30:00Z",

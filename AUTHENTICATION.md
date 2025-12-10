@@ -31,7 +31,7 @@ Content-Type: application/json
 
 **Note:** The response only contains tokens. User information is embedded in the JWT access token payload itself. Decode the access token to get:
 - `email`: User's email address
-- `role`: User role (SUPPLIER, RESELLER, STAFF, CUSTOMER)
+- `role`: User role (SUPPLIER, RESELLER, STAFF)
 - `full_name`: Full name from profile (company_name for suppliers, display_name for resellers, name for staff, email fallback)
 - `profile_picture_url`: Absolute URL to profile picture (if available)
 
@@ -181,13 +181,15 @@ console.log('New Access Token:', newAccessToken);
 The access token includes user information in its payload. You can decode the JWT token to access:
 
 - `email`: User's email address
-- `role`: User role (`SUPPLIER`, `RESELLER`, `STAFF`, `CUSTOMER`)
+- `role`: User role (`SUPPLIER`, `RESELLER`, `STAFF`)
 - `full_name`: Full name from profile:
-  - Suppliers: `company_name`
-  - Resellers: `display_name`
-  - Staff: `name`
+  - Suppliers: `company_name` from SupplierProfile
+  - Resellers: `display_name` from ResellerProfile
+  - Staff: `name` from StaffProfile
   - Fallback: `email` if no profile exists
 - `profile_picture_url`: Absolute URL to profile picture (if available)
+  - Photo is stored in the respective profile model (SupplierProfile, ResellerProfile, or StaffProfile)
+  - Returns `null` if no photo is uploaded
 
 **Decoding JWT Token (JavaScript):**
 ```javascript

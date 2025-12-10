@@ -31,7 +31,6 @@ class UserSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "email",
-            "phone_number",
             "role",
             "email_verified",
             "email_verified_at",
@@ -166,7 +165,6 @@ class BaseAdminProfileSerializer(serializers.ModelSerializer):
         style={"input_type": "password"},
         validators=[validate_password],
     )
-    phone_number = serializers.CharField(write_only=True, required=False, max_length=20)
     
     def validate(self, attrs):
         """Validate that if creating new user, email and password are provided."""
@@ -198,7 +196,7 @@ class AdminSupplierProfileSerializer(BaseAdminProfileSerializer, SupplierProfile
     )
 
     class Meta(SupplierProfileSerializer.Meta):
-        fields = SupplierProfileSerializer.Meta.fields + ["user_data", "email", "password", "phone_number"]
+        fields = SupplierProfileSerializer.Meta.fields + ["user_data", "email", "password"]
         read_only_fields = ["id", "created_at", "updated_at"]
 
 
@@ -212,7 +210,7 @@ class AdminResellerProfileSerializer(BaseAdminProfileSerializer, ResellerProfile
     )
 
     class Meta(ResellerProfileSerializer.Meta):
-        fields = ResellerProfileSerializer.Meta.fields + ["user_data", "email", "password", "phone_number"]
+        fields = ResellerProfileSerializer.Meta.fields + ["user_data", "email", "password"]
         read_only_fields = [
             "id",
             "group_root",
@@ -232,6 +230,6 @@ class AdminStaffProfileSerializer(BaseAdminProfileSerializer, StaffProfileSerial
     )
 
     class Meta(StaffProfileSerializer.Meta):
-        fields = StaffProfileSerializer.Meta.fields + ["user_data", "email", "password", "phone_number"]
+        fields = StaffProfileSerializer.Meta.fields + ["user_data", "email", "password"]
         read_only_fields = ["id", "created_at", "updated_at"]
 
