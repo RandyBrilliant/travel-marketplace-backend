@@ -14,11 +14,23 @@ from account.views import (
     AdminResellerProfileViewSet,
     AdminStaffProfileViewSet,
 )
+from travel.views import (
+    SupplierTourPackageViewSet,
+    SupplierTourDateViewSet,
+    SupplierTourImageViewSet,
+    SupplierItineraryItemViewSet,
+)
 
 router = DefaultRouter()
 router.register(r"suppliers/me/profile", SupplierProfileViewSet, basename="supplier-profile")
 router.register(r"resellers/me/profile", ResellerProfileViewSet, basename="reseller-profile")
 router.register(r"admin/staff/me/profile", StaffProfileViewSet, basename="staff-profile")
+
+# Supplier tour management endpoints
+router.register(r"suppliers/me/tours", SupplierTourPackageViewSet, basename="supplier-tour-package")
+router.register(r"suppliers/me/tour-dates", SupplierTourDateViewSet, basename="supplier-tour-date")
+router.register(r"suppliers/me/tour-images", SupplierTourImageViewSet, basename="supplier-tour-image")
+router.register(r"suppliers/me/itinerary-items", SupplierItineraryItemViewSet, basename="supplier-itinerary-item")
 
 # Admin-only endpoints for managing all profiles
 router.register(

@@ -22,6 +22,12 @@ class TourBadge(models.TextChoices):
     NEW = "NEW", _("New")
 
 
+class TourType(models.TextChoices):
+    """Tour type options for Indonesian citizens."""
+    CONVENTIONAL = "CONVENTIONAL", _("Conventional Tour")
+    MUSLIM = "MUSLIM", _("Muslim Tour")
+
+
 class TourPackage(models.Model):
     """
     A tour product listed by a supplier (e.g. '3D2N Bali Getaway').
@@ -70,6 +76,14 @@ class TourPackage(models.Model):
         max_length=50,
         default="Small Group",
         help_text=_("Type of group (e.g., 'Small Group', 'Private', 'Large Group')."),
+    )
+
+    # Tour type (for Indonesian citizens)
+    tour_type = models.CharField(
+        max_length=20,
+        choices=TourType.choices,
+        default=TourType.CONVENTIONAL,
+        help_text=_("Tour type: Conventional Tour or Muslim Tour (for Indonesian citizens)."),
     )
 
     # Categories/Tags
@@ -129,19 +143,6 @@ class TourPackage(models.Model):
         help_text=_("Currency code (e.g., 'USD', 'IDR')."),
     )
 
-    # Rating and reviews
-    average_rating = models.DecimalField(
-        max_digits=3,
-        decimal_places=2,
-        default=0.00,
-        validators=[MinValueValidator(0.00), MaxValueValidator(5.00)],
-        help_text=_("Average rating out of 5.0."),
-    )
-    review_count = models.PositiveIntegerField(
-        default=0,
-        help_text=_("Total number of reviews."),
-    )
-
     # Featured badge
     badge = models.CharField(
         max_length=20,
@@ -157,6 +158,14 @@ class TourPackage(models.Model):
         blank=True,
         null=True,
         help_text=_("Main featured image for the tour."),
+    )
+
+    # Itinerary PDF
+    itinerary_pdf = models.FileField(
+        upload_to="tours/itineraries/",
+        blank=True,
+        null=True,
+        help_text=_("PDF file containing the detailed itinerary for the tour package."),
     )
 
     # Commission settings (Admin-only editable)
@@ -199,11 +208,12 @@ class TourPackage(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["-is_featured", "-average_rating", "-created_at"]
+        ordering = ["-is_featured", "-created_at"]
         indexes = [
             models.Index(fields=["category", "is_active"]),
             models.Index(fields=["city", "country"]),
             models.Index(fields=["is_featured"]),
+            models.Index(fields=["tour_type", "is_active"]),
         ]
 
     def __str__(self) -> str:
@@ -360,92 +370,6 @@ class ItineraryItem(models.Model):
 
     def __str__(self) -> str:
         return f"Day {self.day_number}: {self.title}"
-
-
-class TourReview(models.Model):
-    """
-    Customer reviews/ratings for tour packages.
-    """
-    
-    package = models.ForeignKey(
-        TourPackage,
-        on_delete=models.CASCADE,
-        related_name="reviews",
-    )
-    booking = models.ForeignKey(
-        "Booking",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="review",
-        help_text=_("Optional link to the booking this review is for."),
-    )
-    reviewer_name = models.CharField(
-        max_length=255,
-        help_text=_("Name of the reviewer."),
-    )
-    reviewer_email = models.EmailField(blank=True)
-    rating = models.PositiveSmallIntegerField(
-        validators=[MinValueValidator(1), MaxValueValidator(5)],
-        help_text=_("Rating from 1 to 5 stars."),
-    )
-    comment = models.TextField(
-        blank=True,
-        help_text=_("Review comment/feedback."),
-    )
-    is_verified = models.BooleanField(
-        default=False,
-        help_text=_("Whether this review is from a verified booking."),
-    )
-    is_published = models.BooleanField(
-        default=True,
-        help_text=_("Whether to show this review publicly."),
-    )
-    
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    
-    class Meta:
-        ordering = ["-created_at"]
-        indexes = [
-            models.Index(fields=["package", "is_published"]),
-        ]
-    
-    def __str__(self) -> str:
-        return f"Review by {self.reviewer_name} - {self.rating}/5"
-    
-    def save(self, *args, **kwargs):
-        """Update package rating when review is saved."""
-        super().save(*args, **kwargs)
-        self._update_package_rating()
-    
-    def delete(self, *args, **kwargs):
-        """Update package rating when review is deleted."""
-        package = self.package
-        super().delete(*args, **kwargs)
-        self._update_package_rating_for_package(package)
-    
-    def _update_package_rating(self):
-        """Recalculate and update the package's average rating."""
-        self._update_package_rating_for_package(self.package)
-    
-    @staticmethod
-    def _update_package_rating_for_package(package):
-        """Recalculate rating for a specific package."""
-        published_reviews = TourReview.objects.filter(
-            package=package,
-            is_published=True
-        )
-        if published_reviews.exists():
-            avg_rating = published_reviews.aggregate(
-                avg=models.Avg('rating')
-            )['avg']
-            package.average_rating = round(avg_rating, 2)
-            package.review_count = published_reviews.count()
-        else:
-            package.average_rating = 0.00
-            package.review_count = 0
-        package.save(update_fields=['average_rating', 'review_count'])
 
 
 class SeatSlotStatus(models.TextChoices):
