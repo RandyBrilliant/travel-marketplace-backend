@@ -184,7 +184,7 @@ class BaseAdminProfileViewSet(viewsets.ModelViewSet):
         return Response(response_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     def update(self, request, *args, **kwargs):
-        """Update profile. Also allows updating user email and phone_number."""
+        """Update profile. Also allows updating user email."""
         partial = kwargs.pop("partial", False)
         instance = self.get_object()
         data = request.data.copy()
