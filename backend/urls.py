@@ -19,6 +19,9 @@ from travel.views import (
     SupplierTourDateViewSet,
     SupplierTourImageViewSet,
     SupplierItineraryItemViewSet,
+    AdminResellerTourCommissionViewSet,
+    AdminResellerGroupViewSet,
+    PublicTourPackageListView,
 )
 
 router = DefaultRouter()
@@ -42,6 +45,18 @@ router.register(
 router.register(
     r"admin/staff", AdminStaffProfileViewSet, basename="admin-staff-profile"
 )
+# Admin-only endpoints for managing reseller tour commissions
+router.register(
+    r"admin/reseller-tour-commissions",
+    AdminResellerTourCommissionViewSet,
+    basename="admin-reseller-tour-commission",
+)
+# Admin-only endpoints for managing reseller groups
+router.register(
+    r"admin/reseller-groups",
+    AdminResellerGroupViewSet,
+    basename="admin-reseller-group",
+)
 
 urlpatterns = [
     path("", include(router.urls)),
@@ -49,6 +64,8 @@ urlpatterns = [
     path("api-auth/", include("rest_framework.urls")),
     path("api/token/", CustomTokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    # Public tour listing endpoint
+    path("api/tours/", PublicTourPackageListView.as_view(), name="public-tour-list"),
 ]
 
 # Serve media files in development

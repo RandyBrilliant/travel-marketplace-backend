@@ -28,6 +28,57 @@ class TourType(models.TextChoices):
     MUSLIM = "MUSLIM", _("Muslim Tour")
 
 
+class ResellerGroup(models.Model):
+    """
+    Group of resellers that can be assigned to specific tour packages.
+    Allows suppliers to control which resellers can see and book specific tours.
+    """
+    
+    name = models.CharField(
+        max_length=255,
+        help_text=_("Name of the reseller group."),
+    )
+    description = models.TextField(
+        blank=True,
+        help_text=_("Description of the group and its purpose."),
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_reseller_groups",
+        help_text=_("User who created this group (supplier or admin)."),
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text=_("Whether this group is active."),
+    )
+    
+    # Resellers in this group
+    resellers = models.ManyToManyField(
+        "account.ResellerProfile",
+        related_name="reseller_groups",
+        blank=True,
+        help_text=_("Resellers belonging to this group."),
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "Reseller Group"
+        verbose_name_plural = "Reseller Groups"
+        ordering = ["name"]
+        indexes = [
+            models.Index(fields=["is_active"]),
+            models.Index(fields=["name"]),
+        ]
+    
+    def __str__(self) -> str:
+        return f"{self.name} ({self.resellers.count()} resellers)"
+
+
 class TourPackage(models.Model):
     """
     A tour product listed by a supplier (e.g. '3D2N Bali Getaway').
@@ -203,6 +254,20 @@ class TourPackage(models.Model):
         default=False,
         help_text=_("Whether to feature this tour on the homepage."),
     )
+    
+    # Reseller groups that can access this tour package
+    # If empty, tour is visible to all resellers
+    # If not empty, only resellers in these groups can see this tour
+    reseller_groups = models.ManyToManyField(
+        ResellerGroup,
+        related_name="tour_packages",
+        blank=True,
+        help_text=_(
+            "Reseller groups that can access this tour package. "
+            "If empty, tour is visible to all resellers. "
+            "If not empty, only resellers in these groups can see this tour."
+        ),
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -239,6 +304,21 @@ class TourPackage(models.Model):
         elif self.commission_type == "FIXED" and self.fixed_commission_amount:
             return self.fixed_commission_amount
         return 0.00
+    
+    def get_reseller_commission(self, reseller):
+        """
+        Get the fixed commission amount for a specific reseller for this tour package.
+        Returns the commission amount from ResellerTourCommission if exists, otherwise None.
+        """
+        try:
+            commission = ResellerTourCommission.objects.get(
+                reseller=reseller,
+                tour_package=self,
+                is_active=True
+            )
+            return commission.commission_amount
+        except ResellerTourCommission.DoesNotExist:
+            return None
 
 
 class TourDate(models.Model):
@@ -558,6 +638,14 @@ class Booking(models.Model):
         default=BookingStatus.PENDING,
     )
 
+    # Platform fee (fixed at Rp. 50,000)
+    platform_fee = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=50000.00,
+        help_text=_("Platform fee in IDR (default: Rp. 50,000)."),
+    )
+
     notes = models.TextField(blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -634,6 +722,56 @@ class Payment(models.Model):
 
     def __str__(self) -> str:
         return f"Payment for booking #{self.booking_id} - {self.amount} {self.currency}"
+
+
+class ResellerTourCommission(models.Model):
+    """
+    Commission settings per reseller per tour package.
+    Each reseller can have a different fixed commission amount for each tour package.
+    """
+
+    reseller = models.ForeignKey(
+        "account.ResellerProfile",
+        on_delete=models.CASCADE,
+        related_name="tour_commissions",
+        help_text=_("Reseller who will receive this commission."),
+    )
+    tour_package = models.ForeignKey(
+        TourPackage,
+        on_delete=models.CASCADE,
+        related_name="reseller_commissions",
+        help_text=_("Tour package this commission applies to."),
+    )
+    commission_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text=_("Fixed commission amount for this reseller for this tour package."),
+    )
+    currency = models.CharField(
+        max_length=10,
+        default="IDR",
+        help_text=_("Currency code (e.g., 'IDR', 'USD')."),
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text=_("Whether this commission setting is active."),
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("reseller", "tour_package")
+        ordering = ["-created_at"]
+        verbose_name = "Reseller Tour Commission"
+        verbose_name_plural = "Reseller Tour Commissions"
+        indexes = [
+            models.Index(fields=["reseller", "is_active"]),
+            models.Index(fields=["tour_package", "is_active"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.reseller.display_name} - {self.tour_package.name}: {self.commission_amount} {self.currency}"
 
 
 class ResellerCommission(models.Model):

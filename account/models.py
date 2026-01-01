@@ -10,8 +10,8 @@ class UserRole(models.TextChoices):
     """
     High-level roles for the marketplace.
 
-    - SUPPLIER: Provides travel products (e.g., tours, stays, transport).
-    - RESELLER: Sells/markets products, often under their own brand.
+    - SUPPLIER: Provides travel products.
+    - RESELLER: Sells/markets products, get commission from sales.
     - STAFF: Internal operations/admin staff, non-superuser by default.
     """
 
@@ -20,26 +20,11 @@ class UserRole(models.TextChoices):
     STAFF = "STAFF", _("Admin staff")
 
 
-class ProfileStatus(models.TextChoices):
-    """
-    Status for supplier and reseller profiles.
-    
-    - PENDING: Awaiting verification/approval
-    - ACTIVE: Approved and active
-    - SUSPENDED: Temporarily suspended
-    """
-
-    PENDING = "PENDING", _("Pending Verification")
-    ACTIVE = "ACTIVE", _("Active")
-    SUSPENDED = "SUSPENDED", _("Suspended")
-
-
 class CustomUser(AbstractUser):
     email = models.EmailField(verbose_name="Email Address", unique=True)
     role = models.CharField(
         max_length=20,
         choices=UserRole.choices,
-        default=UserRole.RESELLER,
         verbose_name="Role",
         help_text=_("High-level role used for permissions and routing."),
     )
@@ -73,7 +58,7 @@ class CustomUser(AbstractUser):
         related_name="user_updated_by",
         verbose_name="Updated By",
     )
-
+    
     # We use email as the unique identifier instead of username/first/last name.
     username = None
     first_name = None
@@ -144,18 +129,6 @@ class SupplierProfile(models.Model):
         blank=True,
         help_text=_("Business address."),
     )
-    tax_id = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text=_("Tax identification number."),
-    )
-    status = models.CharField(
-        max_length=20,
-        choices=ProfileStatus.choices,
-        default=ProfileStatus.PENDING,
-        verbose_name="Status",
-        help_text=_("Supplier account status (pending verification, active, or suspended)."),
-    )
     photo = models.ImageField(
         upload_to="profile_photos/suppliers/",
         blank=True,
@@ -172,7 +145,6 @@ class SupplierProfile(models.Model):
         verbose_name_plural = "Supplier Profiles"
         indexes = [
             models.Index(fields=["company_name"]),
-            models.Index(fields=["status"]),
         ]
 
     def __str__(self) -> str:
@@ -191,9 +163,9 @@ class ResellerProfile(models.Model):
         related_name="reseller_profile",
         limit_choices_to={"role": UserRole.RESELLER},
     )
-    display_name = models.CharField(
+    full_name = models.CharField(
         max_length=255,
-        help_text=_("Public / brand name shown to customers."),
+        help_text=_("Full name of the reseller."),
     )
     contact_phone = models.CharField(max_length=50, blank=True)
     address = models.TextField(
@@ -232,7 +204,7 @@ class ResellerProfile(models.Model):
     )
 
     # Commission settings for this reseller (their own sales and downline override).
-    own_commission_rate = models.DecimalField(
+    commission_rate = models.DecimalField(
         max_digits=5,
         decimal_places=2,
         default=10.00,
@@ -250,14 +222,6 @@ class ResellerProfile(models.Model):
             "if your business logic uses it."
         ),
     )
-    status = models.CharField(
-        max_length=20,
-        choices=ProfileStatus.choices,
-        default=ProfileStatus.PENDING,
-        verbose_name="Status",
-        help_text=_("Reseller account status (pending verification, active, or suspended)."),
-    )
-    
     # Banking information for commission payouts
     bank_name = models.CharField(
         max_length=255,
@@ -292,13 +256,12 @@ class ResellerProfile(models.Model):
         verbose_name = "Reseller Profile"
         verbose_name_plural = "Reseller Profiles"
         indexes = [
-            models.Index(fields=["display_name"]),
-            models.Index(fields=["status"]),
+            models.Index(fields=["full_name"]),
             models.Index(fields=["referral_code"]),
         ]
 
     def __str__(self) -> str:
-        return f"{self.display_name} ({self.user.email})"
+        return f"{self.full_name} ({self.user.email})"
 
     def save(self, *args, **kwargs):
         """
@@ -347,19 +310,9 @@ class StaffProfile(models.Model):
         related_name="staff_profile",
         limit_choices_to={"role": UserRole.STAFF},
     )
-    name = models.CharField(
+    full_name = models.CharField(
         max_length=255,
         help_text=_("Full name of the staff member."),
-    )
-    job_title = models.CharField(
-        max_length=255,
-        blank=True,
-        help_text=_("Job title or position."),
-    )
-    department = models.CharField(
-        max_length=255,
-        blank=True,
-        help_text=_("Department or division."),
     )
     contact_phone = models.CharField(
         max_length=50,
@@ -382,6 +335,6 @@ class StaffProfile(models.Model):
         verbose_name_plural = "Staff Profiles"
 
     def __str__(self) -> str:
-        return f"{self.name} ({self.user.email})"
+        return f"{self.full_name} ({self.user.email})"
 
 

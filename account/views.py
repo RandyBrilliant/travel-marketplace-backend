@@ -215,7 +215,7 @@ class AdminSupplierProfileViewSet(BaseAdminProfileViewSet):
 
     queryset = SupplierProfile.objects.select_related("user").order_by("-created_at")
     serializer_class = AdminSupplierProfileSerializer
-    filterset_fields = ["status", "user__is_active"]
+    filterset_fields = ["user__is_active"]
     search_fields = ["company_name", "contact_person", "user__email", "tax_id"]
 
     def get_user_role(self):
@@ -227,9 +227,9 @@ class AdminResellerProfileViewSet(BaseAdminProfileViewSet):
 
     queryset = ResellerProfile.objects.select_related("user").order_by("-created_at")
     serializer_class = AdminResellerProfileSerializer
-    filterset_fields = ["status", "user__is_active"]
+    filterset_fields = ["user__is_active"]
     search_fields = [
-        "display_name",
+        "full_name",
         "user__email",
         "referral_code",
         "bank_account_name",
@@ -245,8 +245,8 @@ class AdminStaffProfileViewSet(BaseAdminProfileViewSet):
 
     queryset = StaffProfile.objects.select_related("user").order_by("-created_at")
     serializer_class = AdminStaffProfileSerializer
-    filterset_fields = ["department", "user__is_active"]
-    search_fields = ["name", "job_title", "department", "user__email"]
+    filterset_fields = ["user__is_active"]
+    search_fields = ["full_name", "user__email"]
 
     def get_user_role(self):
         return UserRole.STAFF

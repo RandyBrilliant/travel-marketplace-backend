@@ -29,12 +29,12 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                     photo_url = profile.photo.url
             elif user.role == UserRole.RESELLER and hasattr(user, "reseller_profile"):
                 profile = user.reseller_profile
-                full_name = profile.display_name
+                full_name = profile.full_name
                 if profile.photo:
                     photo_url = profile.photo.url
             elif user.role == UserRole.STAFF and hasattr(user, "staff_profile"):
                 profile = user.staff_profile
-                full_name = profile.name
+                full_name = profile.full_name
                 if profile.photo:
                     photo_url = profile.photo.url
         except Exception:

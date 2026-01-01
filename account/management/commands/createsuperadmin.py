@@ -4,12 +4,12 @@ Management command to create a superuser account with a staff profile.
 The created user will have:
 - Superuser privileges (is_staff=True, is_superuser=True)
 - STAFF role
-- Associated StaffProfile with name, job_title, department, and contact_phone
+- Associated StaffProfile with full_name and contact_phone
 
 When this user logs in via /api/token/, the JWT access token will include:
 - email: User's email address
 - role: STAFF
-- full_name: Staff profile name (or email if no profile)
+- full_name: Staff profile full_name (or email if no profile)
 - profile_picture_url: Absolute URL to profile photo (if photo is uploaded later)
 
 Usage:
@@ -46,17 +46,6 @@ class Command(BaseCommand):
             help='Full name for the staff profile',
         )
         parser.add_argument(
-            '--job-title',
-            type=str,
-            dest='job_title',
-            help='Job title for the staff profile',
-        )
-        parser.add_argument(
-            '--department',
-            type=str,
-            help='Department for the staff profile',
-        )
-        parser.add_argument(
             '--contact-phone',
             type=str,
             dest='contact_phone',
@@ -72,8 +61,6 @@ class Command(BaseCommand):
         email = options.get('email')
         password = options.get('password')
         name = options.get('name')
-        job_title = options.get('job_title')
-        department = options.get('department')
         contact_phone = options.get('contact_phone')
         noinput = options.get('noinput', False)
 
@@ -108,12 +95,6 @@ class Command(BaseCommand):
             name = self._get_name()
 
         # Collect optional information interactively if not provided
-        if job_title is None and not noinput:
-            job_title = self._get_job_title()
-
-        if department is None and not noinput:
-            department = self._get_department()
-
         if contact_phone is None and not noinput:
             contact_phone = self._get_contact_phone()
 
@@ -134,9 +115,7 @@ class Command(BaseCommand):
                 # Create staff profile
                 staff_profile = StaffProfile.objects.create(
                     user=user,
-                    name=name,
-                    job_title=job_title or '',
-                    department=department or '',
+                    full_name=name,
                     contact_phone=contact_phone or '',
                 )
 
@@ -149,16 +128,14 @@ class Command(BaseCommand):
                 self.stdout.write(f'  Email: {user.email}')
                 self.stdout.write(f'  Role: {user.role}')
                 self.stdout.write(f'  Staff Profile ID: {staff_profile.id}')
-                self.stdout.write(f'  Staff Name: {staff_profile.name}')
-                if staff_profile.job_title:
-                    self.stdout.write(f'  Job Title: {staff_profile.job_title}')
-                if staff_profile.department:
-                    self.stdout.write(f'  Department: {staff_profile.department}')
+                self.stdout.write(f'  Staff Name: {staff_profile.full_name}')
+                if staff_profile.contact_phone:
+                    self.stdout.write(f'  Contact Phone: {staff_profile.contact_phone}')
                 
                 self.stdout.write(
                     self.style.SUCCESS(
                         '\nNote: When this user logs in via /api/token/, the JWT access token '
-                        'will include email, role (STAFF), and full_name (from staff profile name).'
+                        'will include email, role (STAFF), and full_name (from staff profile).'
                     )
                 )
 
@@ -214,16 +191,6 @@ class Command(BaseCommand):
                 return name
             else:
                 self.stdout.write(self.style.ERROR('Name cannot be blank.'))
-
-    def _get_job_title(self):
-        """Prompt for job title (optional)."""
-        job_title = input('Job title (optional): ').strip()
-        return job_title if job_title else None
-
-    def _get_department(self):
-        """Prompt for department (optional)."""
-        department = input('Department (optional): ').strip()
-        return department if department else None
 
     def _get_contact_phone(self):
         """Prompt for contact phone (optional)."""

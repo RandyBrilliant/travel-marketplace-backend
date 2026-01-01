@@ -8,6 +8,8 @@ from .models import (
     TourCategory,
     TourType,
     TourBadge,
+    ResellerTourCommission,
+    ResellerGroup,
 )
 
 
@@ -98,6 +100,7 @@ class TourPackageSerializer(serializers.ModelSerializer):
             "itinerary_items",
             "images",
             "dates",
+            "reseller_groups",
             "created_at",
             "updated_at",
             # Commission fields (read-only for suppliers)
@@ -192,6 +195,11 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
     """Serializer for creating/updating tour packages (excludes nested relations)."""
     
     supplier = serializers.PrimaryKeyRelatedField(read_only=True)
+    reseller_groups = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=None,  # Will be set in __init__
+        required=False,
+    )
     
     class Meta:
         model = TourPackage
@@ -224,8 +232,14 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
             "itinerary_pdf",
             "is_active",
             "is_featured",
+            "reseller_groups",
         ]
         read_only_fields = ["id", "supplier", "slug"]
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Set queryset for reseller_groups field
+        self.fields["reseller_groups"].queryset = ResellerGroup.objects.filter(is_active=True)
     
     def validate_slug(self, value):
         """Auto-generate slug from name if not provided."""
@@ -244,4 +258,102 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
                     queryset = queryset.exclude(pk=self.instance.pk)
                 counter += 1
         return value
+
+
+class ResellerTourCommissionSerializer(serializers.ModelSerializer):
+    """Serializer for reseller tour commission settings."""
+    
+    reseller_name = serializers.CharField(source="reseller.display_name", read_only=True)
+    reseller_email = serializers.EmailField(source="reseller.user.email", read_only=True)
+    tour_package_name = serializers.CharField(source="tour_package.name", read_only=True)
+    tour_package_slug = serializers.SlugField(source="tour_package.slug", read_only=True)
+    
+    class Meta:
+        model = ResellerTourCommission
+        fields = [
+            "id",
+            "reseller",
+            "reseller_name",
+            "reseller_email",
+            "tour_package",
+            "tour_package_name",
+            "tour_package_slug",
+            "commission_amount",
+            "currency",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class ResellerGroupSerializer(serializers.ModelSerializer):
+    """Serializer for reseller groups."""
+    
+    created_by_name = serializers.CharField(source="created_by.email", read_only=True)
+    reseller_count = serializers.IntegerField(source="resellers.count", read_only=True)
+    tour_count = serializers.IntegerField(source="tour_packages.count", read_only=True)
+    reseller_ids = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=None,  # Will be set in __init__
+        source="resellers",
+        write_only=True,
+        required=False,
+    )
+    
+    class Meta:
+        model = ResellerGroup
+        fields = [
+            "id",
+            "name",
+            "description",
+            "created_by",
+            "created_by_name",
+            "is_active",
+            "reseller_count",
+            "tour_count",
+            "reseller_ids",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_by", "created_by_name", "created_at", "updated_at"]
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Set queryset for reseller_ids field
+        from account.models import ResellerProfile
+        self.fields["reseller_ids"].queryset = ResellerProfile.objects.all()
+    
+    def to_representation(self, instance):
+        """Include reseller details in read operations."""
+        representation = super().to_representation(instance)
+        # Include reseller details if needed
+        if self.context.get("request") and hasattr(instance, "resellers"):
+            representation["resellers"] = [
+                {
+                    "id": r.id,
+                    "display_name": r.display_name,
+                    "email": r.user.email,
+                }
+                for r in instance.resellers.all()
+            ]
+        return representation
+    
+    def create(self, validated_data):
+        """Create group and assign resellers."""
+        resellers = validated_data.pop("resellers", [])
+        group = ResellerGroup.objects.create(**validated_data)
+        if resellers:
+            group.resellers.set(resellers)
+        return group
+    
+    def update(self, instance, validated_data):
+        """Update group and resellers."""
+        resellers = validated_data.pop("resellers", None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        if resellers is not None:
+            instance.resellers.set(resellers)
+        return instance
 
