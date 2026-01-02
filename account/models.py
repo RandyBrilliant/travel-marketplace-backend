@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.utils.translation import gettext_lazy as _
 
 from .managers import CustomUserManager
@@ -96,6 +97,8 @@ class CustomUser(AbstractUser):
         indexes = [
             models.Index(fields=["email"]),
             models.Index(fields=["role", "is_active"]),
+            models.Index(fields=["email_verified"]),
+            models.Index(fields=["is_active", "role", "email_verified"]),
         ]
 
 
@@ -145,6 +148,9 @@ class SupplierProfile(models.Model):
         verbose_name_plural = "Supplier Profiles"
         indexes = [
             models.Index(fields=["company_name"]),
+            models.Index(fields=["user"]),
+            models.Index(fields=["created_at"]),
+            models.Index(fields=["user", "created_at"]),
         ]
 
     def __str__(self) -> str:
@@ -208,18 +214,20 @@ class ResellerProfile(models.Model):
         max_digits=5,
         decimal_places=2,
         default=10.00,
+        validators=[MinValueValidator(0.00), MaxValueValidator(100.00)],
         help_text=_(
             "Default percentage this reseller earns from the commissionable "
-            "amount of their own bookings."
+            "amount of their own bookings (0-100)."
         ),
     )
     upline_commission_rate = models.DecimalField(
         max_digits=5,
         decimal_places=2,
         default=3.00,
+        validators=[MinValueValidator(0.00), MaxValueValidator(100.00)],
         help_text=_(
             "Suggested percentage for direct upline override commissions, "
-            "if your business logic uses it."
+            "if your business logic uses it (0-100)."
         ),
     )
     # Banking information for commission payouts
@@ -258,6 +266,12 @@ class ResellerProfile(models.Model):
         indexes = [
             models.Index(fields=["full_name"]),
             models.Index(fields=["referral_code"]),
+            models.Index(fields=["user"]),
+            models.Index(fields=["sponsor"]),
+            models.Index(fields=["group_root"]),
+            models.Index(fields=["created_at"]),
+            models.Index(fields=["user", "created_at"]),
+            models.Index(fields=["sponsor", "created_at"]),
         ]
 
     def __str__(self) -> str:
@@ -333,6 +347,11 @@ class StaffProfile(models.Model):
     class Meta:
         verbose_name = "Staff Profile"
         verbose_name_plural = "Staff Profiles"
+        indexes = [
+            models.Index(fields=["user"]),
+            models.Index(fields=["created_at"]),
+            models.Index(fields=["user", "created_at"]),
+        ]
 
     def __str__(self) -> str:
         return f"{self.full_name} ({self.user.email})"

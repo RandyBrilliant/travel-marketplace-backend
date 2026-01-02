@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome to Travel Marketplace</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        .container {
+            background-color: #ffffff;
+            border-radius: 8px;
+            padding: 40px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo {
+            font-size: 28px;
+            font-weight: bold;
+            color: #2563eb;
+            margin-bottom: 10px;
+        }
+        h1 {
+            color: #1f2937;
+            font-size: 26px;
+            margin: 0 0 20px 0;
+            text-align: center;
+        }
+        .content {
+            margin-bottom: 30px;
+        }
+        p {
+            margin: 0 0 15px 0;
+            color: #4b5563;
+        }
+        .button {
+            display: inline-block;
+            padding: 12px 30px;
+            background-color: #2563eb;
+            color: #ffffff;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: 600;
+            margin: 20px 0;
+        }
+        .button:hover {
+            background-color: #1d4ed8;
+        }
+        .features {
+            margin: 30px 0;
+            padding: 20px;
+            background-color: #f9fafb;
+            border-radius: 6px;
+        }
+        .feature-item {
+            margin: 10px 0;
+            padding-left: 25px;
+            position: relative;
+        }
+        .feature-item:before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #10b981;
+            font-weight: bold;
+        }
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #e5e7eb;
+            text-align: center;
+            font-size: 12px;
+            color: #6b7280;
+        }
+        .highlight {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">✈️ Travel Marketplace</div>
+        </div>
+        
+        <h1>Welcome to Travel Marketplace! 🎉</h1>
+        
+        <div class="content">
+            <p>Hello {% if profile_name %}{{ profile_name }}{% else %}{{ user.email }}{% endif %},</p>
+            
+            <p>We're thrilled to have you join our travel marketplace community! Your account has been successfully created.</p>
+            
+            {% if user.role == 'SUPPLIER' %}
+            <div class="highlight">
+                <strong>You're registered as a Supplier!</strong><br>
+                Start listing your amazing tour packages and reach thousands of travelers.
+            </div>
+            {% elif user.role == 'RESELLER' %}
+            <div class="highlight">
+                <strong>You're registered as a Reseller!</strong><br>
+                Start booking tours for your customers and earn commissions.
+            </div>
+            {% elif user.role == 'STAFF' %}
+            <div class="highlight">
+                <strong>You're registered as Staff!</strong><br>
+                Welcome to the team! You can now manage the marketplace.
+            </div>
+            {% endif %}
+            
+            <div class="features">
+                <h3 style="margin-top: 0; color: #1f2937;">What you can do:</h3>
+                {% if user.role == 'SUPPLIER' %}
+                <div class="feature-item">Create and manage tour packages</div>
+                <div class="feature-item">Set pricing and availability</div>
+                <div class="feature-item">Track bookings and manage dates</div>
+                <div class="feature-item">Upload photos and itineraries</div>
+                {% elif user.role == 'RESELLER' %}
+                <div class="feature-item">Browse available tour packages</div>
+                <div class="feature-item">Book tours for your customers</div>
+                <div class="feature-item">Earn commissions on bookings</div>
+                <div class="feature-item">Manage your reseller network</div>
+                {% else %}
+                <div class="feature-item">Access admin dashboard</div>
+                <div class="feature-item">Manage users and profiles</div>
+                <div class="feature-item">Oversee bookings and payments</div>
+                <div class="feature-item">Configure system settings</div>
+                {% endif %}
+            </div>
+            
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{{ FRONTEND_URL }}/dashboard" class="button">Go to Dashboard</a>
+            </div>
+            
+            <p>If you have any questions or need assistance, our support team is here to help!</p>
+        </div>
+        
+        <div class="footer">
+            <p>Thank you for choosing Travel Marketplace!</p>
+            <p>&copy; {% now "Y" %} Travel Marketplace. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+</html>
+

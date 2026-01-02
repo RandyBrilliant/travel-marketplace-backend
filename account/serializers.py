@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import MinValueValidator, MaxValueValidator
 import secrets
 import string
 
@@ -62,7 +63,6 @@ class SupplierProfileSerializer(serializers.ModelSerializer):
             "contact_person",
             "contact_phone",
             "address",
-            "tax_id",
             "photo",
             "created_at",
             "updated_at",
@@ -109,11 +109,28 @@ class ResellerProfileSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "user",
+            "referral_code",
             "group_root",
             "direct_downline_count",
             "created_at",
             "updated_at",
         ]
+
+    def validate_commission_rate(self, value):
+        """Validate commission rate is between 0 and 100."""
+        if value < 0 or value > 100:
+            raise serializers.ValidationError(
+                "Commission rate must be between 0 and 100."
+            )
+        return value
+
+    def validate_upline_commission_rate(self, value):
+        """Validate upline commission rate is between 0 and 100."""
+        if value < 0 or value > 100:
+            raise serializers.ValidationError(
+                "Upline commission rate must be between 0 and 100."
+            )
+        return value
 
     def validate_sponsor_referral_code(self, value):
         """Validate that sponsor referral code exists if provided."""
@@ -125,6 +142,88 @@ class ResellerProfileSerializer(serializers.ModelSerializer):
                     f"Sponsor with referral code '{value}' does not exist."
                 )
         return value
+
+    def _validate_no_circular_sponsor(self, sponsor, current_instance=None):
+        """
+        Validate that setting this sponsor won't create a circular relationship.
+        A circular relationship occurs if the sponsor is in the current reseller's downline.
+        """
+        if not sponsor or not current_instance:
+            return
+        
+        # Check if sponsor is in the current reseller's downline (would create a circle)
+        if current_instance.pk:
+            # Get all downlines of the current reseller
+            downlines = current_instance.all_downlines()
+            if sponsor in downlines:
+                raise serializers.ValidationError(
+                    {"sponsor": f"Cannot set sponsor: {sponsor.full_name} is in your downline. This would create a circular relationship."}
+                )
+            # Also check direct downlines
+            if sponsor in current_instance.direct_downlines.all():
+                raise serializers.ValidationError(
+                    {"sponsor": f"Cannot set sponsor: {sponsor.full_name} is your direct downline. This would create a circular relationship."}
+                )
+
+    def create(self, validated_data):
+        """Create reseller profile and automatically generate referral code if not provided."""
+        # Handle sponsor_referral_code lookup
+        sponsor_referral_code = validated_data.pop("sponsor_referral_code", None)
+        sponsor = validated_data.get("sponsor")
+        
+        if sponsor_referral_code:
+            try:
+                sponsor = ResellerProfile.objects.get(referral_code=sponsor_referral_code)
+                validated_data["sponsor"] = sponsor
+            except ResellerProfile.DoesNotExist:
+                raise serializers.ValidationError(
+                    {"sponsor_referral_code": f"Sponsor with referral code '{sponsor_referral_code}' does not exist."}
+                )
+        
+        # Generate referral code if not provided (for regular users it's read-only, for admins it may be provided)
+        referral_code = validated_data.get("referral_code")
+        if not referral_code:
+            validated_data["referral_code"] = generate_unique_referral_code()
+        
+        # Note: Circular validation happens after creation since we need the instance
+        instance = super().create(validated_data)
+        
+        # Validate circular relationship after creation
+        if sponsor:
+            self._validate_no_circular_sponsor(sponsor, instance)
+            # If validation passes, update the sponsor (it was already set, but this ensures consistency)
+            if instance.sponsor != sponsor:
+                instance.sponsor = sponsor
+                instance.save()
+        
+        return instance
+
+    def update(self, instance, validated_data):
+        """Update reseller profile and handle sponsor_referral_code lookup."""
+        # Handle sponsor_referral_code lookup
+        sponsor_referral_code = validated_data.pop("sponsor_referral_code", None)
+        sponsor = validated_data.get("sponsor")
+        
+        if sponsor_referral_code:
+            try:
+                sponsor = ResellerProfile.objects.get(referral_code=sponsor_referral_code)
+                validated_data["sponsor"] = sponsor
+            except ResellerProfile.DoesNotExist:
+                raise serializers.ValidationError(
+                    {"sponsor_referral_code": f"Sponsor with referral code '{sponsor_referral_code}' does not exist."}
+                )
+        
+        # Validate sponsor if it's being set or changed
+        if sponsor is not None:
+            # Prevent self-sponsorship
+            if sponsor.pk == instance.pk:
+                raise serializers.ValidationError(
+                    {"sponsor": "A reseller cannot be their own sponsor."}
+                )
+            # Prevent circular relationships
+            self._validate_no_circular_sponsor(sponsor, instance)
+        
+        return super().update(instance, validated_data)
 
 
 class StaffProfileSerializer(serializers.ModelSerializer):

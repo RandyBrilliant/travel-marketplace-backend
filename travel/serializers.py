@@ -11,6 +11,7 @@ from .models import (
     ResellerTourCommission,
     ResellerGroup,
 )
+from account.models import ResellerProfile
 
 
 class ItineraryItemSerializer(serializers.ModelSerializer):
@@ -197,7 +198,7 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
     supplier = serializers.PrimaryKeyRelatedField(read_only=True)
     reseller_groups = serializers.PrimaryKeyRelatedField(
         many=True,
-        queryset=None,  # Will be set in __init__
+        queryset=ResellerGroup.objects.filter(is_active=True),
         required=False,
     )
     
@@ -236,11 +237,6 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "supplier", "slug"]
     
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # Set queryset for reseller_groups field
-        self.fields["reseller_groups"].queryset = ResellerGroup.objects.filter(is_active=True)
-    
     def validate_slug(self, value):
         """Auto-generate slug from name if not provided."""
         if not value and self.initial_data.get("name"):
@@ -263,7 +259,7 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
 class ResellerTourCommissionSerializer(serializers.ModelSerializer):
     """Serializer for reseller tour commission settings."""
     
-    reseller_name = serializers.CharField(source="reseller.display_name", read_only=True)
+    reseller_name = serializers.CharField(source="reseller.full_name", read_only=True)
     reseller_email = serializers.EmailField(source="reseller.user.email", read_only=True)
     tour_package_name = serializers.CharField(source="tour_package.name", read_only=True)
     tour_package_slug = serializers.SlugField(source="tour_package.slug", read_only=True)
@@ -295,7 +291,7 @@ class ResellerGroupSerializer(serializers.ModelSerializer):
     tour_count = serializers.IntegerField(source="tour_packages.count", read_only=True)
     reseller_ids = serializers.PrimaryKeyRelatedField(
         many=True,
-        queryset=None,  # Will be set in __init__
+        queryset=ResellerProfile.objects.all(),
         source="resellers",
         write_only=True,
         required=False,
@@ -320,9 +316,6 @@ class ResellerGroupSerializer(serializers.ModelSerializer):
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Set queryset for reseller_ids field
-        from account.models import ResellerProfile
-        self.fields["reseller_ids"].queryset = ResellerProfile.objects.all()
     
     def to_representation(self, instance):
         """Include reseller details in read operations."""
@@ -332,7 +325,7 @@ class ResellerGroupSerializer(serializers.ModelSerializer):
             representation["resellers"] = [
                 {
                     "id": r.id,
-                    "display_name": r.display_name,
+                    "full_name": r.full_name,
                     "email": r.user.email,
                 }
                 for r in instance.resellers.all()

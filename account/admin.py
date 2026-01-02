@@ -39,16 +39,21 @@ class CustomUserAdmin(admin.ModelAdmin):
 @admin.register(SupplierProfile)
 class SupplierProfileAdmin(admin.ModelAdmin):
     list_display = ('user', 'company_name', 'contact_person', 'contact_phone')
-    list_filter = ('user__role',)
-    search_fields = ('user__email', 'company_name', 'contact_person', 'tax_id')
+    list_filter = ('user__role', 'user__is_active', 'created_at')
+    search_fields = ('user__email', 'company_name', 'contact_person')
     readonly_fields = ('photo_preview', 'created_at', 'updated_at')
+    list_select_related = ('user',)
+    
+    def get_queryset(self, request):
+        """Optimize queryset with select_related to avoid N+1 queries."""
+        return super().get_queryset(request).select_related('user')
     
     fieldsets = (
         ('User', {
             'fields': ('user',)
         }),
         ('Company Information', {
-            'fields': ('company_name', 'contact_person', 'contact_phone', 'address', 'tax_id')
+            'fields': ('company_name', 'contact_person', 'contact_phone', 'address')
         }),
         ('Profile Photo', {
             'fields': ('photo', 'photo_preview')
@@ -78,7 +83,7 @@ class ResellerProfileAdmin(admin.ModelAdmin):
         'referral_code',
         'bank_account_name',
     )
-    list_filter = ('user__role',)
+    list_filter = ('user__role', 'user__is_active', 'created_at')
     search_fields = (
         'user__email',
         'full_name',
@@ -87,6 +92,11 @@ class ResellerProfileAdmin(admin.ModelAdmin):
         'bank_account_number',
     )
     readonly_fields = ('photo_preview', 'group_root', 'direct_downline_count', 'created_at', 'updated_at')
+    list_select_related = ('user', 'sponsor', 'group_root')
+    
+    def get_queryset(self, request):
+        """Optimize queryset with select_related to avoid N+1 queries."""
+        return super().get_queryset(request).select_related('user', 'sponsor', 'group_root')
     
     fieldsets = (
         ('User', {
@@ -126,9 +136,14 @@ class ResellerProfileAdmin(admin.ModelAdmin):
 @admin.register(StaffProfile)
 class StaffProfileAdmin(admin.ModelAdmin):
     list_display = ('user', 'full_name', 'contact_phone')
-    list_filter = ('user__role',)
+    list_filter = ('user__role', 'user__is_active', 'created_at')
     search_fields = ('user__email', 'full_name')
     readonly_fields = ('photo_preview', 'created_at', 'updated_at')
+    list_select_related = ('user',)
+    
+    def get_queryset(self, request):
+        """Optimize queryset with select_related to avoid N+1 queries."""
+        return super().get_queryset(request).select_related('user')
     
     fieldsets = (
         ('User', {

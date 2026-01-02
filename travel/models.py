@@ -771,7 +771,7 @@ class ResellerTourCommission(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.reseller.display_name} - {self.tour_package.name}: {self.commission_amount} {self.currency}"
+        return f"{self.reseller.full_name} - {self.tour_package.name}: {self.commission_amount} {self.currency}"
 
 
 class ResellerCommission(models.Model):

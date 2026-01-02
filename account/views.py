@@ -82,7 +82,7 @@ class SupplierProfileViewSet(BaseOwnProfileViewSet):
     def get_profile_queryset_for_user(self, user):
         if not user.is_authenticated or user.role != UserRole.SUPPLIER:
             return SupplierProfile.objects.none()
-        return SupplierProfile.objects.filter(user=user)
+        return SupplierProfile.objects.select_related('user').filter(user=user)
 
 
 class ResellerProfileViewSet(BaseOwnProfileViewSet):
@@ -95,7 +95,7 @@ class ResellerProfileViewSet(BaseOwnProfileViewSet):
     def get_profile_queryset_for_user(self, user):
         if not user.is_authenticated or user.role != UserRole.RESELLER:
             return ResellerProfile.objects.none()
-        return ResellerProfile.objects.filter(user=user)
+        return ResellerProfile.objects.select_related('user', 'sponsor', 'group_root').filter(user=user)
 
 
 class StaffProfileViewSet(BaseOwnProfileViewSet):
@@ -108,7 +108,7 @@ class StaffProfileViewSet(BaseOwnProfileViewSet):
     def get_profile_queryset_for_user(self, user):
         if not user.is_authenticated or user.role != UserRole.STAFF:
             return StaffProfile.objects.none()
-        return StaffProfile.objects.filter(user=user)
+        return StaffProfile.objects.select_related('user').filter(user=user)
 
 
 # ==================== ADMIN VIEWSETS ====================
@@ -145,6 +145,13 @@ class BaseAdminProfileViewSet(viewsets.ModelViewSet):
                     is_active=True,
                 )
                 validated_data["user"] = user
+        elif user:
+            # Validate that existing user has the correct role
+            expected_role = self.get_user_role()
+            if user.role != expected_role:
+                raise serializers.ValidationError(
+                    {"user": f"User must have role '{expected_role}', but has '{user.role}'."}
+                )
         
         return validated_data
 
@@ -216,7 +223,7 @@ class AdminSupplierProfileViewSet(BaseAdminProfileViewSet):
     queryset = SupplierProfile.objects.select_related("user").order_by("-created_at")
     serializer_class = AdminSupplierProfileSerializer
     filterset_fields = ["user__is_active"]
-    search_fields = ["company_name", "contact_person", "user__email", "tax_id"]
+    search_fields = ["company_name", "contact_person", "user__email"]
 
     def get_user_role(self):
         return UserRole.SUPPLIER
@@ -225,7 +232,7 @@ class AdminSupplierProfileViewSet(BaseAdminProfileViewSet):
 class AdminResellerProfileViewSet(BaseAdminProfileViewSet):
     """Admin-only CRUD (except delete) for managing all reseller profiles."""
 
-    queryset = ResellerProfile.objects.select_related("user").order_by("-created_at")
+    queryset = ResellerProfile.objects.select_related("user", "sponsor", "group_root").order_by("-created_at")
     serializer_class = AdminResellerProfileSerializer
     filterset_fields = ["user__is_active"]
     search_fields = [

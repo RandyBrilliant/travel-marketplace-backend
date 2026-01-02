@@ -59,7 +59,7 @@ class ResellerGroupAdmin(admin.ModelAdmin):
 class ResellerTourCommissionAdmin(admin.ModelAdmin):
     list_display = ["reseller", "tour_package", "commission_amount", "currency", "is_active"]
     list_filter = ["is_active", "currency", "tour_package__tour_type"]
-    search_fields = ["reseller__display_name", "tour_package__name"]
+    search_fields = ["reseller__full_name", "tour_package__name"]
     raw_id_fields = ["reseller", "tour_package"]
 
 
@@ -67,7 +67,7 @@ class ResellerTourCommissionAdmin(admin.ModelAdmin):
 class BookingAdmin(admin.ModelAdmin):
     list_display = ["id", "reseller", "tour_date", "customer_name", "seats_booked", "status", "platform_fee"]
     list_filter = ["status", "created_at"]
-    search_fields = ["customer_name", "customer_email", "reseller__display_name"]
+    search_fields = ["customer_name", "customer_email", "reseller__full_name"]
 
 
 @admin.register(Payment)
@@ -81,4 +81,4 @@ class PaymentAdmin(admin.ModelAdmin):
 class ResellerCommissionAdmin(admin.ModelAdmin):
     list_display = ["reseller", "booking", "level", "amount"]
     list_filter = ["level", "created_at"]
-    search_fields = ["reseller__display_name"]
+    search_fields = ["reseller__full_name"]
