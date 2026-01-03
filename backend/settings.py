@@ -75,9 +75,10 @@ if not DEBUG:
     SECURE_HSTS_SECONDS = 31536000  # 1 year
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
-    SECURE_SSL_REDIRECT = True
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
+    # SSL redirect - only enable after SSL certificates are set up
+    SECURE_SSL_REDIRECT = get_env_bool("SECURE_SSL_REDIRECT", False)
+    SESSION_COOKIE_SECURE = get_env_bool("SESSION_COOKIE_SECURE", False)
+    CSRF_COOKIE_SECURE = get_env_bool("CSRF_COOKIE_SECURE", False)
 else:
     # Development settings
     SECURE_BROWSER_XSS_FILTER = True
