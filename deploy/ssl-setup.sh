@@ -53,13 +53,29 @@ mkdir -p "$APP_DIR/nginx/ssl/$DOMAIN"
 mkdir -p /var/www/certbot
 chmod -R 755 /var/www/certbot
 
-# Check if production nginx is running and stop it temporarily
-echo -e "${GREEN}[3/6] Checking for running nginx containers...${NC}"
-NGINX_RUNNING=false
+# Check if system nginx is running and stop it temporarily
+echo -e "${GREEN}[3/6] Checking for running nginx services...${NC}"
+SYSTEM_NGINX_RUNNING=false
+DOCKER_NGINX_RUNNING=false
+
+# Check for system nginx service
+if systemctl is-active --quiet nginx 2>/dev/null; then
+    echo "Stopping system nginx service temporarily..."
+    systemctl stop nginx
+    SYSTEM_NGINX_RUNNING=true
+    sleep 2
+elif pgrep nginx > /dev/null; then
+    echo "Stopping system nginx processes temporarily..."
+    pkill nginx
+    SYSTEM_NGINX_RUNNING=true
+    sleep 2
+fi
+
+# Check for production nginx container
 if docker ps --format '{{.Names}}' | grep -q "dcnetwork-api-nginx"; then
-    echo "Stopping production nginx temporarily..."
+    echo "Stopping production nginx container temporarily..."
     docker stop dcnetwork-api-nginx
-    NGINX_RUNNING=true
+    DOCKER_NGINX_RUNNING=true
     sleep 2
 fi
 
@@ -117,9 +133,14 @@ docker stop nginx-certbot || true
 docker rm nginx-certbot || true
 rm -f "$TEMP_NGINX_CONF"
 
-# Restart production nginx if it was running
-if [ "$NGINX_RUNNING" = true ]; then
-    echo -e "${GREEN}Restarting production nginx...${NC}"
+# Restart services if they were running
+if [ "$SYSTEM_NGINX_RUNNING" = true ]; then
+    echo -e "${GREEN}Restarting system nginx service...${NC}"
+    systemctl start nginx || true
+fi
+
+if [ "$DOCKER_NGINX_RUNNING" = true ]; then
+    echo -e "${GREEN}Restarting production nginx container...${NC}"
     docker start dcnetwork-api-nginx || true
 fi
 
