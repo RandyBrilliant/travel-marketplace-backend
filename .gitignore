@@ -52,3 +52,7 @@ backups/
 *.tar.gz
 deploy/*.log
 
+# Celery
+celerybeat-schedule
+celerybeat-schedule.*
+
