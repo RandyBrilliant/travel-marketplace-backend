@@ -14,6 +14,25 @@ from account.models import (
 )
 
 
+class ChangePasswordSerializer(serializers.Serializer):
+    """Serializer for password change requests."""
+    old_password = serializers.CharField(required=True, write_only=True)
+    new_password = serializers.CharField(required=True, write_only=True)
+
+    def validate_new_password(self, value):
+        """Validate the new password meets requirements."""
+        validate_password(value)
+        return value
+
+    def validate(self, attrs):
+        """Validate that old and new passwords are different."""
+        if attrs['old_password'] == attrs['new_password']:
+            raise serializers.ValidationError({
+                'new_password': ['New password must be different from old password.']
+            })
+        return attrs
+
+
 def generate_unique_referral_code(length=8):
     """
     Generate a unique referral code for resellers.
@@ -53,6 +72,8 @@ class UserSerializer(serializers.ModelSerializer):
 
 class SupplierProfileSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(read_only=True)
+    email = serializers.EmailField(source="user.email", read_only=True)
+    email_verified = serializers.BooleanField(source="user.email_verified", read_only=True)
 
     class Meta:
         model = SupplierProfile
@@ -64,10 +85,12 @@ class SupplierProfileSerializer(serializers.ModelSerializer):
             "contact_phone",
             "address",
             "photo",
+            "email",
+            "email_verified",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "user", "created_at", "updated_at"]
+        read_only_fields = ["id", "user", "email", "email_verified", "created_at", "updated_at"]
 
 
 class ResellerProfileSerializer(serializers.ModelSerializer):
@@ -260,6 +283,8 @@ class BaseAdminProfileSerializer(serializers.ModelSerializer):
         style={"input_type": "password"},
         validators=[validate_password],
     )
+    # User update fields (for updating user properties)
+    # Note: is_active is handled by a separate activate/deactivate endpoint
     
     def validate(self, attrs):
         """Validate that if creating new user, email and password are provided."""
@@ -308,6 +333,8 @@ class AdminResellerProfileSerializer(BaseAdminProfileSerializer, ResellerProfile
         fields = ResellerProfileSerializer.Meta.fields + ["user_data", "email", "password"]
         read_only_fields = [
             "id",
+            "user",
+            "referral_code",  # Auto-generated, should be read-only
             "group_root",
             "direct_downline_count",
             "created_at",

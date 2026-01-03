@@ -1,0 +1,27 @@
+[Unit]
+Description=DCNetwork API Docker Compose
+Documentation=https://github.com/yourusername/dcnetwork
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/dcnetwork-api
+ExecStart=/usr/bin/docker compose -f /opt/dcnetwork-api/docker-compose.prod.yml up -d
+ExecStop=/usr/bin/docker compose -f /opt/dcnetwork-api/docker-compose.prod.yml down
+ExecReload=/usr/bin/docker compose -f /opt/dcnetwork-api/docker-compose.prod.yml restart
+TimeoutStartSec=0
+Restart=on-failure
+RestartSec=5
+
+# Security settings
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/dcnetwork-api
+
+[Install]
+WantedBy=multi-user.target
+

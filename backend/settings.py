@@ -38,15 +38,15 @@ CSRF_TRUSTED_ORIGINS = get_env_list("CSRF_TRUSTED_ORIGINS")
 
 INSTALLED_APPS = [
     "corsheaders",
-    'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
-    'django.contrib.staticfiles',
     "rest_framework",
     "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",
     "django_filters",
+    "drf_spectacular",  # API documentation
 
     "account.apps.AccountConfig",
     "travel.apps.TravelConfig",
@@ -55,13 +55,33 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     "corsheaders.middleware.CorsMiddleware",
-    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.gzip.GZipMiddleware',  # Response compression
+    'backend.middleware.ResponseTimeMiddleware',  # Add response time header
+    'backend.middleware.APILoggingMiddleware',  # Log API requests
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'backend.middleware.CacheControlMiddleware',  # Add cache headers
 ]
+
+if not DEBUG:
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = 'DENY'
+    SECURE_HSTS_SECONDS = 31536000  # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+else:
+    # Development settings
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = 'DENY'
 
 ROOT_URLCONF = 'backend.urls'
 
@@ -140,11 +160,7 @@ USE_I18N = True
 USE_TZ = True
 
 
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/5.2/howto/static-files/
-
-STATIC_URL = 'static/'
-STATIC_ROOT = BASE_DIR / "staticfiles"
+# Media files (User uploaded files)
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
@@ -169,6 +185,22 @@ REST_FRAMEWORK = {
     "DEFAULT_FILTER_BACKENDS": (
         "django_filters.rest_framework.DjangoFilterBackend",
     ),
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle'
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '100/hour',
+        'user': '1000/hour',
+        'login': '5/minute',  # For login endpoints
+    },
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 20,
+    'PAGE_SIZE_QUERY_PARAM': 'page_size',
+    'MAX_PAGE_SIZE': 100,
+    'EXCEPTION_HANDLER': 'backend.exceptions.custom_exception_handler',
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'DEFAULT_VERSIONING_CLASS': 'rest_framework.versioning.URLPathVersioning',
 }
 
 ACCESS_TOKEN_MINUTES = int(os.environ.get("ACCESS_TOKEN_LIFETIME_MINUTES", "5"))
@@ -206,3 +238,90 @@ CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
 CELERY_TASK_SOFT_TIME_LIMIT = 60  # 1 minute
 CELERY_TASK_ACKS_LATE = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+# Fix deprecation warning: explicitly enable broker connection retry on startup
+# This will be required in Celery 6.0+
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+
+# API Documentation (drf-spectacular)
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'DCNetwork API',
+    'DESCRIPTION': 'API documentation for DCNetwork - A platform connecting suppliers, resellers, and customers for tour bookings.',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'COMPONENT_SPLIT_REQUEST': True,
+    'SCHEMA_PATH_PREFIX': '/api/v1',
+}
+
+# Caching Configuration (django-redis)
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': os.environ.get('REDIS_URL', os.environ.get('CELERY_BROKER_URL', 'redis://127.0.0.1:6379/1')),
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'SOCKET_CONNECT_TIMEOUT': 5,
+            'SOCKET_TIMEOUT': 5,
+            'COMPRESSOR': 'django_redis.compressors.zlib.ZlibCompressor',
+            'IGNORE_EXCEPTIONS': True,  # Don't fail if Redis is down
+        },
+        'KEY_PREFIX': 'travel_marketplace',
+        'TIMEOUT': 300,  # 5 minutes default
+    }
+}
+
+# Use cache for sessions (optional but recommended)
+SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
+SESSION_CACHE_ALIAS = 'default'
+
+# Logging Configuration
+LOGS_DIR = BASE_DIR / 'logs'
+LOGS_DIR.mkdir(exist_ok=True)
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '{levelname} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'file': {
+            'level': 'INFO',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': LOGS_DIR / 'django.log',
+            'maxBytes': 1024 * 1024 * 10,  # 10 MB
+            'backupCount': 10,
+            'formatter': 'verbose',
+        },
+        'console': {
+            'level': 'DEBUG' if DEBUG else 'INFO',
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+    },
+    'root': {
+        'handlers': ['console', 'file'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'account': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG' if DEBUG else 'INFO',
+        },
+        'travel': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG' if DEBUG else 'INFO',
+        },
+    },
+}

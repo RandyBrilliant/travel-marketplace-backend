@@ -8,14 +8,6 @@ from .managers import CustomUserManager
 
 
 class UserRole(models.TextChoices):
-    """
-    High-level roles for the marketplace.
-
-    - SUPPLIER: Provides travel products.
-    - RESELLER: Sells/markets products, get commission from sales.
-    - STAFF: Internal operations/admin staff, non-superuser by default.
-    """
-
     SUPPLIER = "SUPPLIER", _("Supplier")
     RESELLER = "RESELLER", _("Reseller")
     STAFF = "STAFF", _("Admin staff")

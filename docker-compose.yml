@@ -10,6 +10,7 @@ services:
       - .env
     volumes:
       - .:/app
+      - media_files:/app/media
     depends_on:
       db:
         condition: service_healthy
@@ -54,6 +55,7 @@ services:
       - .env
     volumes:
       - .:/app
+      - media_files:/app/media
     depends_on:
       db:
         condition: service_healthy
@@ -65,11 +67,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: celery -A backend beat --loglevel=info
+    command: celery -A backend beat --loglevel=info -s /tmp/celerybeat-schedule
     env_file:
       - .env
     volumes:
       - .:/app
+      - celerybeat_schedule:/tmp
     depends_on:
       db:
         condition: service_healthy
@@ -80,4 +83,6 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  celerybeat_schedule:
+  media_files:
 

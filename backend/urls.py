@@ -1,10 +1,11 @@
-from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 
+from backend.health import health_check
 from account.token_views import CustomTokenObtainPairView
 from account.views import (
     SupplierProfileViewSet,
@@ -13,15 +14,28 @@ from account.views import (
     AdminSupplierProfileViewSet,
     AdminResellerProfileViewSet,
     AdminStaffProfileViewSet,
+    ChangePasswordView,
+    SendEmailVerificationView,
+    VerifyEmailView,
+    RequestPasswordResetView,
+    ResetPasswordView,
+    ResetPasswordConfirmView,
+    ActivateDeactivateAccountView,
+    RegisterResellerView,
 )
 from travel.views import (
     SupplierTourPackageViewSet,
     SupplierTourDateViewSet,
     SupplierTourImageViewSet,
     SupplierItineraryItemViewSet,
+    SupplierBookingViewSet,
+    ResellerBookingViewSet,
     AdminResellerTourCommissionViewSet,
     AdminResellerGroupViewSet,
+    AdminBookingViewSet,
+    AdminTourPackageViewSet,
     PublicTourPackageListView,
+    PublicTourPackageDetailView,
 )
 
 router = DefaultRouter()
@@ -34,6 +48,10 @@ router.register(r"suppliers/me/tours", SupplierTourPackageViewSet, basename="sup
 router.register(r"suppliers/me/tour-dates", SupplierTourDateViewSet, basename="supplier-tour-date")
 router.register(r"suppliers/me/tour-images", SupplierTourImageViewSet, basename="supplier-tour-image")
 router.register(r"suppliers/me/itinerary-items", SupplierItineraryItemViewSet, basename="supplier-itinerary-item")
+router.register(r"suppliers/me/bookings", SupplierBookingViewSet, basename="supplier-booking")
+
+# Reseller booking endpoints
+router.register(r"resellers/me/bookings", ResellerBookingViewSet, basename="reseller-booking")
 
 # Admin-only endpoints for managing all profiles
 router.register(
@@ -57,15 +75,59 @@ router.register(
     AdminResellerGroupViewSet,
     basename="admin-reseller-group",
 )
+# Admin-only endpoints for managing bookings
+router.register(
+    r"admin/bookings",
+    AdminBookingViewSet,
+    basename="admin-booking",
+)
+# Admin-only endpoints for managing tour packages
+router.register(
+    r"admin/tours",
+    AdminTourPackageViewSet,
+    basename="admin-tour-package",
+)
+
+# API Documentation endpoints
+api_docs_patterns = [
+    path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
+    path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    path('api/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
+]
+
+# API v1 endpoints
+api_v1_patterns = [
+    path("", include(router.urls)),
+    path("token/", CustomTokenObtainPairView.as_view(), name="token_obtain_pair"),
+    path("token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    # Public registration endpoint
+    path("register/reseller/", RegisterResellerView.as_view(), name="register-reseller"),
+    # Password change endpoint (works for all user types)
+    path("change-password/", ChangePasswordView.as_view(), name="change-password"),
+    # Email verification endpoints
+    path("users/<int:user_id>/send-verification-email/", SendEmailVerificationView.as_view(), name="send-verification-email"),
+    path("verify-email/<str:uidb64>/<str:token>/", VerifyEmailView.as_view(), name="verify-email"),
+    # Password reset endpoints
+    path("request-password-reset/", RequestPasswordResetView.as_view(), name="request-password-reset"),
+    path("users/<int:user_id>/reset-password/", ResetPasswordView.as_view(), name="reset-password"),
+    path("reset-password/<str:uidb64>/<str:token>/", ResetPasswordConfirmView.as_view(), name="reset-password-confirm"),
+    # Activate/Deactivate account endpoint
+    path("admin/<str:profile_type>/<int:profile_id>/activate-deactivate/", ActivateDeactivateAccountView.as_view(), name="activate-deactivate-account"),
+    # Public tour endpoints
+    path("tours/", PublicTourPackageListView.as_view(), name="public-tour-list"),
+    path("tours/<int:pk>/", PublicTourPackageDetailView.as_view(), name="public-tour-detail"),
+]
 
 urlpatterns = [
-    path("", include(router.urls)),
-    path("admin/", admin.site.urls),
+    path("health/", health_check, name="health"),
+    # API Documentation
+    *api_docs_patterns,
+    # API v1
+    path("api/v1/", include(api_v1_patterns)),
+    # Backward compatibility: keep old endpoints working
+    path("api/", include(api_v1_patterns)),
+    # REST framework auth URLs (for browsable API)
     path("api-auth/", include("rest_framework.urls")),
-    path("api/token/", CustomTokenObtainPairView.as_view(), name="token_obtain_pair"),
-    path("api/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
-    # Public tour listing endpoint
-    path("api/tours/", PublicTourPackageListView.as_view(), name="public-tour-list"),
 ]
 
 # Serve media files in development

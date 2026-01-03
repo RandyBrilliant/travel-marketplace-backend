@@ -1,0 +1,3 @@
+# This file ensures the nginx directory is tracked by git
+# SSL certificates and logs will be created during deployment
+

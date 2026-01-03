@@ -90,6 +90,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         # Always include email and role in token payload
         token["email"] = user.email
         token["role"] = user.role
+        token["email_verified"] = user.email_verified
 
         # Get full name and profile picture URL
         full_name, photo_url = cls._get_profile_info(user)

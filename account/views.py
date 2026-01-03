@@ -1,6 +1,13 @@
 from rest_framework import viewsets, permissions, status, serializers
+from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from django.db import transaction
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.encoding import force_str
+from django.utils.http import urlsafe_base64_decode
+from django.utils import timezone
+from account.tasks import send_email_verification, send_password_reset_email
 
 from account.models import (
     CustomUser,
@@ -16,6 +23,7 @@ from account.serializers import (
     AdminSupplierProfileSerializer,
     AdminResellerProfileSerializer,
     AdminStaffProfileSerializer,
+    ChangePasswordSerializer,
 )
 
 
@@ -45,7 +53,6 @@ class BaseOwnProfileViewSet(viewsets.ModelViewSet):
         """
         Override list to return a single object instead of an array.
         Returns the current user's profile or 404 if not found.
-        Also handles PUT/PATCH requests on the list endpoint.
         """
         queryset = self.filter_queryset(self.get_queryset())
         
@@ -58,16 +65,30 @@ class BaseOwnProfileViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
         
-        # Handle PUT/PATCH on list endpoint
-        if request.method in ['PUT', 'PATCH']:
-            partial = request.method == 'PATCH'
-            serializer = self.get_serializer(profile, data=request.data, partial=partial)
-            serializer.is_valid(raise_exception=True)
-            serializer.save()
-            return Response(serializer.data)
-        
         # Handle GET (list)
         serializer = self.get_serializer(profile)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['put', 'patch'])
+    def update_me(self, request, *args, **kwargs):
+        """
+        Update the current user's profile.
+        Supports both PUT (full update) and PATCH (partial update).
+        This custom action allows PUT/PATCH on the list endpoint.
+        """
+        queryset = self.filter_queryset(self.get_queryset())
+        profile = queryset.first()
+        
+        if profile is None:
+            return Response(
+                {"detail": "Not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        partial = request.method == 'PATCH'
+        serializer = self.get_serializer(profile, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
         return Response(serializer.data)
     
 
@@ -158,6 +179,7 @@ class BaseAdminProfileViewSet(viewsets.ModelViewSet):
     def _update_user_data(self, instance, data):
         """Update user email if provided."""
         email = data.pop("email", None)
+        # Note: is_active is handled by a separate activate/deactivate endpoint
         
         if instance.user and email is not None:
             if email != instance.user.email:
@@ -246,6 +268,38 @@ class AdminResellerProfileViewSet(BaseAdminProfileViewSet):
     def get_user_role(self):
         return UserRole.RESELLER
 
+    @action(detail=True, methods=["get"], url_path="downlines")
+    def downlines(self, request, pk=None):
+        """
+        Get all downlines (direct and indirect) for a reseller.
+        Returns paginated list of reseller profiles in the downline tree.
+        """
+        try:
+            reseller = self.get_object()
+            
+            # Get all downlines using the model method
+            downlines_queryset = reseller.all_downlines().select_related("user", "sponsor").order_by("-created_at")
+            
+            # Apply pagination
+            page = self.paginate_queryset(downlines_queryset)
+            if page is not None:
+                serializer = self.get_serializer(page, many=True)
+                return self.get_paginated_response(serializer.data)
+            
+            # If no pagination, return all
+            serializer = self.get_serializer(downlines_queryset, many=True)
+            return Response(serializer.data)
+        except ResellerProfile.DoesNotExist:
+            return Response(
+                {"detail": "Reseller profile not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {"detail": f"An error occurred: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
 
 class AdminStaffProfileViewSet(BaseAdminProfileViewSet):
     """Admin-only CRUD (except delete) for managing all staff profiles."""
@@ -258,3 +312,505 @@ class AdminStaffProfileViewSet(BaseAdminProfileViewSet):
     def get_user_role(self):
         return UserRole.STAFF
 
+
+# ==================== PASSWORD CHANGE ENDPOINT ====================
+# Universal endpoint for all user types to change their password
+
+class ChangePasswordView(APIView):
+    """
+    API endpoint for authenticated users to change their password.
+    Works for all user types (STAFF, SUPPLIER, RESELLER).
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        """Change the authenticated user's password."""
+        serializer = ChangePasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+        old_password = serializer.validated_data['old_password']
+        new_password = serializer.validated_data['new_password']
+
+        # Verify old password
+        if not user.check_password(old_password):
+            return Response(
+                {'old_password': ['Current password is incorrect.']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Set new password
+        try:
+            user.set_password(new_password)
+            user.save()
+            return Response(
+                {'detail': 'Password has been successfully changed.'},
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            return Response(
+                {'detail': f'An error occurred while changing password: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+# ==================== EMAIL VERIFICATION ENDPOINTS ====================
+
+class SendEmailVerificationView(APIView):
+    """
+    API endpoint for admin to send email verification to a user.
+    Also allows users to send verification to themselves.
+    Works for all user types (STAFF, SUPPLIER, RESELLER).
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, user_id):
+        """Send email verification email to the specified user."""
+        try:
+            user = CustomUser.objects.get(pk=user_id)
+            
+            # Allow users to send verification to themselves, or require admin for others
+            if not request.user.is_staff and request.user.id != user_id:
+                return Response(
+                    {'detail': 'You do not have permission to send verification email to this user.'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Send verification email asynchronously
+            send_email_verification.delay(user.id)
+            
+            return Response(
+                {'detail': f'Verification email has been sent to {user.email}.'},
+                status=status.HTTP_200_OK
+            )
+        except CustomUser.DoesNotExist:
+            return Response(
+                {'detail': 'User not found.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {'detail': f'An error occurred while sending verification email: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class RequestPasswordResetView(APIView):
+    """
+    Public API endpoint for users to request password reset by email.
+    Works for all user types (STAFF, SUPPLIER, RESELLER).
+    No authentication required.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        """Send password reset email to the user with the provided email."""
+        email = request.data.get('email')
+        
+        if not email:
+            return Response(
+                {'email': ['This field is required.']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            user = CustomUser.objects.get(email=email.lower().strip())
+            
+            # Generate password reset token
+            from django.utils.encoding import force_bytes
+            from django.utils.http import urlsafe_base64_encode
+            
+            token = default_token_generator.make_token(user)
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            reset_token = f"{uid}/{token}"
+            
+            # Send password reset email asynchronously
+            send_password_reset_email.delay(user.id, reset_token)
+            
+            # Always return success message (security: don't reveal if email exists)
+            return Response(
+                {'detail': 'If an account with that email exists, a password reset email has been sent.'},
+                status=status.HTTP_200_OK
+            )
+        except CustomUser.DoesNotExist:
+            # Don't reveal if email exists or not (security best practice)
+            return Response(
+                {'detail': 'If an account with that email exists, a password reset email has been sent.'},
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            return Response(
+                {'detail': f'An error occurred while sending password reset email: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class ResetPasswordView(APIView):
+    """
+    API endpoint for admin to send password reset email to a user.
+    Works for all user types (STAFF, SUPPLIER, RESELLER).
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, user_id):
+        """Send password reset email to the specified user."""
+        try:
+            user = CustomUser.objects.get(pk=user_id)
+            
+            # Generate password reset token
+            from django.utils.encoding import force_bytes
+            from django.utils.http import urlsafe_base64_encode
+            
+            token = default_token_generator.make_token(user)
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            reset_token = f"{uid}/{token}"
+            
+            # Send password reset email asynchronously
+            send_password_reset_email.delay(user.id, reset_token)
+            
+            return Response(
+                {'detail': f'Password reset email has been sent to {user.email}.'},
+                status=status.HTTP_200_OK
+            )
+        except CustomUser.DoesNotExist:
+            return Response(
+                {'detail': 'User not found.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {'detail': f'An error occurred while sending password reset email: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class ResetPasswordConfirmView(APIView):
+    """
+    API endpoint to reset user password using uid and token from email link.
+    No authentication required - uses token-based verification.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, uidb64, token):
+        """Reset user password using uid and token."""
+        try:
+            # Decode user ID from base64
+            uid = force_str(urlsafe_base64_decode(uidb64))
+            user = CustomUser.objects.get(pk=uid)
+        except (TypeError, ValueError, OverflowError, CustomUser.DoesNotExist):
+            return Response(
+                {'detail': 'Invalid password reset link.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check if token is valid
+        if not default_token_generator.check_token(user, token):
+            return Response(
+                {'detail': 'Invalid or expired password reset token.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate new password
+        new_password = request.data.get('new_password')
+        if not new_password:
+            return Response(
+                {'new_password': ['This field is required.']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate password using Django's password validators
+        try:
+            from django.contrib.auth.password_validation import validate_password
+            validate_password(new_password, user)
+        except Exception as e:
+            return Response(
+                {'new_password': list(e.messages) if hasattr(e, 'messages') else [str(e)]},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Reset the password
+        try:
+            user.set_password(new_password)
+            user.save()
+            
+            return Response(
+                {
+                    'detail': 'Password has been successfully reset. You can now login with your new password.',
+                    'email': user.email,
+                },
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            return Response(
+                {'detail': f'An error occurred while resetting password: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class VerifyEmailView(APIView):
+    """
+    API endpoint to verify user email using uid and token from email link.
+    No authentication required - uses token-based verification.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, uidb64, token):
+        """Verify user email using uid and token."""
+        try:
+            # Decode user ID from base64
+            uid = force_str(urlsafe_base64_decode(uidb64))
+            user = CustomUser.objects.get(pk=uid)
+        except (TypeError, ValueError, OverflowError, CustomUser.DoesNotExist):
+            return Response(
+                {'detail': 'Invalid verification link.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check if token is valid
+        if not default_token_generator.check_token(user, token):
+            return Response(
+                {'detail': 'Invalid or expired verification token.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check if email is already verified
+        if user.email_verified:
+            return Response(
+                {'detail': 'Email has already been verified.'},
+                status=status.HTTP_200_OK
+            )
+
+        # Verify the email
+        try:
+            user.email_verified = True
+            user.email_verified_at = timezone.now()
+            user.save()
+            
+            return Response(
+                {
+                    'detail': 'Email has been successfully verified.',
+                    'email': user.email,
+                },
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            return Response(
+                {'detail': f'An error occurred while verifying email: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+# ==================== ACTIVATE/DEACTIVATE ACCOUNT ENDPOINT ====================
+
+class ActivateDeactivateAccountView(APIView):
+    """
+    API endpoint for admin to activate or deactivate a user account.
+    Works for all user types (STAFF, SUPPLIER, RESELLER).
+    Accepts profile_type and profile_id to identify which profile to update.
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, profile_type, profile_id):
+        """
+        Activate or deactivate a user account.
+        
+        Request body:
+        {
+            "is_active": true/false
+        }
+        """
+        is_active = request.data.get('is_active')
+        
+        if is_active is None:
+            return Response(
+                {'is_active': ['This field is required.']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if not isinstance(is_active, bool):
+            return Response(
+                {'is_active': ['This field must be a boolean.']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # Get the profile based on type
+            if profile_type == 'staff':
+                try:
+                    profile = StaffProfile.objects.select_related('user').get(pk=profile_id)
+                except StaffProfile.DoesNotExist:
+                    return Response(
+                        {'detail': 'Staff profile not found.'},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+            elif profile_type == 'supplier':
+                try:
+                    profile = SupplierProfile.objects.select_related('user').get(pk=profile_id)
+                except SupplierProfile.DoesNotExist:
+                    return Response(
+                        {'detail': 'Supplier profile not found.'},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+            elif profile_type == 'reseller':
+                try:
+                    profile = ResellerProfile.objects.select_related('user').get(pk=profile_id)
+                except ResellerProfile.DoesNotExist:
+                    return Response(
+                        {'detail': 'Reseller profile not found.'},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+            else:
+                return Response(
+                    {'detail': f'Invalid profile type: {profile_type}. Must be one of: staff, supplier, reseller.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Update user's is_active status
+            if profile.user:
+                profile.user.is_active = is_active
+                profile.user.save()
+                
+                return Response(
+                    {
+                        'detail': f'Account has been {"activated" if is_active else "deactivated"} successfully.',
+                        'is_active': is_active,
+                        'user_id': profile.user.id,
+                        'profile_id': profile.id,
+                        'profile_type': profile_type
+                    },
+                    status=status.HTTP_200_OK
+                )
+            else:
+                return Response(
+                    {'detail': 'Profile does not have an associated user.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+                
+        except Exception as e:
+            return Response(
+                {'detail': f'An error occurred while updating account status: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+# ==================== PUBLIC REGISTRATION ENDPOINT ====================
+
+class RegisterResellerView(APIView):
+    """
+    Public API endpoint for reseller registration.
+    Creates a new user with RESELLER role and associated ResellerProfile.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        """
+        Register a new reseller account.
+        
+        Request body:
+        {
+            "email": "user@example.com",
+            "password": "securepassword123",
+            "full_name": "John Doe",
+            "contact_phone": "+6281234567890" (optional),
+            "address": "Address" (optional),
+            "sponsor_referral_code": "ABC123" (optional)
+        }
+        """
+        from account.serializers import ResellerProfileSerializer
+        
+        email = request.data.get('email')
+        password = request.data.get('password')
+        full_name = request.data.get('full_name')
+        contact_phone = request.data.get('contact_phone', '')
+        address = request.data.get('address', '')
+        sponsor_referral_code = request.data.get('sponsor_referral_code', '')
+
+        # Validate required fields
+        if not email:
+            return Response(
+                {'email': ['This field is required.']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if not password:
+            return Response(
+                {'password': ['This field is required.']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if not full_name:
+            return Response(
+                {'full_name': ['This field is required.']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check if user with this email already exists
+        if CustomUser.objects.filter(email=email).exists():
+            return Response(
+                {'email': ['A user with this email already exists.']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate password
+        try:
+            from django.contrib.auth.password_validation import validate_password
+            validate_password(password)
+        except Exception as e:
+            return Response(
+                {'password': list(e.messages) if hasattr(e, 'messages') else [str(e)]},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            with transaction.atomic():
+                # Create user
+                user = CustomUser.objects.create_user(
+                    email=email,
+                    password=password,
+                    role=UserRole.RESELLER,
+                    is_active=True,  # Resellers are active by default
+                )
+
+                # Handle sponsor referral code if provided
+                sponsor = None
+                if sponsor_referral_code:
+                    try:
+                        sponsor = ResellerProfile.objects.get(referral_code=sponsor_referral_code)
+                    except ResellerProfile.DoesNotExist:
+                        user.delete()  # Clean up user if sponsor code is invalid
+                        return Response(
+                            {'sponsor_referral_code': [f"Sponsor with referral code '{sponsor_referral_code}' does not exist."]},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+
+                # Create reseller profile directly (bypass serializer since user is read-only)
+                from account.models import ResellerProfile
+                profile = ResellerProfile.objects.create(
+                    user=user,
+                    full_name=full_name,
+                    contact_phone=contact_phone,
+                    address=address,
+                    sponsor=sponsor,
+                )
+                
+                # Send email verification
+                try:
+                    send_email_verification.delay(user.id)
+                except Exception as e:
+                    # Log error but don't fail registration
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.error(f"Failed to send verification email: {str(e)}")
+
+                return Response(
+                    {
+                        'detail': 'Reseller account created successfully. Please check your email to verify your account.',
+                        'user_id': user.id,
+                        'email': user.email,
+                    },
+                    status=status.HTTP_201_CREATED
+                )
+
+        except Exception as e:
+            return Response(
+                {'detail': f'An error occurred during registration: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

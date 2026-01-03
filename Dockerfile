@@ -20,9 +20,21 @@ FROM base AS runtime
 COPY --from=deps /usr/local/lib/python3.12 /usr/local/lib/python3.12
 COPY --from=deps /usr/local/bin /usr/local/bin
 
+# Create a non-root user for running the application
+# This prevents security warnings when running Celery workers
+RUN groupadd -r appuser && useradd -r -g appuser -u 1000 appuser
+
 COPY . .
 
-RUN chmod +x entrypoint.sh
+# Create media directories with proper permissions before switching user
+RUN mkdir -p /app/media/profile_photos/staff \
+    && mkdir -p /app/media/profile_photos/supplier \
+    && mkdir -p /app/media/profile_photos/reseller \
+    && chmod +x entrypoint.sh \
+    && chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
 
 EXPOSE 8000
 
