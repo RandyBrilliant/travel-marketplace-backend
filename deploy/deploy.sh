@@ -17,6 +17,13 @@ echo "=========================================="
 echo "Travel Marketplace Backend - Deployment"
 echo "=========================================="
 
+# Check if running as root (required for /opt directory access)
+if [ "$EUID" -ne 0 ]; then 
+    echo -e "${RED}Please run as root or with sudo${NC}"
+    echo "Usage: sudo ./deploy/deploy.sh"
+    exit 1
+fi
+
 # Check if .env exists
 if [ ! -f "$PROJECT_DIR/.env" ]; then
     echo -e "${RED}Error: .env file not found!${NC}"
@@ -49,6 +56,10 @@ fi
 # Copy files to deployment directory
 echo -e "${GREEN}[1/6] Copying files to deployment directory...${NC}"
 mkdir -p "$APP_DIR"
+
+# Ensure correct ownership of deployment directory
+chown -R $SUDO_USER:$SUDO_USER "$APP_DIR" 2>/dev/null || chown -R root:root "$APP_DIR"
+
 rsync -av --exclude='.git' \
     --exclude='env' \
     --exclude='__pycache__' \
