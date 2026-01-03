@@ -75,7 +75,7 @@ EOF
 echo -e "${GREEN}[4/5] Starting temporary Nginx for certificate challenge...${NC}"
 docker run -d --name nginx-certbot \
     -p 80:80 \
-    -v /var/www/certbot:/var/www/certbot:ro \
+    -v /var/www/certbot:/var/www/certbot \
     -v "$TEMP_NGINX_CONF:/etc/nginx/conf.d/default.conf:ro" \
     nginx:alpine || docker start nginx-certbot
 
