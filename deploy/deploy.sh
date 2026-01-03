@@ -102,6 +102,18 @@ docker compose -f docker-compose.prod.yml build --no-cache
 echo -e "${GREEN}[5/6] Stopping existing containers...${NC}"
 docker compose -f docker-compose.prod.yml down || true
 
+# Stop system nginx if running (to free port 80)
+echo -e "${GREEN}Checking for services using port 80...${NC}"
+if systemctl is-active --quiet nginx 2>/dev/null; then
+    echo -e "${YELLOW}Stopping system nginx service (conflicts with Docker nginx)...${NC}"
+    systemctl stop nginx
+    systemctl disable nginx
+    echo -e "${GREEN}System nginx stopped and disabled${NC}"
+elif pgrep nginx > /dev/null; then
+    echo -e "${YELLOW}Stopping nginx processes...${NC}"
+    pkill nginx
+fi
+
 # Note: Static volume permissions will be handled after containers start
 
 # Start services
