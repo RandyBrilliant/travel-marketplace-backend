@@ -29,7 +29,7 @@ services:
       context: .
       dockerfile: Dockerfile.prod
     container_name: dcnetwork-api-backend
-    command: gunicorn backend.wsgi:application --bind 0.0.0.0:8000 --workers 4 --threads 2 --timeout 120 --access-logfile - --error-logfile - --log-level info
+    command: gunicorn backend.wsgi:application --bind 0.0.0.0:8000 --workers 2 --threads 2 --timeout 120 --access-logfile - --error-logfile - --log-level info
     env_file:
       - .env
     volumes:
@@ -52,11 +52,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2.0'
-          memory: 2G
+          cpus: '0.5'
+          memory: 256M
         reservations:
-          cpus: '1.0'
-          memory: 512M
+          cpus: '0.2'
+          memory: 128M
 
   db:
     image: postgres:15-alpine
@@ -79,16 +79,16 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1.0'
-          memory: 1G
-        reservations:
-          cpus: '0.5'
+          cpus: '0.3'
           memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
 
   redis:
     image: redis:7-alpine
     container_name: dcnetwork-api-redis
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --appendonly yes --maxmemory 100mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
     restart: unless-stopped
@@ -102,18 +102,18 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 512M
-        reservations:
-          cpus: '0.25'
+          cpus: '0.15'
           memory: 128M
+        reservations:
+          cpus: '0.05'
+          memory: 32M
 
   celery:
     build:
       context: .
       dockerfile: Dockerfile.prod
     container_name: travel-api-celery
-    command: celery -A backend worker --loglevel=info --concurrency=4 --max-tasks-per-child=1000
+    command: celery -A backend worker --loglevel=info --concurrency=2 --max-tasks-per-child=1000
     env_file:
       - .env
     volumes:
@@ -130,11 +130,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1.0'
-          memory: 1G
+          cpus: '0.3'
+          memory: 128M
         reservations:
-          cpus: '0.5'
-          memory: 256M
+          cpus: '0.1'
+          memory: 64M
 
   celery-beat:
     build:
@@ -158,11 +158,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 512M
+          cpus: '0.1'
+          memory: 64M
         reservations:
-          cpus: '0.25'
-          memory: 128M
+          cpus: '0.05'
+          memory: 32M
 
 volumes:
   postgres_data:
