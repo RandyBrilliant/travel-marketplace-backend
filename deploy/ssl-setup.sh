@@ -53,8 +53,18 @@ mkdir -p "$APP_DIR/nginx/ssl/$DOMAIN"
 mkdir -p /var/www/certbot
 chmod -R 755 /var/www/certbot
 
+# Check if production nginx is running and stop it temporarily
+echo -e "${GREEN}[3/6] Checking for running nginx containers...${NC}"
+NGINX_RUNNING=false
+if docker ps --format '{{.Names}}' | grep -q "dcnetwork-api-nginx"; then
+    echo "Stopping production nginx temporarily..."
+    docker stop dcnetwork-api-nginx
+    NGINX_RUNNING=true
+    sleep 2
+fi
+
 # Create temporary nginx config for certificate challenge
-echo -e "${GREEN}[3/5] Creating temporary Nginx configuration...${NC}"
+echo -e "${GREEN}[4/6] Creating temporary Nginx configuration...${NC}"
 TEMP_NGINX_CONF="/tmp/nginx-certbot.conf"
 cat > "$TEMP_NGINX_CONF" << EOF
 server {
@@ -71,18 +81,22 @@ server {
 }
 EOF
 
+# Clean up any existing nginx-certbot container
+docker stop nginx-certbot 2>/dev/null || true
+docker rm nginx-certbot 2>/dev/null || true
+
 # Start temporary nginx container for certificate challenge
-echo -e "${GREEN}[4/5] Starting temporary Nginx for certificate challenge...${NC}"
+echo -e "${GREEN}[5/6] Starting temporary Nginx for certificate challenge...${NC}"
 docker run -d --name nginx-certbot \
     -p 80:80 \
     -v /var/www/certbot:/var/www/certbot \
     -v "$TEMP_NGINX_CONF:/etc/nginx/conf.d/default.conf:ro" \
-    nginx:alpine || docker start nginx-certbot
+    nginx:alpine
 
 sleep 2
 
 # Request certificate
-echo -e "${GREEN}[5/5] Requesting SSL certificate from Let's Encrypt...${NC}"
+echo -e "${GREEN}[6/6] Requesting SSL certificate from Let's Encrypt...${NC}"
 certbot certonly \
     --webroot \
     --webroot-path=/var/www/certbot \
@@ -102,6 +116,12 @@ certbot certonly \
 docker stop nginx-certbot || true
 docker rm nginx-certbot || true
 rm -f "$TEMP_NGINX_CONF"
+
+# Restart production nginx if it was running
+if [ "$NGINX_RUNNING" = true ]; then
+    echo -e "${GREEN}Restarting production nginx...${NC}"
+    docker start dcnetwork-api-nginx || true
+fi
 
 # Copy certificates to nginx directory
 echo -e "${GREEN}Copying certificates to nginx directory...${NC}"
