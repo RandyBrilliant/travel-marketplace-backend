@@ -8,12 +8,12 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-APP_DIR="${APP_DIR:-/opt/dcnetwork-api}"
+APP_DIR="${APP_DIR:-/opt/travel-marketplace-backend}"
 BACKUP_DIR="${BACKUP_DIR:-$APP_DIR/backups}"
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
 
 echo "=========================================="
-echo "DCNetwork API - Backup"
+echo "Travel Marketplace Backend - Backup"
 echo "=========================================="
 
 # Create backup directory

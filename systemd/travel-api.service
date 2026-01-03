@@ -1,6 +1,6 @@
 [Unit]
-Description=DCNetwork API Docker Compose
-Documentation=https://github.com/yourusername/dcnetwork
+Description=Travel Marketplace Backend Docker Compose
+Documentation=https://github.com/yourusername/travel-marketplace
 Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target
@@ -8,10 +8,10 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-WorkingDirectory=/opt/dcnetwork-api
-ExecStart=/usr/bin/docker compose -f /opt/dcnetwork-api/docker-compose.prod.yml up -d
-ExecStop=/usr/bin/docker compose -f /opt/dcnetwork-api/docker-compose.prod.yml down
-ExecReload=/usr/bin/docker compose -f /opt/dcnetwork-api/docker-compose.prod.yml restart
+WorkingDirectory=/opt/travel-marketplace-backend
+ExecStart=/usr/bin/docker compose -f /opt/travel-marketplace-backend/docker-compose.prod.yml up -d
+ExecStop=/usr/bin/docker compose -f /opt/travel-marketplace-backend/docker-compose.prod.yml down
+ExecReload=/usr/bin/docker compose -f /opt/travel-marketplace-backend/docker-compose.prod.yml restart
 TimeoutStartSec=0
 Restart=on-failure
 RestartSec=5
@@ -20,7 +20,7 @@ RestartSec=5
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/opt/dcnetwork-api
+ReadWritePaths=/opt/travel-marketplace-backend
 
 [Install]
 WantedBy=multi-user.target

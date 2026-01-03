@@ -11,7 +11,7 @@ NC='\033[0m' # No Color
 # Get script directory
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-APP_DIR="${APP_DIR:-/opt/dcnetwork-api}"
+APP_DIR="${APP_DIR:-/opt/travel-marketplace-backend}"
 
 DOMAIN="api.goholiday.id"
 EMAIL="${SSL_EMAIL:-admin@goholiday.id}"
@@ -115,13 +115,13 @@ chmod 644 "$APP_DIR/nginx/ssl/$DOMAIN/chain.pem"
 
 # Setup auto-renewal hook
 echo -e "${GREEN}Setting up certificate auto-renewal...${NC}"
-RENEWAL_HOOK="/etc/letsencrypt/renewal-hooks/deploy/dcnetwork-api-nginx.sh"
+RENEWAL_HOOK="/etc/letsencrypt/renewal-hooks/deploy/travel-api-nginx.sh"
 mkdir -p "$(dirname "$RENEWAL_HOOK")"
 cat > "$RENEWAL_HOOK" << 'EOF'
 #!/bin/bash
 # Copy renewed certificates
 DOMAIN="api.goholiday.id"
-APP_DIR="/opt/dcnetwork-api"
+APP_DIR="/opt/travel-marketplace-backend"
 CERT_PATH="/etc/letsencrypt/live/$DOMAIN"
 
 cp "$CERT_PATH/fullchain.pem" "$APP_DIR/nginx/ssl/$DOMAIN/fullchain.pem"

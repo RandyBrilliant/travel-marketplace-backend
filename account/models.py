@@ -16,7 +16,7 @@ class UserRole(models.TextChoices):
 class CustomUser(AbstractUser):
     email = models.EmailField(verbose_name="Email Address", unique=True)
     role = models.CharField(
-        max_length=20,
+        max_length=8,
         choices=UserRole.choices,
         verbose_name="Role",
         help_text=_("High-level role used for permissions and routing."),

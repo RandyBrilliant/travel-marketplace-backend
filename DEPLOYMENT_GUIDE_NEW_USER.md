@@ -29,20 +29,20 @@ sudo apt-get install -y git
 ```bash
 # Navigate to a suitable directory
 cd /opt
-sudo git clone <your-repository-url> dcnetwork-api
-sudo chown -R $USER:$USER dcnetwork-api
-cd dcnetwork-api/travel-marketplace-backend
+sudo git clone <your-repository-url> travel-marketplace-backend
+sudo chown -R $USER:$USER travel-marketplace-backend
+cd travel-marketplace-backend
 ```
 
 **Option B: Transfer via SCP (from your local machine)**
 ```bash
 # On your local machine
-scp -r travel-marketplace-backend your-username@your-server-ip:/opt/dcnetwork-api/
+scp -r travel-marketplace-backend your-username@your-server-ip:/opt/
 ```
 
 Then on the server:
 ```bash
-cd /opt/dcnetwork-api/travel-marketplace-backend
+cd /opt/travel-marketplace-backend
 ```
 
 ## Step 4: Make Scripts Executable
@@ -64,7 +64,7 @@ sudo ./deploy/ubuntu-setup.sh
 - Updates system packages
 - Installs Docker and Docker Compose
 - Configures UFW firewall (allows SSH, HTTP, HTTPS)
-- Creates necessary directories (`/opt/dcnetwork-api`)
+- Creates necessary directories (`/opt/travel-marketplace-backend`)
 - Sets up log rotation
 - Creates systemd service for auto-start
 - Sets up SSL renewal cron job
@@ -164,7 +164,7 @@ This will:
 ```
 
 This script will:
-- Copy files to `/opt/dcnetwork-api`
+- Copy files to `/opt/travel-marketplace-backend`
 - Build Docker images
 - Start all services (nginx, api, db, redis, celery)
 - Run database migrations
@@ -178,7 +178,7 @@ This script will:
 After deployment, create a Django admin superuser:
 
 ```bash
-cd /opt/dcnetwork-api
+cd /opt/travel-marketplace-backend
 docker compose -f docker-compose.prod.yml exec api python manage.py createsuperuser
 ```
 
@@ -189,7 +189,7 @@ Follow the prompts to create your admin account.
 ### Check Service Status
 
 ```bash
-cd /opt/dcnetwork-api
+cd /opt/travel-marketplace-backend
 docker compose -f docker-compose.prod.yml ps
 ```
 
@@ -226,7 +226,7 @@ Press `Ctrl+C` to exit log viewing.
 Test the backup script:
 
 ```bash
-cd /opt/dcnetwork-api/travel-marketplace-backend
+cd /opt/travel-marketplace-backend
 ./deploy/backup.sh
 ```
 
@@ -238,7 +238,7 @@ crontab -e
 
 Add this line (backups run at 2 AM daily):
 ```
-0 2 * * * /opt/dcnetwork-api/travel-marketplace-backend/deploy/backup.sh >> /var/log/dcnetwork-api-backup.log 2>&1
+0 2 * * * /opt/travel-marketplace-backend/deploy/backup.sh >> /var/log/travel-api-backup.log 2>&1
 ```
 
 Save and exit.
@@ -248,7 +248,7 @@ Save and exit.
 ### Service Management
 
 ```bash
-cd /opt/dcnetwork-api
+cd /opt/travel-marketplace-backend
 
 # Start services
 docker compose -f docker-compose.prod.yml up -d
@@ -292,7 +292,7 @@ docker compose -f docker-compose.prod.yml logs -f api
 ### Updating the Application
 
 ```bash
-cd /opt/dcnetwork-api/travel-marketplace-backend
+cd /opt/travel-marketplace-backend
 
 # Pull latest code (if using git)
 git pull origin main
@@ -339,15 +339,15 @@ docker compose -f docker-compose.prod.yml ps db
 docker compose -f docker-compose.prod.yml logs db
 
 # Verify credentials in .env file
-cat /opt/dcnetwork-api/.env | grep SQL_
+cat /opt/travel-marketplace-backend/.env | grep SQL_
 ```
 
 ### Permission Issues
 
 ```bash
 # Fix media directory permissions
-sudo chown -R 1000:1000 /opt/dcnetwork-api/media
-sudo chmod -R 755 /opt/dcnetwork-api/media
+sudo chown -R 1000:1000 /opt/travel-marketplace-backend/media
+sudo chmod -R 755 /opt/travel-marketplace-backend/media
 ```
 
 ### Cannot Access the API

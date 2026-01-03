@@ -3,7 +3,7 @@
 set -e
 
 echo "=========================================="
-echo "DCNetwork API - Ubuntu Setup"
+echo "Travel Marketplace Backend - Ubuntu Setup"
 echo "=========================================="
 
 # Colors for output
@@ -79,7 +79,7 @@ ufw --force reload
 
 # Create application directory
 echo -e "${GREEN}[5/8] Creating application directories...${NC}"
-APP_DIR="/opt/dcnetwork-api"
+APP_DIR="/opt/travel-marketplace-backend"
 mkdir -p $APP_DIR
 mkdir -p $APP_DIR/nginx/ssl
 mkdir -p $APP_DIR/nginx/logs
@@ -88,14 +88,14 @@ mkdir -p $APP_DIR/backups
 mkdir -p /var/www/certbot
 
 # Create non-root user for application (optional)
-if ! id "dcnetwork-api" &>/dev/null; then
-    useradd -r -s /bin/bash -d $APP_DIR dcnetwork-api
-    chown -R dcnetwork-api:dcnetwork-api $APP_DIR
+if ! id "travel-api" &>/dev/null; then
+    useradd -r -s /bin/bash -d $APP_DIR travel-api
+    chown -R travel-api:travel-api $APP_DIR
 fi
 
 # Setup log rotation
 echo -e "${GREEN}[6/8] Setting up log rotation...${NC}"
-cat > /etc/logrotate.d/dcnetwork-api << EOF
+cat > /etc/logrotate.d/travel-api << EOF
 $APP_DIR/logs/*.log {
     daily
     missingok
@@ -103,7 +103,7 @@ $APP_DIR/logs/*.log {
     compress
     delaycompress
     notifempty
-    create 0640 dcnetwork-api dcnetwork-api
+    create 0640 travel-api travel-api
     sharedscripts
     postrotate
         docker compose -f $APP_DIR/docker-compose.prod.yml restart api || true
@@ -113,9 +113,9 @@ EOF
 
 # Create systemd service
 echo -e "${GREEN}[7/8] Creating systemd service...${NC}"
-cat > /etc/systemd/system/dcnetwork-api.service << EOF
+cat > /etc/systemd/system/travel-api.service << EOF
 [Unit]
-Description=DCNetwork API Docker Compose
+Description=Travel Marketplace Backend Docker Compose
 Requires=docker.service
 After=docker.service
 
@@ -133,7 +133,7 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable dcnetwork-api.service
+systemctl enable travel-api.service
 
 # Setup cron for SSL renewal
 echo -e "${GREEN}[8/8] Setting up SSL renewal cron job...${NC}"

@@ -1,6 +1,6 @@
 # Production Deployment Guide
 
-This guide covers deploying the DCNetwork API to an Ubuntu server with Docker, Nginx, and SSL.
+This guide covers deploying the Travel Marketplace Backend to an Ubuntu server with Docker, Nginx, and SSL.
 
 ## Prerequisites
 
@@ -42,10 +42,10 @@ ssh root@your-server-ip
 ```bash
 # Clone or upload the project to your server
 cd /opt
-git clone <your-repo-url> dcnetwork-api
+git clone <your-repo-url> travel-marketplace-backend
 # OR upload files via SCP/SFTP
 
-cd dcnetwork-api/travel-marketplace-backend
+cd travel-marketplace-backend
 chmod +x deploy/*.sh
 sudo ./deploy/ubuntu-setup.sh
 ```
@@ -64,7 +64,7 @@ This script will:
 ### 2.1 Create production environment file
 
 ```bash
-cd /opt/dcnetwork-api/travel-marketplace-backend
+cd /opt/travel-marketplace-backend
 cp env.prod.example .env
 nano .env
 ```
@@ -123,7 +123,7 @@ Before proceeding, ensure your DNS is configured:
 ### 4.1 Run SSL setup script
 
 ```bash
-cd /opt/dcnetwork-api/travel-marketplace-backend
+cd /opt/travel-marketplace-backend
 sudo ./deploy/ssl-setup.sh
 ```
 
@@ -144,7 +144,7 @@ This script will:
 ### 5.1 Run deployment script
 
 ```bash
-cd /opt/dcnetwork-api/travel-marketplace-backend
+cd /opt/travel-marketplace-backend
 ./deploy/deploy.sh
 ```
 
@@ -159,7 +159,7 @@ This script will:
 ### 5.2 Create superuser
 
 ```bash
-cd /opt/dcnetwork-api
+cd /opt/travel-marketplace-backend
 docker compose -f docker-compose.prod.yml exec api python manage.py createsuperuser
 ```
 
@@ -168,7 +168,7 @@ docker compose -f docker-compose.prod.yml exec api python manage.py createsuperu
 ### 6.1 Check service status
 
 ```bash
-cd /opt/dcnetwork-api
+cd /opt/travel-marketplace-backend
 docker compose -f docker-compose.prod.yml ps
 ```
 
@@ -200,7 +200,7 @@ docker compose -f docker-compose.prod.yml logs -f nginx
 ### 7.1 Test backup script
 
 ```bash
-cd /opt/dcnetwork-api/travel-marketplace-backend
+cd /opt/travel-marketplace-backend
 ./deploy/backup.sh
 ```
 
@@ -212,7 +212,7 @@ crontab -e
 
 Add:
 ```cron
-0 2 * * * /opt/dcnetwork-api/travel-marketplace-backend/deploy/backup.sh >> /var/log/dcnetwork-api-backup.log 2>&1
+0 2 * * * /opt/travel-marketplace-backend/deploy/backup.sh >> /var/log/travel-api-backup.log 2>&1
 ```
 
 ## Management Commands
@@ -220,7 +220,7 @@ Add:
 ### Start/Stop Services
 
 ```bash
-cd /opt/dcnetwork-api
+cd /opt/travel-marketplace-backend
 
 # Start
 docker compose -f docker-compose.prod.yml up -d
@@ -267,7 +267,7 @@ docker compose -f docker-compose.prod.yml exec api python manage.py shell
 ### Update Application
 
 ```bash
-cd /opt/dcnetwork-api/travel-marketplace-backend
+cd /opt/travel-marketplace-backend
 
 # Pull latest code
 git pull origin main
@@ -294,7 +294,7 @@ df -h
 docker system df
 
 # Log sizes
-du -sh /opt/dcnetwork-api/logs/*
+du -sh /opt/travel-marketplace-backend/logs/*
 ```
 
 ## Troubleshooting
@@ -339,8 +339,8 @@ docker compose -f docker-compose.prod.yml logs db
 
 ```bash
 # Fix media directory permissions
-sudo chown -R 1000:1000 /opt/dcnetwork-api/media
-sudo chmod -R 755 /opt/dcnetwork-api/media
+sudo chown -R 1000:1000 /opt/travel-marketplace-backend/media
+sudo chmod -R 755 /opt/travel-marketplace-backend/media
 ```
 
 ## Security Checklist
@@ -364,7 +364,7 @@ sudo chmod -R 755 /opt/dcnetwork-api/media
 ./deploy/backup.sh
 ```
 
-Backups are stored in `/opt/dcnetwork-api/backups/`
+Backups are stored in `/opt/travel-marketplace-backend/backups/`
 
 ### Restore Database
 
@@ -383,7 +383,7 @@ docker compose -f docker-compose.prod.yml up -d
 ### Restore Media Files
 
 ```bash
-cd /opt/dcnetwork-api
+cd /opt/travel-marketplace-backend
 tar -xzf backups/backup-YYYYMMDD-HHMMSS/media.tar.gz
 ```
 
@@ -410,5 +410,5 @@ celery:
 For issues or questions:
 - Check logs: `docker compose -f docker-compose.prod.yml logs`
 - Review this documentation
-- Check Django logs: `/opt/dcnetwork-api/logs/django.log`
+- Check Django logs: `/opt/travel-marketplace-backend/logs/django.log`
 

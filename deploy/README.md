@@ -1,6 +1,6 @@
 # Deployment Scripts
 
-This directory contains scripts for deploying the DCNetwork API to production.
+This directory contains scripts for deploying the Travel Marketplace Backend to production.
 
 ## Scripts Overview
 
@@ -65,7 +65,7 @@ Creates backups of database and media files.
 **Scheduling:**
 Add to crontab for daily backups:
 ```bash
-0 2 * * * /opt/dcnetwork-api/travel-marketplace-backend/deploy/backup.sh
+0 2 * * * /opt/travel-marketplace-backend/deploy/backup.sh
 ```
 
 ## Deployment Workflow
@@ -99,7 +99,7 @@ Add to crontab for daily backups:
 6. **Schedule Backups**
    ```bash
    crontab -e
-   # Add: 0 2 * * * /opt/dcnetwork-api/travel-marketplace-backend/deploy/backup.sh
+   # Add: 0 2 * * * /opt/travel-marketplace-backend/deploy/backup.sh
    ```
 
 ## Environment Variables

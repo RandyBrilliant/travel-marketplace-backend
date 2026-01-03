@@ -11,10 +11,10 @@ NC='\033[0m' # No Color
 # Get script directory
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-APP_DIR="${APP_DIR:-/opt/dcnetwork-api}"
+APP_DIR="${APP_DIR:-/opt/travel-marketplace-backend}"
 
 echo "=========================================="
-echo "DCNetwork API - Deployment"
+echo "Travel Marketplace Backend - Deployment"
 echo "=========================================="
 
 # Check if .env exists
