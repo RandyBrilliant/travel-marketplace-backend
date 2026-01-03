@@ -87,6 +87,9 @@ mkdir -p media/profile_photos/supplier
 mkdir -p media/profile_photos/reseller
 mkdir -p backups
 
+# Set permissions for directories that containers need to write to
+chmod -R 777 logs media 2>/dev/null || true
+
 # Set permissions
 chmod +x deploy/*.sh entrypoint.sh 2>/dev/null || true
 
