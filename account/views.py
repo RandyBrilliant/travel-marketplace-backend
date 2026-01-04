@@ -7,6 +7,7 @@ from django.contrib.auth.tokens import default_token_generator
 from django.utils.encoding import force_str
 from django.utils.http import urlsafe_base64_decode
 from django.utils import timezone
+from django.conf import settings
 from account.tasks import send_email_verification, send_password_reset_email
 
 from account.models import (
@@ -311,6 +312,122 @@ class AdminStaffProfileViewSet(BaseAdminProfileViewSet):
 
     def get_user_role(self):
         return UserRole.STAFF
+
+
+# ==================== USER INFO ENDPOINT ====================
+
+class CurrentUserView(APIView):
+    """
+    API endpoint to get current authenticated user information.
+    Used by frontend to get user info since tokens are in httpOnly cookies.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        """Return current user information."""
+        user = request.user
+        from account.models import UserRole
+        
+        # Get profile info based on role
+        full_name = user.email
+        photo_url = None
+        
+        try:
+            if user.role == UserRole.SUPPLIER and hasattr(user, "supplier_profile"):
+                profile = user.supplier_profile
+                full_name = profile.company_name
+                if profile.photo:
+                    photo_url = profile.photo.url
+            elif user.role == UserRole.RESELLER and hasattr(user, "reseller_profile"):
+                profile = user.reseller_profile
+                full_name = profile.full_name
+                if profile.photo:
+                    photo_url = profile.photo.url
+            elif user.role == UserRole.STAFF and hasattr(user, "staff_profile"):
+                profile = user.staff_profile
+                full_name = profile.full_name
+                if profile.photo:
+                    photo_url = profile.photo.url
+        except Exception:
+            pass
+        
+        return Response({
+            'id': user.id,
+            'email': user.email,
+            'role': user.role,
+            'full_name': full_name,
+            'profile_picture_url': photo_url,
+            'email_verified': user.email_verified,
+        })
+
+
+# ==================== LOGOUT ENDPOINT ====================
+
+class LogoutView(APIView):
+    """
+    API endpoint to logout user by clearing httpOnly cookies.
+    Also blacklists the refresh token if provided.
+    """
+    permission_classes = [permissions.AllowAny]  # Allow unauthenticated access
+
+    def post(self, request):
+        """Logout user by clearing authentication cookies."""
+        from rest_framework_simplejwt.tokens import RefreshToken
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        
+        # Try to blacklist the refresh token if available
+        refresh_token = request.COOKIES.get('refresh_token')
+        if refresh_token:
+            try:
+                token = RefreshToken(refresh_token)
+                token.blacklist()
+                logger.info("Refresh token blacklisted successfully")
+            except Exception as e:
+                # If blacklisting fails, continue with logout anyway
+                logger.warning(f"Failed to blacklist token: {e}")
+        
+        # Create response
+        response = Response(
+            {'detail': 'Successfully logged out.'},
+            status=status.HTTP_200_OK
+        )
+        
+        # Cookie settings - must match EXACTLY how they were set during login
+        is_secure = not settings.DEBUG
+        
+        # For cookie deletion to work, we need to try multiple approaches
+        # because browsers can be finicky about cookie deletion
+        
+        # Method 1: Delete with no domain (works for localhost)
+        response.delete_cookie('access_token', path='/', samesite='Lax')
+        response.delete_cookie('refresh_token', path='/', samesite='Lax')
+        
+        # Method 2: Also set to empty with max_age=0 (belt and suspenders)
+        response.set_cookie(
+            'access_token',
+            value='',
+            max_age=0,
+            path='/',
+            httponly=True,
+            secure=is_secure,
+            samesite='Lax',
+        )
+        
+        response.set_cookie(
+            'refresh_token',
+            value='',
+            max_age=0,
+            path='/',
+            httponly=True,
+            secure=is_secure,
+            samesite='Lax',
+        )
+        
+        logger.info(f"Logout cookies cleared (DEBUG={settings.DEBUG}, secure={is_secure})")
+        
+        return response
 
 
 # ==================== PASSWORD CHANGE ENDPOINT ====================

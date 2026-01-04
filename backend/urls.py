@@ -2,7 +2,7 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from rest_framework.routers import DefaultRouter
-from rest_framework_simplejwt.views import TokenRefreshView
+from account.token_views import CustomTokenRefreshView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 
 from backend.health import health_check
@@ -14,6 +14,8 @@ from account.views import (
     AdminSupplierProfileViewSet,
     AdminResellerProfileViewSet,
     AdminStaffProfileViewSet,
+    CurrentUserView,
+    LogoutView,
     ChangePasswordView,
     SendEmailVerificationView,
     VerifyEmailView,
@@ -99,7 +101,9 @@ api_docs_patterns = [
 api_v1_patterns = [
     path("", include(router.urls)),
     path("token/", CustomTokenObtainPairView.as_view(), name="token_obtain_pair"),
-    path("token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    path("token/refresh/", CustomTokenRefreshView.as_view(), name="token_refresh"),
+    path("token/logout/", LogoutView.as_view(), name="token_logout"),
+    path("token/me/", CurrentUserView.as_view(), name="token_me"),
     # Public registration endpoint
     path("register/reseller/", RegisterResellerView.as_view(), name="register-reseller"),
     # Password change endpoint (works for all user types)

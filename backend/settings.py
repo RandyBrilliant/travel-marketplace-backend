@@ -55,12 +55,11 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    "corsheaders.middleware.CorsMiddleware",
+    "corsheaders.middleware.CorsMiddleware",  # MUST be before CommonMiddleware
+    'django.middleware.common.CommonMiddleware',
     'django.middleware.gzip.GZipMiddleware',  # Response compression
     'backend.middleware.ResponseTimeMiddleware',  # Add response time header
     'backend.middleware.APILoggingMiddleware',  # Log API requests
-    'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
@@ -179,11 +178,18 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # DRF / Auth
 CORS_ALLOWED_ORIGINS = get_env_list("CORS_ALLOWED_ORIGINS")
+# Add localhost:3000 as default for development if not specified
+if DEBUG and not CORS_ALLOWED_ORIGINS:
+    CORS_ALLOWED_ORIGINS = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
 CORS_ALLOW_CREDENTIALS = True
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "account.authentication.CookieJWTAuthentication",  # Custom cookie-based JWT auth
+        "rest_framework_simplejwt.authentication.JWTAuthentication",  # Fallback for backward compatibility
         "rest_framework.authentication.SessionAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": (
@@ -219,9 +225,24 @@ SIMPLE_JWT = {
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
     "AUTH_HEADER_TYPES": ("Bearer",),
+    "AUTH_COOKIE": "access_token",  # Name of the access token cookie
+    "AUTH_COOKIE_REFRESH": "refresh_token",  # Name of the refresh token cookie
+    "AUTH_COOKIE_SECURE": not DEBUG,  # Set to True in production
+    "AUTH_COOKIE_HTTP_ONLY": True,  # HttpOnly flag
+    "AUTH_COOKIE_SAMESITE": "Lax",  # SameSite policy
 }
 
 AUTH_USER_MODEL = "account.CustomUser"
+
+# CSRF Settings for cookie-based authentication
+CSRF_COOKIE_HTTPONLY = False  # Must be False so frontend can read CSRF token if needed
+CSRF_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SECURE = not DEBUG  # Use secure cookies in production
+CSRF_TRUSTED_ORIGINS = get_env_list("CSRF_TRUSTED_ORIGINS")
+
+# Session Settings
+SESSION_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SECURE = not DEBUG
 
 # Email Configuration (Mailgun)
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'

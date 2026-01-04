@@ -352,6 +352,31 @@ class PublicTourPackageListView(APIView):
                 models.Q(summary__icontains=search)
             )
         
+        # Filter by month/year (format: YYYY-MM)
+        month = request.query_params.get("month")
+        if month:
+            try:
+                from datetime import datetime
+                # Parse YYYY-MM format
+                year, month_num = map(int, month.split("-"))
+                # Get the first and last day of the month
+                first_day = datetime(year, month_num, 1).date()
+                # Get last day of month
+                if month_num == 12:
+                    last_day = datetime(year + 1, 1, 1).date()
+                else:
+                    last_day = datetime(year, month_num + 1, 1).date()
+                
+                # Filter tours that have dates in this month with available seats
+                queryset = queryset.filter(
+                    dates__departure_date__gte=first_day,
+                    dates__departure_date__lt=last_day,
+                    dates__seat_slots__status=SeatSlotStatus.AVAILABLE
+                ).distinct()
+            except (ValueError, TypeError):
+                # Invalid month format, ignore filter
+                pass
+        
         # Ordering
         ordering = request.query_params.get("ordering", "-is_featured,-created_at")
         if ordering:
@@ -783,10 +808,10 @@ class SupplierBookingViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(chart_data)
 
 
-class ResellerBookingViewSet(viewsets.ReadOnlyModelViewSet):
+class ResellerBookingViewSet(viewsets.ModelViewSet):
     """
-    ViewSet for resellers to view their own bookings.
-    Resellers can only view their own bookings, not modify them.
+    ViewSet for resellers to view and create their own bookings.
+    Resellers can create bookings and view their own bookings.
     """
     
     permission_classes = [IsReseller]
@@ -856,6 +881,16 @@ class ResellerBookingViewSet(viewsets.ReadOnlyModelViewSet):
         if self.action == "list":
             return BookingListSerializer
         return BookingSerializer
+    
+    def perform_create(self, serializer):
+        """Set the reseller when creating a booking."""
+        try:
+            reseller_profile = ResellerProfile.objects.get(user=self.request.user)
+            serializer.save(reseller=reseller_profile)
+        except ResellerProfile.DoesNotExist:
+            raise ValidationError(
+                {"detail": "Reseller profile not found. Please complete your profile setup."}
+            )
 
 
 class AdminBookingViewSet(viewsets.ReadOnlyModelViewSet):

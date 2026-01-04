@@ -3,114 +3,175 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Verify Your Email</title>
+    <title>Verify Your Email - DCNetwork</title>
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             line-height: 1.6;
-            color: #333;
+            color: #2c3e50;
+            background-color: #f8f9fa;
+            padding: 20px;
+        }
+        .email-wrapper {
             max-width: 600px;
             margin: 0 auto;
-            padding: 20px;
-            background-color: #f4f4f4;
-        }
-        .container {
             background-color: #ffffff;
-            border-radius: 8px;
-            padding: 40px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         .header {
+            padding: 40px 40px 30px;
             text-align: center;
-            margin-bottom: 30px;
+            border-bottom: 1px solid #e9ecef;
         }
         .logo {
-            font-size: 24px;
-            font-weight: bold;
-            color: #2563eb;
-            margin-bottom: 10px;
+            font-size: 28px;
+            font-weight: 700;
+            color: #0d6efd;
+            letter-spacing: -0.5px;
+            margin-bottom: 8px;
         }
-        h1 {
-            color: #1f2937;
-            font-size: 24px;
-            margin: 0 0 20px 0;
+        .tagline {
+            font-size: 13px;
+            color: #6c757d;
+            font-weight: 400;
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
         .content {
-            margin-bottom: 30px;
+            padding: 40px;
         }
-        p {
-            margin: 0 0 15px 0;
-            color: #4b5563;
+        .greeting {
+            font-size: 16px;
+            color: #2c3e50;
+            margin-bottom: 24px;
+        }
+        .message {
+            font-size: 15px;
+            color: #495057;
+            margin-bottom: 32px;
+            line-height: 1.7;
+        }
+        .button-container {
+            text-align: center;
+            margin: 32px 0;
         }
         .button {
             display: inline-block;
-            padding: 12px 30px;
-            background-color: #2563eb;
-            color: #ffffff;
+            padding: 14px 32px;
+            background-color: #0d6efd;
+            color: #ffffff !important;
             text-decoration: none;
             border-radius: 6px;
             font-weight: 600;
-            margin: 20px 0;
+            font-size: 15px;
+            transition: background-color 0.2s;
         }
         .button:hover {
-            background-color: #1d4ed8;
+            background-color: #0b5ed7;
         }
-        .link {
-            color: #2563eb;
-            word-break: break-all;
+        .link-fallback {
+            margin-top: 24px;
+            padding: 16px;
+            background-color: #f8f9fa;
+            border-radius: 6px;
+            border-left: 3px solid #0d6efd;
+        }
+        .link-fallback-text {
             font-size: 12px;
-            margin-top: 20px;
-            padding: 15px;
-            background-color: #f3f4f6;
+            color: #6c757d;
+            margin-bottom: 8px;
+        }
+        .link-fallback-url {
+            font-size: 11px;
+            color: #0d6efd;
+            word-break: break-all;
+            font-family: 'Courier New', monospace;
+        }
+        .note {
+            margin-top: 32px;
+            padding: 16px;
+            background-color: #fff3cd;
+            border-left: 3px solid #ffc107;
             border-radius: 4px;
+        }
+        .note-text {
+            font-size: 13px;
+            color: #856404;
+            line-height: 1.6;
         }
         .footer {
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 1px solid #e5e7eb;
+            padding: 30px 40px;
+            background-color: #f8f9fa;
+            border-top: 1px solid #e9ecef;
             text-align: center;
-            font-size: 12px;
-            color: #6b7280;
         }
-        .warning {
-            background-color: #fef3c7;
-            border-left: 4px solid #f59e0b;
-            padding: 12px;
-            margin: 20px 0;
-            border-radius: 4px;
+        .footer-text {
+            font-size: 12px;
+            color: #6c757d;
+            margin-bottom: 8px;
+        }
+        .footer-brand {
+            font-size: 11px;
+            color: #adb5bd;
+        }
+        @media only screen and (max-width: 600px) {
+            .header, .content, .footer {
+                padding: 24px;
+            }
+            .logo {
+                font-size: 24px;
+            }
+            .button {
+                padding: 12px 24px;
+                font-size: 14px;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="container">
+    <div class="email-wrapper">
         <div class="header">
-            <div class="logo">✈️ Travel Marketplace</div>
+            <div class="logo">DCNetwork</div>
+            <div class="tagline">Travel Marketplace</div>
         </div>
         
-        <h1>Verify Your Email Address</h1>
-        
         <div class="content">
-            <p>Hello{% if user.email %} {{ user.email }}{% endif %},</p>
+            <div class="greeting">
+                Hello{% if user.email %} {{ user.email }}{% endif %},
+            </div>
             
-            <p>Thank you for signing up! Please verify your email address to complete your registration and activate your account.</p>
+            <div class="message">
+                Welcome to DCNetwork! We're excited to have you join our travel marketplace community.
+            </div>
             
-            <div style="text-align: center;">
+            <div class="message">
+                To get started, please verify your email address by clicking the button below. This helps us ensure the security of your account.
+            </div>
+            
+            <div class="button-container">
                 <a href="{{ verification_url }}" class="button">Verify Email Address</a>
             </div>
             
-            <p>Or copy and paste this link into your browser:</p>
-            <div class="link">{{ verification_url }}</div>
+            <div class="link-fallback">
+                <div class="link-fallback-text">Or copy and paste this link into your browser:</div>
+                <div class="link-fallback-url">{{ verification_url }}</div>
+            </div>
             
-            <div class="warning">
-                <strong>⚠️ Important:</strong> This verification link will expire in 24 hours. If you didn't create an account, please ignore this email.
+            <div class="note">
+                <div class="note-text">
+                    <strong>Note:</strong> This verification link will expire in 24 hours. If you didn't create an account with DCNetwork, please ignore this email.
+                </div>
             </div>
         </div>
         
         <div class="footer">
-            <p>If you have any questions, please contact our support team.</p>
-            <p>&copy; {% now "Y" %} Travel Marketplace. All rights reserved.</p>
+            <div class="footer-text">Need help? Contact our support team.</div>
+            <div class="footer-brand">&copy; {% now "Y" %} DCNetwork. All rights reserved.</div>
         </div>
     </div>
 </body>
 </html>
-

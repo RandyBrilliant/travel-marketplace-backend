@@ -12,6 +12,7 @@ from .models import (
     ResellerGroup,
     Booking,
     BookingStatus,
+    SeatSlotStatus,
 )
 from account.models import ResellerProfile, SupplierProfile
 
@@ -265,10 +266,12 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
         from django.utils import timezone
         
         # Get future dates with available seats
+        # Note: remaining_seats is a property, not a database field
+        # We need to filter by seat_slots__status instead
         future_dates = obj.dates.filter(
             departure_date__gte=timezone.now().date(),
-            remaining_seats__gt=0
-        ).order_by("departure_date")[:10]  # Limit to 10 upcoming dates
+            seat_slots__status=SeatSlotStatus.AVAILABLE
+        ).distinct().order_by("departure_date")[:10]  # Limit to 10 upcoming dates
         
         return TourDateSerializer(future_dates, many=True, context=self.context).data
 

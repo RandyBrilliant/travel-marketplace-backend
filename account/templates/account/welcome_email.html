@@ -3,132 +3,197 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Welcome to Travel Marketplace</title>
+    <title>Welcome to DCNetwork</title>
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             line-height: 1.6;
-            color: #333;
+            color: #2c3e50;
+            background-color: #f8f9fa;
+            padding: 20px;
+        }
+        .email-wrapper {
             max-width: 600px;
             margin: 0 auto;
-            padding: 20px;
-            background-color: #f4f4f4;
-        }
-        .container {
             background-color: #ffffff;
-            border-radius: 8px;
-            padding: 40px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         .header {
+            padding: 40px 40px 30px;
             text-align: center;
-            margin-bottom: 30px;
+            border-bottom: 1px solid #e9ecef;
         }
         .logo {
             font-size: 28px;
-            font-weight: bold;
-            color: #2563eb;
-            margin-bottom: 10px;
+            font-weight: 700;
+            color: #0d6efd;
+            letter-spacing: -0.5px;
+            margin-bottom: 8px;
         }
-        h1 {
-            color: #1f2937;
-            font-size: 26px;
-            margin: 0 0 20px 0;
-            text-align: center;
+        .tagline {
+            font-size: 13px;
+            color: #6c757d;
+            font-weight: 400;
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
         .content {
-            margin-bottom: 30px;
+            padding: 40px;
         }
-        p {
-            margin: 0 0 15px 0;
-            color: #4b5563;
+        .greeting {
+            font-size: 16px;
+            color: #2c3e50;
+            margin-bottom: 24px;
         }
-        .button {
-            display: inline-block;
-            padding: 12px 30px;
-            background-color: #2563eb;
+        .message {
+            font-size: 15px;
+            color: #495057;
+            margin-bottom: 24px;
+            line-height: 1.7;
+        }
+        .welcome-badge {
+            margin: 32px 0;
+            padding: 24px;
+            background: linear-gradient(135deg, #0d6efd 0%, #0b5ed7 100%);
             color: #ffffff;
-            text-decoration: none;
-            border-radius: 6px;
-            font-weight: 600;
-            margin: 20px 0;
+            border-radius: 8px;
+            text-align: center;
         }
-        .button:hover {
-            background-color: #1d4ed8;
+        .welcome-badge-title {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .welcome-badge-text {
+            font-size: 14px;
+            opacity: 0.95;
         }
         .features {
-            margin: 30px 0;
-            padding: 20px;
-            background-color: #f9fafb;
-            border-radius: 6px;
+            margin: 32px 0;
+            padding: 24px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            border-left: 3px solid #0d6efd;
+        }
+        .features-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 16px;
         }
         .feature-item {
-            margin: 10px 0;
-            padding-left: 25px;
+            margin: 12px 0;
+            padding-left: 24px;
             position: relative;
+            font-size: 14px;
+            color: #495057;
+            line-height: 1.6;
         }
         .feature-item:before {
             content: "✓";
             position: absolute;
             left: 0;
-            color: #10b981;
-            font-weight: bold;
+            color: #198754;
+            font-weight: 700;
+            font-size: 16px;
+        }
+        .button-container {
+            text-align: center;
+            margin: 32px 0;
+        }
+        .button {
+            display: inline-block;
+            padding: 14px 32px;
+            background-color: #0d6efd;
+            color: #ffffff !important;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 15px;
+            transition: background-color 0.2s;
+        }
+        .button:hover {
+            background-color: #0b5ed7;
         }
         .footer {
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 1px solid #e5e7eb;
+            padding: 30px 40px;
+            background-color: #f8f9fa;
+            border-top: 1px solid #e9ecef;
             text-align: center;
-            font-size: 12px;
-            color: #6b7280;
         }
-        .highlight {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px;
-            border-radius: 8px;
-            text-align: center;
-            margin: 20px 0;
+        .footer-text {
+            font-size: 12px;
+            color: #6c757d;
+            margin-bottom: 8px;
+        }
+        .footer-brand {
+            font-size: 11px;
+            color: #adb5bd;
+        }
+        @media only screen and (max-width: 600px) {
+            .header, .content, .footer {
+                padding: 24px;
+            }
+            .logo {
+                font-size: 24px;
+            }
+            .button {
+                padding: 12px 24px;
+                font-size: 14px;
+            }
+            .welcome-badge {
+                padding: 20px;
+            }
+            .welcome-badge-title {
+                font-size: 18px;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="container">
+    <div class="email-wrapper">
         <div class="header">
-            <div class="logo">✈️ Travel Marketplace</div>
+            <div class="logo">DCNetwork</div>
+            <div class="tagline">Travel Marketplace</div>
         </div>
         
-        <h1>Welcome to Travel Marketplace! 🎉</h1>
-        
         <div class="content">
-            <p>Hello {% if profile_name %}{{ profile_name }}{% else %}{{ user.email }}{% endif %},</p>
+            <div class="greeting">
+                Hello {% if profile_name %}{{ profile_name }}{% else %}{{ user.email }}{% endif %},
+            </div>
             
-            <p>We're thrilled to have you join our travel marketplace community! Your account has been successfully created.</p>
+            <div class="message">
+                Welcome to DCNetwork! We're thrilled to have you join our travel marketplace community. Your account has been successfully created and you're all set to start your journey with us.
+            </div>
             
             {% if user.role == 'SUPPLIER' %}
-            <div class="highlight">
-                <strong>You're registered as a Supplier!</strong><br>
-                Start listing your amazing tour packages and reach thousands of travelers.
+            <div class="welcome-badge">
+                <div class="welcome-badge-title">You're registered as a Supplier!</div>
+                <div class="welcome-badge-text">Start listing your amazing tour packages and reach thousands of travelers around the world.</div>
             </div>
             {% elif user.role == 'RESELLER' %}
-            <div class="highlight">
-                <strong>You're registered as a Reseller!</strong><br>
-                Start booking tours for your customers and earn commissions.
+            <div class="welcome-badge">
+                <div class="welcome-badge-title">You're registered as a Reseller!</div>
+                <div class="welcome-badge-text">Start booking tours for your customers and earn commissions on every successful booking.</div>
             </div>
             {% elif user.role == 'STAFF' %}
-            <div class="highlight">
-                <strong>You're registered as Staff!</strong><br>
-                Welcome to the team! You can now manage the marketplace.
+            <div class="welcome-badge">
+                <div class="welcome-badge-title">You're registered as Staff!</div>
+                <div class="welcome-badge-text">Welcome to the team! You can now manage and oversee the marketplace operations.</div>
             </div>
             {% endif %}
             
             <div class="features">
-                <h3 style="margin-top: 0; color: #1f2937;">What you can do:</h3>
+                <div class="features-title">What you can do:</div>
                 {% if user.role == 'SUPPLIER' %}
                 <div class="feature-item">Create and manage tour packages</div>
                 <div class="feature-item">Set pricing and availability</div>
                 <div class="feature-item">Track bookings and manage dates</div>
-                <div class="feature-item">Upload photos and itineraries</div>
+                <div class="feature-item">Upload photos and detailed itineraries</div>
                 {% elif user.role == 'RESELLER' %}
                 <div class="feature-item">Browse available tour packages</div>
                 <div class="feature-item">Book tours for your customers</div>
@@ -142,18 +207,19 @@
                 {% endif %}
             </div>
             
-            <div style="text-align: center; margin: 30px 0;">
+            <div class="button-container">
                 <a href="{{ FRONTEND_URL }}/dashboard" class="button">Go to Dashboard</a>
             </div>
             
-            <p>If you have any questions or need assistance, our support team is here to help!</p>
+            <div class="message" style="margin-top: 32px;">
+                If you have any questions or need assistance, our support team is here to help. We're excited to see what you'll accomplish with DCNetwork!
+            </div>
         </div>
         
         <div class="footer">
-            <p>Thank you for choosing Travel Marketplace!</p>
-            <p>&copy; {% now "Y" %} Travel Marketplace. All rights reserved.</p>
+            <div class="footer-text">Thank you for choosing DCNetwork!</div>
+            <div class="footer-brand">&copy; {% now "Y" %} DCNetwork. All rights reserved.</div>
         </div>
     </div>
 </body>
 </html>
-
