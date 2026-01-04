@@ -10,8 +10,7 @@ NC='\033[0m' # No Color
 
 # Get script directory
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-APP_DIR="${APP_DIR:-/opt/travel-marketplace-backend}"
+APP_DIR="$(dirname "$SCRIPT_DIR")"
 
 DOMAIN="api.goholiday.id"
 EMAIL="${SSL_EMAIL:-admin@goholiday.id}"
@@ -158,19 +157,26 @@ chmod 644 "$APP_DIR/nginx/ssl/$DOMAIN/chain.pem"
 echo -e "${GREEN}Setting up certificate auto-renewal...${NC}"
 RENEWAL_HOOK="/etc/letsencrypt/renewal-hooks/deploy/travel-api-nginx.sh"
 mkdir -p "$(dirname "$RENEWAL_HOOK")"
-cat > "$RENEWAL_HOOK" << 'EOF'
+cat > "$RENEWAL_HOOK" << EOF
 #!/bin/bash
 # Copy renewed certificates
 DOMAIN="api.goholiday.id"
-APP_DIR="/opt/travel-marketplace-backend"
-CERT_PATH="/etc/letsencrypt/live/$DOMAIN"
+# Get the app directory dynamically
+if [ -f "/opt/travel-marketplace-backend/docker-compose.prod.yml" ]; then
+    APP_DIR="/opt/travel-marketplace-backend"
+elif [ -f "\$HOME/travel-marketplace-backend/docker-compose.prod.yml" ]; then
+    APP_DIR="\$HOME/travel-marketplace-backend"
+else
+    APP_DIR="$APP_DIR"
+fi
+CERT_PATH="/etc/letsencrypt/live/\$DOMAIN"
 
-cp "$CERT_PATH/fullchain.pem" "$APP_DIR/nginx/ssl/$DOMAIN/fullchain.pem"
-cp "$CERT_PATH/privkey.pem" "$APP_DIR/nginx/ssl/$DOMAIN/privkey.pem"
-cp "$CERT_PATH/chain.pem" "$APP_DIR/nginx/ssl/$DOMAIN/chain.pem"
+cp "\$CERT_PATH/fullchain.pem" "\$APP_DIR/nginx/ssl/\$DOMAIN/fullchain.pem"
+cp "\$CERT_PATH/privkey.pem" "\$APP_DIR/nginx/ssl/\$DOMAIN/privkey.pem"
+cp "\$CERT_PATH/chain.pem" "\$APP_DIR/nginx/ssl/\$DOMAIN/chain.pem"
 
 # Reload nginx
-docker compose -f "$APP_DIR/docker-compose.prod.yml" restart nginx || true
+docker compose -f "\$APP_DIR/docker-compose.prod.yml" restart nginx || true
 EOF
 
 chmod +x "$RENEWAL_HOOK"
