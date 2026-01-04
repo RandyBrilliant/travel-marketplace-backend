@@ -12,11 +12,15 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-APP_DIR="/opt/travel-marketplace-backend"
+# Get current directory (where the script is run from)
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+APP_DIR="$(dirname "$SCRIPT_DIR")"
 
 echo -e "${BLUE}=========================================="
 echo "Travel Marketplace - Fresh Deployment"
 echo "==========================================${NC}"
+echo ""
+echo -e "${BLUE}Working directory: $APP_DIR${NC}"
 echo ""
 
 # Check if running as root

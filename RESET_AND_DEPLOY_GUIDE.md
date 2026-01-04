@@ -1,14 +1,22 @@
 # Complete Reset and Fresh Deployment Guide
 
-This guide will help you completely reset Docker and do a fresh deployment.
+This guide will help you completely reset Docker and do a fresh deployment from **any directory**.
+
+## Your Setup
+
+You're running from: `~/travel-marketplace-backend` (or wherever your folder is)  
+NOT from `/opt/travel-marketplace-backend`
+
+The scripts will automatically detect your current directory! ✅
 
 ## Step 1: Complete Reset (Ubuntu Server)
 
 SSH into your server and run:
 
 ```bash
-# Go to the app directory
-cd /opt/travel-marketplace-backend
+# Go to YOUR app directory (wherever it is)
+cd ~/travel-marketplace-backend
+# OR wherever you have the project
 
 # Make the reset script executable
 chmod +x deploy/complete-reset.sh
@@ -23,25 +31,21 @@ sudo ./deploy/complete-reset.sh
 - Cleans up Docker system
 - Preserves your `.env` file and backups
 
-## Step 2: Update Your Code (Local Machine)
+## Step 2: Update Your Code
 
-On your local machine, pull the latest fixes:
+Pull the latest fixes with all the configuration changes:
 
 ```bash
-cd travel-marketplace-backend
+cd ~/travel-marketplace-backend  # Or your directory
 
 # Make sure you have the latest code
 git pull
 ```
 
-Or if you're working locally, just make sure the fixed files are in place.
-
 ## Step 3: Prepare .env File
 
-On the server, check your `.env` file:
-
 ```bash
-cd /opt/travel-marketplace-backend
+cd ~/travel-marketplace-backend  # Or your directory
 
 # If .env doesn't exist, create it
 cp env.prod.example .env
@@ -91,46 +95,22 @@ FRONTEND_URL=https://goholiday.id
 python3 -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())'
 ```
 
-## Step 4: Upload Fixed Code to Server
-
-### Option A: Using Git (Recommended)
+## Step 4: Run Fresh Deployment
 
 ```bash
-# On server
-cd /opt/travel-marketplace-backend
-git pull origin main
+cd ~/travel-marketplace-backend  # Or your directory
 
-# Or if you haven't initialized git yet
-cd /opt
-rm -rf travel-marketplace-backend
-git clone <your-repo-url> travel-marketplace-backend
-cd travel-marketplace-backend
-```
-
-### Option B: Using SCP/SFTP
-
-From your local machine:
-
-```bash
-# Upload the entire backend folder
-scp -r travel-marketplace-backend/ user@your-server-ip:/opt/
-```
-
-## Step 5: Run Fresh Deployment
-
-On the server:
-
-```bash
-cd /opt/travel-marketplace-backend
-
-# Make sure the deploy script is executable
+# Make scripts executable
 chmod +x deploy/*.sh
 
-# Run the deployment
+# Option A: Use the automated script (easiest!)
+sudo ./deploy/fresh-start.sh
+
+# Option B: Manual deployment
 sudo ./deploy/deploy.sh
 ```
 
-**The deploy script will:**
+**The deploy script will automatically:**
 1. Copy files to deployment directory
 2. Create necessary directories
 3. Pull Docker images
@@ -140,18 +120,20 @@ sudo ./deploy/deploy.sh
 7. Collect static files
 8. Perform health checks
 
-## Step 6: Create Superuser
+## Step 5: Create Superuser
 
 ```bash
-cd /opt/travel-marketplace-backend
+cd ~/travel-marketplace-backend  # Or your directory
 
 # Create admin user
 docker compose -f docker-compose.prod.yml exec api python manage.py createsuperuser
 ```
 
-## Step 7: Verify Everything Works
+## Step 6: Verify Everything Works
 
 ```bash
+cd ~/travel-marketplace-backend  # Or your directory
+
 # Check all containers are running
 docker compose -f docker-compose.prod.yml ps
 
@@ -163,7 +145,7 @@ curl https://api.goholiday.id/health/
 docker compose -f docker-compose.prod.yml logs -f
 ```
 
-## Step 8: Test in Browser
+## Step 7: Test in Browser
 
 Open your browser and go to:
 - `https://api.goholiday.id/health/` - Should return JSON health status
@@ -179,18 +161,18 @@ docker compose -f docker-compose.prod.yml logs nginx
 
 # Most common issue: duplicate resolver
 # The fixed config should have only ONE resolver directive
-grep -n "resolver" /opt/travel-marketplace-backend/nginx/api.goholiday.id.conf
+grep -n "resolver" nginx/api.goholiday.id.conf
 ```
 
 ### If you get "too many redirects":
 
 ```bash
 # Check your .env
-grep "SECURE_SSL_REDIRECT" /opt/travel-marketplace-backend/.env
+grep "SECURE_SSL_REDIRECT" .env
 
 # It should be: SECURE_SSL_REDIRECT=false
 # If not, fix it:
-sed -i 's/SECURE_SSL_REDIRECT=true/SECURE_SSL_REDIRECT=false/' /opt/travel-marketplace-backend/.env
+sed -i 's/SECURE_SSL_REDIRECT=true/SECURE_SSL_REDIRECT=false/' .env
 
 # Restart API
 docker compose -f docker-compose.prod.yml restart api
@@ -203,10 +185,9 @@ docker compose -f docker-compose.prod.yml restart api
 docker compose -f docker-compose.prod.yml logs celery
 
 # The fixed docker-compose.prod.yml has increased memory limits
-# Make sure you're using the updated version
 ```
 
-### Quick commands:
+### Quick commands (run from YOUR project directory):
 
 ```bash
 # View all logs
@@ -220,13 +201,33 @@ docker compose -f docker-compose.prod.yml ps
 
 # Restart everything
 docker compose -f docker-compose.prod.yml restart
+
+# Stop everything
+docker compose -f docker-compose.prod.yml down
+
+# Start everything
+docker compose -f docker-compose.prod.yml up -d
 ```
 
-## Files Fixed in This Reset
+## Files Fixed in This Update
 
 1. **nginx/api.goholiday.id.conf** - Fixed duplicate resolver directive
 2. **docker-compose.prod.yml** - Fixed nginx health check to use HTTP, increased celery memory
-3. **.env** - Set `SECURE_SSL_REDIRECT=false` to avoid redirect loop
+3. **deploy/complete-reset.sh** - Works from any directory
+4. **deploy/fresh-start.sh** - Works from any directory
+5. **deploy/deploy.sh** - Uses APP_DIR environment variable
+
+## Environment Variable for Custom Directory
+
+The deploy script uses `APP_DIR` environment variable. By default, it deploys to `/opt/travel-marketplace-backend`, but you can override it:
+
+```bash
+# If you want to deploy to a different directory
+export APP_DIR="/home/yourusername/travel-marketplace-backend"
+sudo -E ./deploy/deploy.sh
+```
+
+Or just run the scripts from your project directory - they'll auto-detect it!
 
 ## Common Issues Resolved
 
@@ -235,6 +236,6 @@ docker compose -f docker-compose.prod.yml restart
 ✅ Too many redirects error  
 ✅ Celery memory issues  
 ✅ SSL redirect loop  
+✅ Scripts work from any directory  
 
-Your deployment should now work perfectly!
-
+Your deployment should now work perfectly from any location! 🎉

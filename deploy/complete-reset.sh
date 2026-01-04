@@ -12,8 +12,12 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-APP_DIR="${APP_DIR:-/opt/travel-marketplace-backend}"
+# Get current directory (where the script is run from)
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+APP_DIR="$(dirname "$SCRIPT_DIR")"
 
+echo -e "${BLUE}Working directory: $APP_DIR${NC}"
+echo ""
 echo -e "${RED}=========================================="
 echo "WARNING: Complete Docker Reset"
 echo "==========================================${NC}"
@@ -36,8 +40,9 @@ if [ "$confirm" != "yes" ]; then
     exit 0
 fi
 
-cd "$APP_DIR" 2>/dev/null || {
-    echo -e "${YELLOW}App directory not found, continuing with global cleanup...${NC}"
+cd "$APP_DIR" || {
+    echo -e "${RED}Error: Cannot access $APP_DIR${NC}"
+    exit 1
 }
 
 echo ""
