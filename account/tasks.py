@@ -1,6 +1,7 @@
 """
 Email tasks for async email sending using Celery.
 """
+import logging
 from celery import shared_task
 from django.conf import settings
 from django.core.mail import send_mail
@@ -8,6 +9,8 @@ from django.template.loader import render_to_string
 from django.utils.html import strip_tags
 
 from account.models import CustomUser
+
+logger = logging.getLogger(__name__)
 
 
 @shared_task(bind=True, max_retries=3)
@@ -18,8 +21,24 @@ def send_email_verification(self, user_id):
     Args:
         user_id: ID of the user to send verification email to
     """
+    logger.info(f"Starting email verification task for user_id={user_id}")
+    
     try:
+        # Validate email configuration
+        if not settings.EMAIL_HOST_USER or not settings.EMAIL_HOST_PASSWORD:
+            error_msg = "Mailgun credentials not configured. EMAIL_HOST_USER or EMAIL_HOST_PASSWORD is missing."
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
+        if not settings.DEFAULT_FROM_EMAIL:
+            error_msg = "DEFAULT_FROM_EMAIL is not configured."
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
+        logger.info(f"Email config check passed. From: {settings.DEFAULT_FROM_EMAIL}, Host: {settings.EMAIL_HOST}")
+        
         user = CustomUser.objects.get(pk=user_id)
+        logger.info(f"Found user: {user.email}")
         
         # Generate verification token (you'll need to implement this)
         # For now, using a simple approach - you might want to use django-allauth or similar
@@ -31,6 +50,7 @@ def send_email_verification(self, user_id):
         uid = urlsafe_base64_encode(force_bytes(user.pk))
         
         verification_url = f"{settings.FRONTEND_URL}/verify-email/{uid}/{token}/"
+        logger.info(f"Generated verification URL for user {user.email}")
         
         subject = "Verify your email address"
         html_message = render_to_string('account/email_verification.html', {
@@ -39,6 +59,8 @@ def send_email_verification(self, user_id):
             'FRONTEND_URL': settings.FRONTEND_URL,
         })
         plain_message = strip_tags(html_message)
+        
+        logger.info(f"Attempting to send email to {user.email} via {settings.EMAIL_HOST}:{settings.EMAIL_PORT}")
         
         send_mail(
             subject=subject,
@@ -49,13 +71,25 @@ def send_email_verification(self, user_id):
             fail_silently=False,
         )
         
-        return f"Verification email sent to {user.email}"
+        success_msg = f"Verification email sent successfully to {user.email}"
+        logger.info(success_msg)
+        return success_msg
         
     except CustomUser.DoesNotExist:
-        return f"User with ID {user_id} does not exist"
+        error_msg = f"User with ID {user_id} does not exist"
+        logger.error(error_msg)
+        return error_msg
     except Exception as exc:
+        error_msg = f"Error sending verification email to user_id={user_id}: {str(exc)}"
+        logger.error(error_msg, exc_info=True)
+        
         # Retry the task with exponential backoff
-        raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+        if self.request.retries < self.max_retries:
+            logger.warning(f"Retrying email verification task (attempt {self.request.retries + 1}/{self.max_retries})")
+            raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+        else:
+            logger.error(f"Max retries reached for email verification task. Giving up.")
+            raise
 
 
 @shared_task(bind=True, max_retries=3)
@@ -66,8 +100,17 @@ def send_welcome_email(self, user_id):
     Args:
         user_id: ID of the user to send welcome email to
     """
+    logger.info(f"Starting welcome email task for user_id={user_id}")
+    
     try:
+        # Validate email configuration
+        if not settings.EMAIL_HOST_USER or not settings.EMAIL_HOST_PASSWORD:
+            error_msg = "Mailgun credentials not configured. EMAIL_HOST_USER or EMAIL_HOST_PASSWORD is missing."
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
         user = CustomUser.objects.get(pk=user_id)
+        logger.info(f"Found user: {user.email}")
         
         # Get profile name based on role
         profile_name = user.email
@@ -86,6 +129,8 @@ def send_welcome_email(self, user_id):
         })
         plain_message = strip_tags(html_message)
         
+        logger.info(f"Attempting to send welcome email to {user.email}")
+        
         send_mail(
             subject=subject,
             message=plain_message,
@@ -95,12 +140,24 @@ def send_welcome_email(self, user_id):
             fail_silently=False,
         )
         
-        return f"Welcome email sent to {user.email}"
+        success_msg = f"Welcome email sent successfully to {user.email}"
+        logger.info(success_msg)
+        return success_msg
         
     except CustomUser.DoesNotExist:
-        return f"User with ID {user_id} does not exist"
+        error_msg = f"User with ID {user_id} does not exist"
+        logger.error(error_msg)
+        return error_msg
     except Exception as exc:
-        raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+        error_msg = f"Error sending welcome email to user_id={user_id}: {str(exc)}"
+        logger.error(error_msg, exc_info=True)
+        
+        if self.request.retries < self.max_retries:
+            logger.warning(f"Retrying welcome email task (attempt {self.request.retries + 1}/{self.max_retries})")
+            raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+        else:
+            logger.error(f"Max retries reached for welcome email task. Giving up.")
+            raise
 
 
 @shared_task(bind=True, max_retries=3)
@@ -112,8 +169,17 @@ def send_password_reset_email(self, user_id, reset_token):
         user_id: ID of the user requesting password reset
         reset_token: Token for password reset (should be uidb64/token format)
     """
+    logger.info(f"Starting password reset email task for user_id={user_id}")
+    
     try:
+        # Validate email configuration
+        if not settings.EMAIL_HOST_USER or not settings.EMAIL_HOST_PASSWORD:
+            error_msg = "Mailgun credentials not configured. EMAIL_HOST_USER or EMAIL_HOST_PASSWORD is missing."
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
         user = CustomUser.objects.get(pk=user_id)
+        logger.info(f"Found user: {user.email}")
         
         # reset_token should already be in format: uidb64/token
         # If it's just a token, you'll need to encode the user ID
@@ -133,6 +199,8 @@ def send_password_reset_email(self, user_id, reset_token):
         })
         plain_message = strip_tags(html_message)
         
+        logger.info(f"Attempting to send password reset email to {user.email}")
+        
         send_mail(
             subject=subject,
             message=plain_message,
@@ -142,10 +210,22 @@ def send_password_reset_email(self, user_id, reset_token):
             fail_silently=False,
         )
         
-        return f"Password reset email sent to {user.email}"
+        success_msg = f"Password reset email sent successfully to {user.email}"
+        logger.info(success_msg)
+        return success_msg
         
     except CustomUser.DoesNotExist:
-        return f"User with ID {user_id} does not exist"
+        error_msg = f"User with ID {user_id} does not exist"
+        logger.error(error_msg)
+        return error_msg
     except Exception as exc:
-        raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+        error_msg = f"Error sending password reset email to user_id={user_id}: {str(exc)}"
+        logger.error(error_msg, exc_info=True)
+        
+        if self.request.retries < self.max_retries:
+            logger.warning(f"Retrying password reset email task (attempt {self.request.retries + 1}/{self.max_retries})")
+            raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+        else:
+            logger.error(f"Max retries reached for password reset email task. Giving up.")
+            raise
 
