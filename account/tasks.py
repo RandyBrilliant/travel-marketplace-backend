@@ -2,9 +2,10 @@
 Email tasks for async email sending using Celery.
 """
 import logging
+import socket
 from celery import shared_task
 from django.conf import settings
-from django.core.mail import send_mail
+from django.core.mail import send_mail, get_connection
 from django.template.loader import render_to_string
 from django.utils.html import strip_tags
 
@@ -62,18 +63,47 @@ def send_email_verification(self, user_id):
         
         logger.info(f"Attempting to send email to {user.email} via {settings.EMAIL_HOST}:{settings.EMAIL_PORT}")
         
-        send_mail(
-            subject=subject,
-            message=plain_message,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            html_message=html_message,
-            fail_silently=False,
-        )
-        
-        success_msg = f"Verification email sent successfully to {user.email}"
-        logger.info(success_msg)
-        return success_msg
+        # Set socket timeout to prevent hanging (Django will use this for SMTP connections)
+        timeout = getattr(settings, 'EMAIL_TIMEOUT', 30)
+        old_timeout = socket.getdefaulttimeout()
+        try:
+            socket.setdefaulttimeout(timeout)
+            logger.info(f"Set email connection timeout to {timeout} seconds")
+            
+            # Send the email with explicit connection using timeout
+            connection = get_connection(
+                host=settings.EMAIL_HOST,
+                port=settings.EMAIL_PORT,
+                username=settings.EMAIL_HOST_USER,
+                password=settings.EMAIL_HOST_PASSWORD,
+                use_tls=settings.EMAIL_USE_TLS,
+                timeout=timeout,
+            )
+            
+            logger.info("Attempting SMTP connection...")
+            send_mail(
+                subject=subject,
+                message=plain_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                html_message=html_message,
+                fail_silently=False,
+                connection=connection,
+            )
+            
+            success_msg = f"Verification email sent successfully to {user.email}"
+            logger.info(success_msg)
+            return success_msg
+        except socket.timeout:
+            error_msg = f"SMTP connection timeout after {timeout} seconds when sending to {user.email}"
+            logger.error(error_msg)
+            raise Exception(error_msg)
+        except socket.error as sock_err:
+            error_msg = f"SMTP socket error when sending to {user.email}: {str(sock_err)}"
+            logger.error(error_msg, exc_info=True)
+            raise Exception(error_msg)
+        finally:
+            socket.setdefaulttimeout(old_timeout)
         
     except CustomUser.DoesNotExist:
         error_msg = f"User with ID {user_id} does not exist"
@@ -129,20 +159,48 @@ def send_welcome_email(self, user_id):
         })
         plain_message = strip_tags(html_message)
         
-        logger.info(f"Attempting to send welcome email to {user.email}")
+        logger.info(f"Attempting to send welcome email to {user.email} via {settings.EMAIL_HOST}:{settings.EMAIL_PORT}")
         
-        send_mail(
-            subject=subject,
-            message=plain_message,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            html_message=html_message,
-            fail_silently=False,
-        )
-        
-        success_msg = f"Welcome email sent successfully to {user.email}"
-        logger.info(success_msg)
-        return success_msg
+        # Set socket timeout to prevent hanging
+        timeout = getattr(settings, 'EMAIL_TIMEOUT', 30)
+        old_timeout = socket.getdefaulttimeout()
+        try:
+            socket.setdefaulttimeout(timeout)
+            logger.info(f"Set email connection timeout to {timeout} seconds")
+            
+            connection = get_connection(
+                host=settings.EMAIL_HOST,
+                port=settings.EMAIL_PORT,
+                username=settings.EMAIL_HOST_USER,
+                password=settings.EMAIL_HOST_PASSWORD,
+                use_tls=settings.EMAIL_USE_TLS,
+                timeout=timeout,
+            )
+            
+            logger.info("Attempting SMTP connection...")
+            send_mail(
+                subject=subject,
+                message=plain_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                html_message=html_message,
+                fail_silently=False,
+                connection=connection,
+            )
+            
+            success_msg = f"Welcome email sent successfully to {user.email}"
+            logger.info(success_msg)
+            return success_msg
+        except socket.timeout:
+            error_msg = f"SMTP connection timeout after {timeout} seconds when sending to {user.email}"
+            logger.error(error_msg)
+            raise Exception(error_msg)
+        except socket.error as sock_err:
+            error_msg = f"SMTP socket error when sending to {user.email}: {str(sock_err)}"
+            logger.error(error_msg, exc_info=True)
+            raise Exception(error_msg)
+        finally:
+            socket.setdefaulttimeout(old_timeout)
         
     except CustomUser.DoesNotExist:
         error_msg = f"User with ID {user_id} does not exist"
@@ -199,20 +257,48 @@ def send_password_reset_email(self, user_id, reset_token):
         })
         plain_message = strip_tags(html_message)
         
-        logger.info(f"Attempting to send password reset email to {user.email}")
+        logger.info(f"Attempting to send password reset email to {user.email} via {settings.EMAIL_HOST}:{settings.EMAIL_PORT}")
         
-        send_mail(
-            subject=subject,
-            message=plain_message,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            html_message=html_message,
-            fail_silently=False,
-        )
-        
-        success_msg = f"Password reset email sent successfully to {user.email}"
-        logger.info(success_msg)
-        return success_msg
+        # Set socket timeout to prevent hanging
+        timeout = getattr(settings, 'EMAIL_TIMEOUT', 30)
+        old_timeout = socket.getdefaulttimeout()
+        try:
+            socket.setdefaulttimeout(timeout)
+            logger.info(f"Set email connection timeout to {timeout} seconds")
+            
+            connection = get_connection(
+                host=settings.EMAIL_HOST,
+                port=settings.EMAIL_PORT,
+                username=settings.EMAIL_HOST_USER,
+                password=settings.EMAIL_HOST_PASSWORD,
+                use_tls=settings.EMAIL_USE_TLS,
+                timeout=timeout,
+            )
+            
+            logger.info("Attempting SMTP connection...")
+            send_mail(
+                subject=subject,
+                message=plain_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                html_message=html_message,
+                fail_silently=False,
+                connection=connection,
+            )
+            
+            success_msg = f"Password reset email sent successfully to {user.email}"
+            logger.info(success_msg)
+            return success_msg
+        except socket.timeout:
+            error_msg = f"SMTP connection timeout after {timeout} seconds when sending to {user.email}"
+            logger.error(error_msg)
+            raise Exception(error_msg)
+        except socket.error as sock_err:
+            error_msg = f"SMTP socket error when sending to {user.email}: {str(sock_err)}"
+            logger.error(error_msg, exc_info=True)
+            raise Exception(error_msg)
+        finally:
+            socket.setdefaulttimeout(old_timeout)
         
     except CustomUser.DoesNotExist:
         error_msg = f"User with ID {user_id} does not exist"
