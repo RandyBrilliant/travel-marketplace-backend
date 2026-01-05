@@ -378,6 +378,7 @@ class LogoutView(APIView):
     def post(self, request):
         """Logout user by clearing authentication cookies."""
         from rest_framework_simplejwt.tokens import RefreshToken
+        from django.http import JsonResponse
         import logging
         
         logger = logging.getLogger(__name__)
@@ -393,80 +394,17 @@ class LogoutView(APIView):
                 # If blacklisting fails, continue with logout anyway
                 logger.warning(f"Failed to blacklist token: {e}")
         
-        # Create response
-        response = Response(
-            {'detail': 'Successfully logged out.'},
-            status=status.HTTP_200_OK
-        )
+        # Use Django's JsonResponse for better cookie handling
+        response = JsonResponse({'detail': 'Successfully logged out.'})
         
-        # Cookie settings - must match EXACTLY how they were set during login
-        is_secure = not settings.DEBUG
-        cookie_domain = None if settings.DEBUG else None
+        # Use Django's delete_cookie - this is the most reliable way
+        # It sets the cookie to empty string with max_age=0 and expires in the past
+        response.delete_cookie('access_token', path='/')
+        response.delete_cookie('refresh_token', path='/')
+        response.delete_cookie('csrftoken', path='/')
+        response.delete_cookie('sessionid', path='/')
         
-        # Clear access_token cookie
-        # For proper deletion, all parameters must match how the cookie was set
-        response.delete_cookie(
-            'access_token',
-            path='/',
-            domain=cookie_domain,
-            samesite='Lax',
-        )
-        
-        # Clear refresh_token cookie
-        response.delete_cookie(
-            'refresh_token',
-            path='/',
-            domain=cookie_domain,
-            samesite='Lax',
-        )
-        
-        # Clear csrftoken cookie (set by Django CSRF middleware)
-        response.delete_cookie(
-            'csrftoken',
-            path='/',
-            domain=cookie_domain,
-            samesite='Lax',
-        )
-        
-        # Also set cookies to empty with max_age=0 as a fallback
-        # This ensures deletion even if delete_cookie parameters don't match exactly
-        response.set_cookie(
-            'access_token',
-            value='',
-            max_age=0,
-            expires='Thu, 01 Jan 1970 00:00:00 GMT',
-            path='/',
-            domain=cookie_domain,
-            httponly=True,
-            secure=is_secure,
-            samesite='Lax',
-        )
-        
-        response.set_cookie(
-            'refresh_token',
-            value='',
-            max_age=0,
-            expires='Thu, 01 Jan 1970 00:00:00 GMT',
-            path='/',
-            domain=cookie_domain,
-            httponly=True,
-            secure=is_secure,
-            samesite='Lax',
-        )
-        
-        # csrftoken is not httpOnly, so we can clear it normally
-        response.set_cookie(
-            'csrftoken',
-            value='',
-            max_age=0,
-            expires='Thu, 01 Jan 1970 00:00:00 GMT',
-            path='/',
-            domain=cookie_domain,
-            secure=is_secure,
-            samesite='Lax',
-        )
-        
-        logger.info(f"Logout cookies cleared (DEBUG={settings.DEBUG}, secure={is_secure}, domain={cookie_domain})")
+        logger.info(f"Logout: delete_cookie called for all auth cookies")
         
         return response
 

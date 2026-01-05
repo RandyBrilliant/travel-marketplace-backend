@@ -902,6 +902,12 @@ class AdminBookingViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAdminUser]
     queryset = Booking.objects.all()
     
+    def get_queryset(self):
+        """Optimize queryset by prefetching related objects."""
+        return Booking.objects.select_related(
+            "reseller", "reseller__user", "tour_date", "tour_date__package", "payment"
+        ).prefetch_related("seat_slots")
+    
     @action(detail=False, methods=["get"], url_path="dashboard-stats")
     def dashboard_stats(self, request):
         """

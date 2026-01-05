@@ -55,30 +55,26 @@ class CustomTokenObtainPairView(TokenObtainPairView):
         max_age_access = int(settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME'].total_seconds())
         max_age_refresh = int(settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME'].total_seconds())
         
-        # Get domain from CORS settings for cookie domain
-        # In development, don't set domain to allow localhost/127.0.0.1
-        cookie_domain = None if settings.DEBUG else None  # Let browser decide in dev
-        
+        # Don't set domain - let the browser determine it based on the request
+        # This works for both localhost (dev) and production domains
         response.set_cookie(
-            'access_token',
-            access_token,
+            key='access_token',
+            value=access_token,
             max_age=max_age_access,
             httponly=True,
             secure=is_secure,
             samesite='Lax',
             path='/',
-            domain=cookie_domain,
         )
         
         response.set_cookie(
-            'refresh_token',
-            refresh_token,
+            key='refresh_token',
+            value=refresh_token,
             max_age=max_age_refresh,
             httponly=True,
             secure=is_secure,
             samesite='Lax',
             path='/',
-            domain=cookie_domain,
         )
         
         return response
@@ -125,28 +121,25 @@ class CustomTokenRefreshView(TokenRefreshView):
         max_age_access = int(settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME'].total_seconds())
         max_age_refresh = int(settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME'].total_seconds())
         
-        cookie_domain = None if settings.DEBUG else None
-        
+        # Don't set domain - let the browser determine it based on the request
         response.set_cookie(
-            'access_token',
-            access_token,
+            key='access_token',
+            value=access_token,
             max_age=max_age_access,
             httponly=True,
             secure=is_secure,
             samesite='Lax',
             path='/',
-            domain=cookie_domain,
         )
         
         response.set_cookie(
-            'refresh_token',
-            new_refresh_token,
+            key='refresh_token',
+            value=new_refresh_token,
             max_age=max_age_refresh,
             httponly=True,
             secure=is_secure,
             samesite='Lax',
             path='/',
-            domain=cookie_domain,
         )
         
         return response

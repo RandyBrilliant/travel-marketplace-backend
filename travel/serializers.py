@@ -14,6 +14,7 @@ from .models import (
     ResellerGroup,
     Booking,
     BookingStatus,
+    SeatSlot,
     SeatSlotStatus,
 )
 from account.models import ResellerProfile, SupplierProfile
@@ -570,6 +571,39 @@ class BookingListSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at", "updated_at", "seats_booked", "total_amount"]
 
 
+class SeatSlotSerializer(serializers.ModelSerializer):
+    """Serializer for seat slot details."""
+    
+    class Meta:
+        model = SeatSlot
+        fields = [
+            "id",
+            "seat_number",
+            "status",
+            "passenger_name",
+            "passenger_email",
+            "passenger_phone",
+            "passenger_date_of_birth",
+            "passenger_gender",
+            "passenger_nationality",
+            "passport_number",
+            "passport_issue_date",
+            "passport_expiry_date",
+            "passport_issue_country",
+            "visa_required",
+            "visa_number",
+            "visa_issue_date",
+            "visa_expiry_date",
+            "visa_type",
+            "special_requests",
+            "emergency_contact_name",
+            "emergency_contact_phone",
+        ]
+        read_only_fields = [
+            "id",
+        ]
+
+
 class BookingSerializer(serializers.ModelSerializer):
     """Detailed serializer for booking detail view."""
     
@@ -582,6 +616,7 @@ class BookingSerializer(serializers.ModelSerializer):
     seats_booked = serializers.IntegerField(read_only=True)
     total_amount = serializers.IntegerField(read_only=True)
     subtotal = serializers.IntegerField(read_only=True)
+    seat_slots = SeatSlotSerializer(many=True, read_only=True)
     
     class Meta:
         model = Booking
@@ -604,6 +639,7 @@ class BookingSerializer(serializers.ModelSerializer):
             "subtotal",
             "total_amount",
             "notes",
+            "seat_slots",
             "created_at",
             "updated_at",
         ]
