@@ -1,5 +1,6 @@
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.conf import settings
+import os
 
 from account.models import UserRole
 
@@ -77,9 +78,10 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             # Fallback if sites framework not installed or other error
             if settings.DEBUG:
                 return f"http://localhost:8000{relative_url}"
-            # Production fallback - return relative URL or use a default domain
-            # You can set a default domain in settings if needed
-            default_domain = getattr(settings, 'DEFAULT_DOMAIN', 'localhost:8000')
+            # Production fallback - use API domain from settings or environment
+            # Default to api.goholiday.id with HTTPS in production
+            default_domain = getattr(settings, 'API_DOMAIN', None) or os.environ.get('API_DOMAIN', 'api.goholiday.id')
+            # Always use HTTPS in production (when not DEBUG)
             protocol = 'https' if not settings.DEBUG else 'http'
             return f"{protocol}://{default_domain}{relative_url}"
 

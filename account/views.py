@@ -341,17 +341,17 @@ class CurrentUserView(APIView):
                 profile = user.supplier_profile
                 full_name = profile.company_name
                 if profile.photo:
-                    photo_url = profile.photo.url
+                    photo_url = request.build_absolute_uri(profile.photo.url) if request else profile.photo.url
             elif user.role == UserRole.RESELLER and hasattr(user, "reseller_profile"):
                 profile = user.reseller_profile
                 full_name = profile.full_name
                 if profile.photo:
-                    photo_url = profile.photo.url
+                    photo_url = request.build_absolute_uri(profile.photo.url) if request else profile.photo.url
             elif user.role == UserRole.STAFF and hasattr(user, "staff_profile"):
                 profile = user.staff_profile
                 full_name = profile.full_name
                 if profile.photo:
-                    photo_url = profile.photo.url
+                    photo_url = request.build_absolute_uri(profile.photo.url) if request else profile.photo.url
         except Exception:
             pass
         

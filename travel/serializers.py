@@ -1,5 +1,7 @@
 from rest_framework import serializers
 from django.utils.text import slugify
+from django.conf import settings
+import os
 from .models import (
     TourPackage,
     TourDate,
@@ -17,6 +19,31 @@ from .models import (
 from account.models import ResellerProfile, SupplierProfile
 
 
+def build_absolute_image_url(relative_url, request=None):
+    """
+    Build absolute HTTPS URL for images.
+    Uses request if available, otherwise falls back to production domain.
+    """
+    if not relative_url:
+        return None
+    
+    # If already absolute, return as-is
+    if relative_url.startswith('http'):
+        return relative_url
+    
+    # Use request if available (most reliable, respects X-Forwarded-Proto)
+    if request:
+        return request.build_absolute_uri(relative_url)
+    
+    # Fallback for production (when no request available, e.g., in tokens)
+    if settings.DEBUG:
+        return f"http://localhost:8000{relative_url}"
+    
+    # Production: always use HTTPS
+    default_domain = getattr(settings, 'API_DOMAIN', None) or os.environ.get('API_DOMAIN', 'api.goholiday.id')
+    return f"https://{default_domain}{relative_url}"
+
+
 class ItineraryItemSerializer(serializers.ModelSerializer):
     """Serializer for itinerary items (day-by-day itinerary)."""
     
@@ -29,10 +56,19 @@ class ItineraryItemSerializer(serializers.ModelSerializer):
 class TourImageSerializer(serializers.ModelSerializer):
     """Serializer for tour gallery images."""
     
+    image = serializers.SerializerMethodField()
+    
     class Meta:
         model = TourImage
         fields = ["id", "image", "caption", "order", "is_primary", "created_at"]
         read_only_fields = ["id", "created_at"]
+    
+    def get_image(self, obj):
+        """Return absolute URL for image."""
+        if obj.image:
+            request = self.context.get("request")
+            return build_absolute_image_url(obj.image.url, request)
+        return None
 
 
 class TourDateSerializer(serializers.ModelSerializer):
@@ -189,9 +225,7 @@ class TourPackageListSerializer(serializers.ModelSerializer):
         """Return absolute URL for main image if exists."""
         if obj.main_image:
             request = self.context.get("request")
-            if request:
-                return request.build_absolute_uri(obj.main_image.url)
-            return obj.main_image.url
+            return build_absolute_image_url(obj.main_image.url, request)
         return None
 
 
@@ -256,9 +290,7 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
         """Return absolute URL for main image if exists."""
         if obj.main_image:
             request = self.context.get("request")
-            if request:
-                return request.build_absolute_uri(obj.main_image.url)
-            return obj.main_image.url
+            return build_absolute_image_url(obj.main_image.url, request)
         return None
     
     def get_dates(self, obj):
