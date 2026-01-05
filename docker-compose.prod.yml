@@ -17,7 +17,7 @@ services:
     networks:
       - dcnetwork-network
     healthcheck:
-      test: ["CMD-SHELL", "pgrep nginx || exit 1"]
+      test: ["CMD-SHELL", "ps aux | grep '[n]ginx: master' || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -172,7 +172,7 @@ services:
     networks:
       - dcnetwork-network
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -f 'celery.*beat' || exit 1"]
+      test: ["CMD-SHELL", "ps aux | grep '[c]elery.*beat' || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
