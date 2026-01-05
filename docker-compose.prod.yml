@@ -17,17 +17,27 @@ services:
     networks:
       - dcnetwork-network
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health/"]
+      test: ["CMD-SHELL", "pgrep nginx || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 50M
+        reservations:
+          cpus: '0.05'
+          memory: 20M
 
   api:
     build:
       context: .
       dockerfile: Dockerfile.prod
     container_name: dcnetwork-api-backend
-    command: gunicorn backend.wsgi:application --bind 0.0.0.0:8000 --workers 2 --threads 2 --timeout 120 --access-logfile - --error-logfile - --log-level info
+    # Optimized for 2GB RAM: 1 worker instead of 2
+    command: gunicorn backend.wsgi:application --bind 0.0.0.0:8000 --workers 1 --threads 2 --timeout 120 --access-logfile - --error-logfile - --log-level info
     env_file:
       - .env
     volumes:
@@ -50,11 +60,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 256M
+          cpus: '0.4'
+          memory: 200M
         reservations:
           cpus: '0.2'
-          memory: 128M
+          memory: 100M
 
   db:
     image: postgres:15-alpine
@@ -78,7 +88,7 @@ services:
       resources:
         limits:
           cpus: '0.3'
-          memory: 256M
+          memory: 200M
         reservations:
           cpus: '0.1'
           memory: 64M
@@ -86,7 +96,8 @@ services:
   redis:
     image: redis:7-alpine
     container_name: dcnetwork-api-redis
-    command: redis-server --appendonly yes --maxmemory 100mb --maxmemory-policy allkeys-lru
+    # Optimized for 2GB RAM: 80MB max instead of 100MB
+    command: redis-server --appendonly yes --maxmemory 80mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
     restart: unless-stopped
@@ -101,7 +112,7 @@ services:
       resources:
         limits:
           cpus: '0.15'
-          memory: 128M
+          memory: 100M
         reservations:
           cpus: '0.05'
           memory: 32M
@@ -111,7 +122,8 @@ services:
       context: .
       dockerfile: Dockerfile.prod
     container_name: travel-api-celery
-    command: celery -A backend worker --loglevel=info --concurrency=2 --max-tasks-per-child=1000
+    # Optimized for 2GB RAM: 1 concurrency instead of 2
+    command: celery -A backend worker --loglevel=info --concurrency=1 --max-tasks-per-child=1000
     env_file:
       - .env
     volumes:
@@ -134,11 +146,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 256M
+          cpus: '0.4'
+          memory: 200M
         reservations:
-          cpus: '0.2'
-          memory: 128M
+          cpus: '0.15'
+          memory: 100M
 
   celery-beat:
     build:
@@ -159,14 +171,20 @@ services:
     restart: unless-stopped
     networks:
       - dcnetwork-network
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'celery.*beat' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     deploy:
       resources:
         limits:
-          cpus: '0.1'
-          memory: 64M
+          cpus: '0.15'
+          memory: 100M
         reservations:
           cpus: '0.05'
-          memory: 32M
+          memory: 50M
 
 volumes:
   postgres_data:

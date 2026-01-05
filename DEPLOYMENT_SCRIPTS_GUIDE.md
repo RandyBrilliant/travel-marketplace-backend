@@ -4,6 +4,33 @@ This guide explains when to use each deployment script.
 
 ## 📋 Available Scripts
 
+### 0. `deploy/fix-2gb-memory.sh` - 2GB RAM Optimization ⚠️
+
+**When to use:**
+- Running on a 2GB RAM server (DigitalOcean Basic droplet)
+- Containers being killed with OOM errors (exit code 137)
+- Celery-beat keeps restarting
+
+**What it does:**
+- Fixes Redis memory overcommit warning
+- Installs memory-optimized docker-compose configuration
+- Reduces workers and memory limits
+- Total memory: 980MB → 850MB
+
+**Usage:**
+```bash
+cd ~/travel-marketplace-backend
+sudo ./deploy/fix-2gb-memory.sh
+```
+
+**Time:** ~2-3 minutes  
+**Downtime:** ~1 minute  
+**Data loss:** None ✅
+
+See [2GB-RAM-GUIDE.md](deploy/2GB-RAM-GUIDE.md) for details.
+
+---
+
 ### 1. `deploy/update.sh` ⭐ **USE THIS FOR REGULAR UPDATES**
 
 **When to use:**
