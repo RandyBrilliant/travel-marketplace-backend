@@ -38,6 +38,7 @@ CSRF_TRUSTED_ORIGINS = get_env_list("CSRF_TRUSTED_ORIGINS")
 
 INSTALLED_APPS = [
     "corsheaders",
+    'django.contrib.admin',  # Django admin interface
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',

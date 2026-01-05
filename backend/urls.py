@@ -1,9 +1,13 @@
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from django.contrib import admin
 from rest_framework.routers import DefaultRouter
 from account.token_views import CustomTokenRefreshView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
+
+# Import admin configuration to customize admin site
+import backend.admin_config  # noqa
 
 from backend.health import health_check
 from account.token_views import CustomTokenObtainPairView
@@ -123,6 +127,8 @@ api_v1_patterns = [
 ]
 
 urlpatterns = [
+    # Django Admin
+    path("admin/", admin.site.urls),
     path("health/", health_check, name="health"),
     # API Documentation
     *api_docs_patterns,

@@ -1,9 +1,11 @@
 from django.contrib import admin
+from django.utils.html import format_html
 from .models import (
     TourPackage,
     TourDate,
     TourImage,
     ItineraryItem,
+    SeatSlot,
     Booking,
     Payment,
     ResellerCommission,
@@ -209,8 +211,128 @@ class PaymentAdmin(admin.ModelAdmin):
     amount_display.short_description = "Amount"
 
 
+@admin.register(TourImage)
+class TourImageAdmin(admin.ModelAdmin):
+    """Admin interface for TourImage."""
+    list_display = ["package", "image", "order", "is_primary", "created_at"]
+    list_display_links = ["package"]
+    list_filter = ["is_primary", "package__supplier", "created_at"]
+    search_fields = ["package__name", "package__city", "package__country"]
+    readonly_fields = ["image_preview", "created_at"]
+    ordering = ["package", "order"]
+    
+    fieldsets = (
+        ("Tour Information", {
+            "fields": ("package", "order", "is_primary")
+        }),
+        ("Image", {
+            "fields": ("image", "caption", "image_preview")
+        }),
+        ("Timestamps", {
+            "fields": ("created_at",),
+            "classes": ("collapse",)
+        }),
+    )
+    
+    def get_queryset(self, request):
+        """Optimize queryset with select_related."""
+        qs = super().get_queryset(request)
+        return qs.select_related("package", "package__supplier")
+    
+    def image_preview(self, obj):
+        """Display image preview in admin."""
+        if obj.image:
+            from django.utils.html import format_html
+            return format_html(
+                '<img src="{}" style="max-height: 200px; max-width: 200px;" />',
+                obj.image.url
+            )
+        return "No image"
+    image_preview.short_description = "Image Preview"
+
+
+@admin.register(ItineraryItem)
+class ItineraryItemAdmin(admin.ModelAdmin):
+    """Admin interface for ItineraryItem."""
+    list_display = ["package", "day_number", "title"]
+    list_display_links = ["package", "title"]
+    list_filter = ["day_number", "package__supplier"]
+    search_fields = ["package__name", "title", "description"]
+    ordering = ["package", "day_number"]
+    
+    fieldsets = (
+        ("Tour Information", {
+            "fields": ("package", "day_number")
+        }),
+        ("Itinerary Details", {
+            "fields": ("title", "description")
+        }),
+    )
+    
+    def get_queryset(self, request):
+        """Optimize queryset with select_related."""
+        qs = super().get_queryset(request)
+        return qs.select_related("package", "package__supplier")
+
+
+@admin.register(SeatSlot)
+class SeatSlotAdmin(admin.ModelAdmin):
+    """Admin interface for SeatSlot."""
+    list_display = ["booking", "tour_date", "passenger_name", "seat_number", "status", "created_at"]
+    list_display_links = ["booking", "passenger_name"]
+    list_filter = ["status", "tour_date__package", "created_at"]
+    search_fields = ["booking__customer_name", "passenger_name", "booking__customer_email"]
+    readonly_fields = ["created_at", "updated_at"]
+    date_hierarchy = "created_at"
+    
+    fieldsets = (
+        ("Booking Information", {
+            "fields": ("booking", "tour_date")
+        }),
+        ("Passenger Details", {
+            "fields": ("passenger_name", "seat_number", "status")
+        }),
+        ("Timestamps", {
+            "fields": ("created_at", "updated_at"),
+            "classes": ("collapse",)
+        }),
+    )
+    
+    def get_queryset(self, request):
+        """Optimize queryset with select_related."""
+        qs = super().get_queryset(request)
+        return qs.select_related("booking", "booking__reseller", "tour_date", "tour_date__package")
+
+
 @admin.register(ResellerCommission)
 class ResellerCommissionAdmin(admin.ModelAdmin):
-    list_display = ["reseller", "booking", "level", "amount"]
+    list_display = ["reseller", "booking", "level", "amount_display", "created_at"]
+    list_display_links = ["reseller", "booking"]
     list_filter = ["level", "created_at"]
-    search_fields = ["reseller__full_name"]
+    search_fields = ["reseller__full_name", "reseller__user__email", "booking__customer_name"]
+    readonly_fields = ["amount_display", "created_at", "updated_at"]
+    raw_id_fields = ["reseller", "booking"]
+    date_hierarchy = "created_at"
+    
+    fieldsets = (
+        ("Commission Information", {
+            "fields": ("reseller", "booking", "level")
+        }),
+        ("Amount", {
+            "fields": ("amount", "amount_display")
+        }),
+        ("Timestamps", {
+            "fields": ("created_at", "updated_at"),
+            "classes": ("collapse",)
+        }),
+    )
+    
+    def amount_display(self, obj):
+        """Display amount with currency formatting."""
+        return f"Rp {obj.amount:,}"
+    amount_display.short_description = "Amount"
+    
+    def get_queryset(self, request):
+        """Optimize queryset with select_related."""
+        qs = super().get_queryset(request)
+        return qs.select_related("reseller", "reseller__user", "booking", "booking__tour_date")

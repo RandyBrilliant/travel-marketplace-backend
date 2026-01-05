@@ -19,8 +19,17 @@ from django.utils.text import slugify
 from datetime import timedelta
 import random
 import string
+import requests
+from io import BytesIO
+from django.core.files.base import ContentFile
 
-from account.models import CustomUser, SupplierProfile, ResellerProfile, UserRole
+try:
+    from PIL import Image
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+
+from account.models import CustomUser, SupplierProfile, ResellerProfile, StaffProfile, UserRole
 from travel.models import (
     TourPackage, TourDate, TourImage, ItineraryItem, Booking, Payment,
     SeatSlot, SeatSlotStatus, BookingStatus, PaymentStatus,
@@ -84,8 +93,52 @@ class Command(BaseCommand):
         SupplierProfile.objects.all().delete()
         CustomUser.objects.filter(role__in=[UserRole.SUPPLIER, UserRole.RESELLER]).delete()
 
+    def _download_image(self, url, max_size=(800, 800)):
+        """Download an image from URL and return a Django ContentFile."""
+        try:
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            
+            if PIL_AVAILABLE:
+                # Open image with PIL for processing
+                img = Image.open(BytesIO(response.content))
+                
+                # Convert to RGB if necessary (handles RGBA, P, etc.)
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                
+                # Resize if too large
+                img.thumbnail(max_size, Image.Resampling.LANCZOS)
+                
+                # Save to BytesIO
+                img_io = BytesIO()
+                img.save(img_io, format='JPEG', quality=85)
+                img_io.seek(0)
+                
+                return ContentFile(img_io.read())
+            else:
+                # If PIL not available, just use the raw image (may be larger)
+                return ContentFile(response.content)
+        except Exception as e:
+            self.stdout.write(self.style.WARNING(f'Failed to download image from {url}: {e}'))
+            return None
+
     def _create_suppliers(self):
         """Create mock suppliers - all Indonesian tour companies."""
+        # Unsplash images for supplier profile photos (business/travel related)
+        supplier_photo_urls = [
+            'https://images.unsplash.com/photo-1556761175-5973dc0f32e7?w=400&h=400&fit=crop',  # Business team
+            'https://images.unsplash.com/photo-1552664730-d307ca884978?w=400&h=400&fit=crop',  # Travel agency
+            'https://images.unsplash.com/photo-1556761175-4b46a572b786?w=400&h=400&fit=crop',  # Office
+            'https://images.unsplash.com/photo-1556761175-b413da4baf72?w=400&h=400&fit=crop',  # Team meeting
+            'https://images.unsplash.com/photo-1552664730-d307ca884978?w=400&h=400&fit=crop',  # Travel
+            'https://images.unsplash.com/photo-1556761175-5973dc0f32e7?w=400&h=400&fit=crop',  # Business
+            'https://images.unsplash.com/photo-1552664730-d307ca884978?w=400&h=400&fit=crop',  # Agency
+            'https://images.unsplash.com/photo-1556761175-4b46a572b786?w=400&h=400&fit=crop',  # Office
+            'https://images.unsplash.com/photo-1556761175-b413da4baf72?w=400&h=400&fit=crop',  # Meeting
+            'https://images.unsplash.com/photo-1552664730-d307ca884978?w=400&h=400&fit=crop',  # Travel
+        ]
+        
         suppliers_data = [
             {
                 'email': 'bali.paradise@example.com',
@@ -160,7 +213,7 @@ class Command(BaseCommand):
         ]
         
         suppliers = []
-        for data in suppliers_data:
+        for idx, data in enumerate(suppliers_data):
             user = CustomUser.objects.create_user(
                 email=data['email'],
                 password='password123',
@@ -175,12 +228,39 @@ class Command(BaseCommand):
                 contact_phone=data['contact_phone'],
                 address=data['address'],
             )
+            
+            # Download and assign profile photo
+            if idx < len(supplier_photo_urls):
+                photo_file = self._download_image(supplier_photo_urls[idx])
+                if photo_file:
+                    supplier.photo.save(
+                        f'supplier_{supplier.id}.jpg',
+                        photo_file,
+                        save=True
+                    )
+            
             suppliers.append(supplier)
         
         return suppliers
 
     def _create_resellers(self):
         """Create mock resellers with MLM relationships - Indonesian names."""
+        # Unsplash images for reseller profile photos (portraits)
+        reseller_photo_urls = [
+            'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=400&fit=crop',  # Woman
+            'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=400&fit=crop',  # Man
+            'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=400&h=400&fit=crop',  # Woman
+            'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400&h=400&fit=crop',  # Man
+            'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400&h=400&fit=crop',  # Woman
+            'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400&h=400&fit=crop',  # Man
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&h=400&fit=crop',  # Woman
+            'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400&h=400&fit=crop',  # Man
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&h=400&fit=crop',  # Woman
+            'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=400&fit=crop',  # Man
+            'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=400&fit=crop',  # Woman
+            'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400&h=400&fit=crop',  # Man
+        ]
+        
         resellers_data = [
             {
                 'email': 'reseller1@example.com',
@@ -334,6 +414,17 @@ class Command(BaseCommand):
                 bank_account_name=data['bank_account_name'],
                 bank_account_number=data['bank_account_number'],
             )
+            
+            # Download and assign profile photo
+            if idx < len(reseller_photo_urls):
+                photo_file = self._download_image(reseller_photo_urls[idx])
+                if photo_file:
+                    reseller.photo.save(
+                        f'reseller_{reseller.id}.jpg',
+                        photo_file,
+                        save=True
+                    )
+            
             resellers.append(reseller)
         
         return resellers
@@ -857,37 +948,226 @@ class Command(BaseCommand):
             # TourDate automatically generates seat slots on save
 
     def _create_itinerary_items(self, tour, days):
-        """Create itinerary items for a tour package."""
-        itinerary_templates = {
-            3: [
-                {'day': 1, 'title': 'Arrival & Welcome', 'description': 'Airport pickup, hotel check-in, welcome dinner, and tour briefing.'},
-                {'day': 2, 'title': 'Full Day Tour', 'description': 'Visit main attractions, enjoy local experiences, and cultural activities.'},
-                {'day': 3, 'title': 'Departure', 'description': 'Final activities, souvenir shopping, and airport transfer.'},
-            ],
-            4: [
-                {'day': 1, 'title': 'Arrival & City Tour', 'description': 'Airport pickup, hotel check-in, and afternoon city tour.'},
-                {'day': 2, 'title': 'Main Attractions', 'description': 'Full day tour of major attractions and landmarks.'},
-                {'day': 3, 'title': 'Cultural Experience', 'description': 'Visit cultural sites, local markets, and traditional experiences.'},
-                {'day': 4, 'title': 'Departure', 'description': 'Free time, souvenir shopping, and airport transfer.'},
-            ],
-            5: [
-                {'day': 1, 'title': 'Arrival & Orientation', 'description': 'Airport pickup, hotel check-in, and welcome orientation.'},
-                {'day': 2, 'title': 'Day Trip Adventure', 'description': 'Full day trip to nearby attractions or natural wonders.'},
-                {'day': 3, 'title': 'City Exploration', 'description': 'Explore the city, visit museums, and enjoy local cuisine.'},
-                {'day': 4, 'title': 'Cultural Immersion', 'description': 'Deep dive into local culture, traditions, and experiences.'},
-                {'day': 5, 'title': 'Departure', 'description': 'Final activities, last-minute shopping, and airport transfer.'},
-            ],
-        }
+        """Create detailed itinerary items for a tour package based on tour name and highlights."""
+        # Get tour-specific itinerary based on tour name and highlights
+        tour_name_lower = tour.name.lower()
+        highlights = tour.highlights if hasattr(tour, 'highlights') and tour.highlights else []
         
-        template = itinerary_templates.get(days, itinerary_templates[3])
+        # Create detailed itinerary based on tour characteristics
+        if 'bali' in tour_name_lower:
+            if 'cultural' in tour_name_lower or 'culture' in tour_name_lower:
+                itinerary = [
+                    {'day': 1, 'title': 'Arrival in Bali & Ubud Orientation', 
+                     'description': 'Airport pickup from Ngurah Rai International Airport. Transfer to Ubud hotel with check-in. Welcome dinner at traditional Balinese restaurant. Evening tour briefing and introduction to Balinese culture.'},
+                    {'day': 2, 'title': 'Cultural Immersion Day', 
+                     'description': 'Early morning visit to Tegalalang Rice Terrace for sunrise views and photography. Visit Tirta Empul Temple for holy water purification ritual. Explore Ubud Monkey Forest and learn about Balinese Hinduism. Afternoon traditional Balinese dance performance. Evening free time to explore Ubud Market.'},
+                    {'day': 3, 'title': 'Departure', 
+                     'description': 'Morning breakfast at hotel. Last-minute souvenir shopping at Ubud Market. Check-out and transfer to Ngurah Rai International Airport for departure flight.'},
+                ]
+            elif 'beach' in tour_name_lower or 'island' in tour_name_lower:
+                itinerary = [
+                    {'day': 1, 'title': 'Arrival & Nusa Dua Check-in', 
+                     'description': 'Airport pickup and transfer to beachfront hotel in Nusa Dua. Hotel check-in and welcome briefing. Afternoon free time to relax on the beach. Evening dinner at hotel restaurant.'},
+                    {'day': 2, 'title': 'Nusa Penida Island Hopping', 
+                     'description': 'Early morning boat transfer to Nusa Penida Island. Visit Kelingking Beach (T-Rex viewpoint) and take photos. Explore Crystal Bay for snorkeling with colorful fish. Visit Angel\'s Billabong and Broken Beach. Snorkeling with Manta Rays at Manta Point (seasonal). Return to Nusa Dua in the evening.'},
+                    {'day': 3, 'title': 'Water Sports & Beach Activities', 
+                     'description': 'Morning water sports activities (jet ski, parasailing, banana boat). Afternoon visit to Uluwatu Temple for sunset views and Kecak dance performance. Traditional seafood dinner at Jimbaran Beach.'},
+                    {'day': 4, 'title': 'Departure', 
+                     'description': 'Morning breakfast and beach relaxation. Check-out from hotel. Transfer to Ngurah Rai International Airport for departure flight.'},
+                ]
+            elif 'muslim' in tour_name_lower:
+                itinerary = [
+                    {'day': 1, 'title': 'Arrival & Halal Welcome', 
+                     'description': 'Airport pickup from Ngurah Rai International Airport. Transfer to halal-certified hotel in Denpasar. Hotel check-in and welcome briefing. Evening halal dinner at certified restaurant. Prayer time arrangements.'},
+                    {'day': 2, 'title': 'Tanah Lot & Uluwatu Temple Tour', 
+                     'description': 'Morning visit to Tanah Lot Temple (sea temple) with halal lunch break. Afternoon visit to Uluwatu Temple for sunset views. Evening Kecak dance performance. Halal dinner at certified restaurant. Prayer facilities available throughout the day.'},
+                    {'day': 3, 'title': 'Cultural Sites & Halal Experiences', 
+                     'description': 'Visit Taman Ayun Temple and learn about Balinese architecture. Explore traditional markets with halal food options. Visit local halal-certified restaurants. Cultural show with traditional performances. Evening halal dinner.'},
+                    {'day': 4, 'title': 'Tegallalang & Traditional Villages', 
+                     'description': 'Morning visit to Tegalalang Rice Terrace. Explore traditional Balinese villages. Visit local halal-certified coffee plantation. Traditional Balinese dance workshop. Halal lunch and dinner.'},
+                    {'day': 5, 'title': 'Departure', 
+                     'description': 'Morning breakfast at hotel. Last-minute shopping at halal-certified souvenir shops. Check-out and transfer to Ngurah Rai International Airport. Prayer time arrangements before departure.'},
+                ]
+            else:
+                itinerary = self._get_generic_itinerary(days)
+        elif 'yogyakarta' in tour_name_lower or 'jogja' in tour_name_lower:
+            if 'solo' in tour_name_lower:
+                itinerary = [
+                    {'day': 1, 'title': 'Arrival & Yogyakarta City Tour', 
+                     'description': 'Airport pickup from Adisucipto International Airport. Transfer to hotel in Yogyakarta. Afternoon city tour: Visit Kraton Palace (Sultan\'s Palace) and learn about Javanese royal history. Explore Taman Sari (Water Castle). Evening walk along Malioboro Street for shopping and street food.'},
+                    {'day': 2, 'title': 'Borobudur & Prambanan Temples', 
+                     'description': 'Early morning departure to Borobudur Temple (world\'s largest Buddhist temple). Sunrise viewing and temple exploration. Visit Prambanan Temple (largest Hindu temple in Indonesia). Learn about ancient Javanese architecture and history. Traditional Javanese lunch. Return to Yogyakarta in the evening.'},
+                    {'day': 3, 'title': 'Solo City & Batik Workshop', 
+                     'description': 'Morning transfer to Solo (Surakarta). Visit Kraton Solo (Surakarta Palace). Participate in traditional batik making workshop. Explore traditional markets and local crafts. Traditional Javanese dinner with cultural performance.'},
+                    {'day': 4, 'title': 'Departure', 
+                     'description': 'Morning breakfast at hotel. Visit local batik showroom for souvenir shopping. Check-out and transfer to Adisucipto International Airport for departure flight.'},
+                ]
+            else:
+                itinerary = [
+                    {'day': 1, 'title': 'Arrival & Yogyakarta Orientation', 
+                     'description': 'Airport pickup from Adisucipto International Airport. Transfer to hotel in Yogyakarta city center. Hotel check-in and welcome briefing. Afternoon visit to Kraton Palace (Sultan\'s Palace). Evening walk along Malioboro Street for shopping and local cuisine.'},
+                    {'day': 2, 'title': 'Borobudur Sunrise & Prambanan', 
+                     'description': 'Early morning (4:00 AM) departure to Borobudur Temple for sunrise experience. Explore the world\'s largest Buddhist temple and learn about its history. Visit Prambanan Temple (largest Hindu temple in Indonesia). Traditional Javanese lunch. Return to Yogyakarta. Evening free time.'},
+                    {'day': 3, 'title': 'Departure', 
+                     'description': 'Morning breakfast at hotel. Visit Taman Sari (Water Castle) for final exploration. Last-minute souvenir shopping at Malioboro Street. Check-out and transfer to Adisucipto International Airport for departure flight.'},
+                ]
+        elif 'bromo' in tour_name_lower:
+            if 'ijen' in tour_name_lower:
+                itinerary = [
+                    {'day': 1, 'title': 'Arrival & Transfer to Probolinggo', 
+                     'description': 'Airport pickup from Juanda International Airport (Surabaya). Transfer to hotel in Probolinggo (approximately 3 hours). Hotel check-in and tour briefing. Early dinner and rest for early morning departure.'},
+                    {'day': 2, 'title': 'Mount Bromo Sunrise Adventure', 
+                     'description': 'Early morning (2:00 AM) departure by jeep to Mount Bromo area. Arrive at Penanjakan viewpoint for sunrise (around 5:00 AM). Witness spectacular sunrise over Mount Bromo and surrounding volcanoes. Cross the Sea of Sand to Mount Bromo crater. Climb to the crater rim and explore. Return to hotel for breakfast and rest. Afternoon transfer to Banyuwangi (approximately 6 hours). Hotel check-in in Banyuwangi.'},
+                    {'day': 3, 'title': 'Ijen Blue Fire Experience', 
+                     'description': 'Late night (11:00 PM) departure to Ijen Crater. Begin trek to Ijen Crater (approximately 2 hours). Witness the famous blue fire phenomenon (best viewed 2-4 AM). Watch sunrise from Ijen Crater rim. Explore sulfur mining area and learn about local miners. Return to hotel for breakfast and rest. Afternoon visit to local attractions or free time.'},
+                    {'day': 4, 'title': 'Departure', 
+                     'description': 'Morning breakfast at hotel. Check-out and transfer to Juanda International Airport (Surabaya) for departure flight.'},
+                ]
+            else:
+                itinerary = [
+                    {'day': 1, 'title': 'Arrival & Transfer to Bromo Area', 
+                     'description': 'Airport pickup from Juanda International Airport (Surabaya) or Probolinggo Station. Transfer to hotel near Mount Bromo (approximately 2-3 hours). Hotel check-in and tour briefing. Early dinner and rest for early morning adventure.'},
+                    {'day': 2, 'title': 'Mount Bromo Sunrise & Crater Exploration', 
+                     'description': 'Early morning (2:00 AM) departure by jeep to Penanjakan viewpoint. Arrive at viewpoint before sunrise (around 5:00 AM). Witness spectacular sunrise over Mount Bromo, Mount Batok, and Mount Semeru. Cross the Sea of Sand (Lautan Pasir) by jeep or on foot. Climb Mount Bromo stairs to reach the crater rim. Explore the active volcano crater and take photos. Visit Madakaripura Waterfall (optional, if time permits). Return to hotel for breakfast and rest. Check-out and transfer back to airport/station for departure.'},
+                ]
+        elif 'raja ampat' in tour_name_lower or 'diving' in tour_name_lower:
+            itinerary = [
+                {'day': 1, 'title': 'Arrival in Raja Ampat', 
+                 'description': 'Airport pickup from Domine Eduard Osok Airport (Sorong). Transfer to harbor and boat to Raja Ampat (approximately 2-3 hours). Arrive at accommodation (homestay or resort). Welcome briefing and diving/snorkeling equipment check. Evening dinner and rest.'},
+                {'day': 2, 'title': 'Diving & Snorkeling - Manta Ray Spotting', 
+                 'description': 'Early morning boat departure to Manta Sandy or Manta Ridge for manta ray spotting. Snorkeling or diving with manta rays (seasonal, best from October to April). Visit Arborek Island for village tour and cultural interaction. Afternoon snorkeling at nearby coral reefs. Return to accommodation in the evening.'},
+                {'day': 3, 'title': 'Island Hopping & Bird Watching', 
+                 'description': 'Morning boat trip to Wayag Islands for iconic viewpoint (weather permitting). Snorkeling at various dive sites with diverse marine life. Visit Pianemo Islands for stunning karst formations. Bird watching at local bird sanctuaries. Afternoon snorkeling at pristine coral reefs.'},
+                {'day': 4, 'title': 'Coral Reef Exploration', 
+                 'description': 'Full day diving/snorkeling at multiple sites. Explore diverse coral reef ecosystems (home to 75% of world\'s coral species). Encounter various marine species including colorful fish, turtles, and reef sharks. Visit local islands for beach relaxation. Evening return to accommodation.'},
+                {'day': 5, 'title': 'Departure', 
+                 'description': 'Morning breakfast at accommodation. Final snorkeling session or free time. Check-out and boat transfer back to Sorong. Transfer to Domine Eduard Osok Airport for departure flight.'},
+            ]
+        elif 'komodo' in tour_name_lower:
+            if 'rinca' in tour_name_lower:
+                itinerary = [
+                    {'day': 1, 'title': 'Arrival in Labuan Bajo', 
+                     'description': 'Airport pickup from Komodo Airport (Labuan Bajo). Transfer to hotel. Hotel check-in and welcome briefing. Evening sunset viewing at local viewpoint. Dinner at local restaurant.'},
+                    {'day': 2, 'title': 'Komodo Island & Pink Beach', 
+                     'description': 'Early morning boat departure to Komodo Island. Guided trek to see Komodo dragons in their natural habitat. Learn about Komodo dragon behavior and conservation. Visit Pink Beach for swimming and snorkeling. Lunch on the boat. Afternoon snorkeling at nearby sites. Return to Labuan Bajo in the evening.'},
+                    {'day': 3, 'title': 'Rinca Island & Padar Island', 
+                     'description': 'Morning boat trip to Rinca Island. Another opportunity to see Komodo dragons with different landscape. Visit Padar Island for iconic viewpoint and hiking. Panoramic views of three bays with different colored beaches. Snorkeling at Manta Point (if conditions permit). Return to Labuan Bajo.'},
+                    {'day': 4, 'title': 'Kanawa Island & Departure', 
+                     'description': 'Morning visit to Kanawa Island for final snorkeling session. Explore pristine coral reefs and marine life. Beach relaxation. Return to Labuan Bajo. Check-out from hotel. Transfer to Komodo Airport for departure flight.'},
+                ]
+            else:
+                itinerary = [
+                    {'day': 1, 'title': 'Arrival & Labuan Bajo Orientation', 
+                     'description': 'Airport pickup from Komodo Airport (Labuan Bajo). Transfer to hotel. Hotel check-in and welcome briefing. Evening sunset viewing at local viewpoint. Traditional dinner at local restaurant.'},
+                    {'day': 2, 'title': 'Komodo Island Adventure', 
+                     'description': 'Early morning boat departure to Komodo National Park. Arrive at Komodo Island and begin guided trek. See Komodo dragons in their natural habitat with experienced rangers. Learn about Komodo dragon behavior, diet, and conservation efforts. Visit Pink Beach for swimming and snorkeling in pink sand. Lunch on the boat. Afternoon snorkeling at nearby coral reefs. Return to Labuan Bajo in the evening.'},
+                    {'day': 3, 'title': 'Departure', 
+                     'description': 'Morning breakfast at hotel. Optional short boat trip to nearby snorkeling sites or free time. Check-out from hotel. Transfer to Komodo Airport for departure flight.'},
+                ]
+        elif 'lombok' in tour_name_lower:
+            itinerary = [
+                {'day': 1, 'title': 'Arrival & Senggigi Check-in', 
+                 'description': 'Airport pickup from Lombok International Airport. Transfer to beachfront hotel in Senggigi. Hotel check-in and welcome briefing. Evening beach walk and dinner at hotel restaurant.'},
+                {'day': 2, 'title': 'Gili Trawangan Island Hopping', 
+                 'description': 'Morning boat transfer to Gili Trawangan Island. Snorkeling with sea turtles at Turtle Point. Explore the island by bicycle or horse cart. Visit local restaurants and beach bars. Afternoon snorkeling at various coral reef sites. Return to Senggigi in the evening.'},
+                {'day': 3, 'title': 'Sendang Gile Waterfall & Sasak Village', 
+                 'description': 'Morning visit to Sendang Gile Waterfall in North Lombok. Trek through lush forest to reach the waterfall. Swimming in natural pools. Visit traditional Sasak village to learn about local culture and traditions. Traditional Sasak lunch. Return to hotel in the afternoon.'},
+                {'day': 4, 'title': 'Departure', 
+                 'description': 'Morning breakfast at hotel. Beach relaxation or optional activities. Check-out from hotel. Transfer to Lombok International Airport for departure flight.'},
+            ]
+        elif 'jakarta' in tour_name_lower:
+            itinerary = [
+                {'day': 1, 'title': 'Arrival & City Tour', 
+                 'description': 'Airport pickup from Soekarno-Hatta International Airport. Transfer to hotel in Jakarta city center. Hotel check-in and welcome briefing. Afternoon city tour: Visit National Monument (Monas) and learn about Indonesian history. Explore Old Batavia (Kota Tua) with colonial architecture. Visit Jakarta History Museum. Evening culinary tour at local food markets.'},
+                {'day': 2, 'title': 'Cultural & Religious Sites', 
+                 'description': 'Morning visit to Istiqlal Mosque (largest mosque in Southeast Asia). Visit Jakarta Cathedral nearby. Explore National Museum of Indonesia. Afternoon visit to Taman Mini Indonesia Indah (Miniature Park of Indonesia). Traditional Indonesian dinner with cultural show. Return to hotel.'},
+                {'day': 3, 'title': 'Departure', 
+                 'description': 'Morning breakfast at hotel. Last-minute shopping at modern malls or traditional markets. Check-out and transfer to Soekarno-Hatta International Airport for departure flight.'},
+            ]
+        elif 'bandung' in tour_name_lower:
+            itinerary = [
+                {'day': 1, 'title': 'Arrival & Bandung Orientation', 
+                 'description': 'Airport pickup from Husein Sastranegara Airport. Transfer to hotel in Bandung. Hotel check-in and welcome briefing. Afternoon visit to shopping outlets for factory outlets and local products. Evening dinner at local restaurant.'},
+                {'day': 2, 'title': 'Volcano & Hot Springs', 
+                 'description': 'Morning visit to Tangkuban Perahu Volcano. Explore the active crater and learn about volcanic activity. Visit Kawah Putih (White Crater) for stunning turquoise lake views. Afternoon visit to Ciater Hot Springs for relaxation. Traditional Sundanese lunch. Return to hotel in the evening.'},
+                {'day': 3, 'title': 'Tea Plantations & Departure', 
+                 'description': 'Morning visit to tea plantations in the highlands. Learn about tea production and processing. Enjoy tea tasting session. Scenic views of rolling tea fields. Traditional lunch. Check-out from hotel. Transfer to Husein Sastranegara Airport for departure flight.'},
+            ]
+        elif 'toba' in tour_name_lower:
+            itinerary = [
+                {'day': 1, 'title': 'Arrival & Lake Toba Orientation', 
+                 'description': 'Airport pickup from Kualanamu International Airport (Medan). Transfer to Parapat on Lake Toba (approximately 4 hours). Boat transfer to Samosir Island. Hotel check-in and welcome briefing. Evening dinner with traditional Batak music performance.'},
+                {'day': 2, 'title': 'Samosir Island Cultural Tour', 
+                 'description': 'Morning visit to traditional Batak houses (rumah adat). Learn about Batak culture, traditions, and architecture. Visit ancient stone chairs and megalithic sites. Traditional Batak dance performance. Visit local markets and handicraft centers. Traditional Batak lunch.'},
+                {'day': 3, 'title': 'Lake Activities & Sipiso-piso Waterfall', 
+                 'description': 'Morning boat trip on Lake Toba for scenic views. Visit Sipiso-piso Waterfall (one of Indonesia\'s highest waterfalls). Explore surrounding areas and take photos. Afternoon return to Samosir Island. Free time for relaxation or optional activities.'},
+                {'day': 4, 'title': 'Departure', 
+                 'description': 'Morning breakfast at hotel. Final cultural experiences or souvenir shopping. Boat transfer back to Parapat. Transfer to Kualanamu International Airport for departure flight.'},
+            ]
+        elif 'toraja' in tour_name_lower:
+            itinerary = [
+                {'day': 1, 'title': 'Arrival in Toraja', 
+                 'description': 'Airport pickup from Sultan Hasanuddin Airport (Makassar). Transfer to Rantepao, Toraja (approximately 8 hours by road). Hotel check-in and welcome briefing. Evening dinner and rest after long journey.'},
+                {'day': 2, 'title': 'Traditional Torajan Houses & Burial Sites', 
+                 'description': 'Morning visit to Kete Kesu Village to see traditional Torajan houses (tongkonan). Learn about Torajan architecture and cultural significance. Visit Lemo Burial Cliffs with hanging graves and tau-tau (wooden effigies). Explore Londa Cave burial site. Traditional Torajan lunch. Afternoon visit to traditional markets.'},
+                {'day': 3, 'title': 'Cultural Sites & Funeral Ceremonies', 
+                 'description': 'Visit Buntu Kalando (traditional house of Torajan nobility). Explore more burial sites and learn about Torajan funeral traditions. If timing permits, witness traditional funeral ceremony (sacred event, requires cultural sensitivity). Visit local handicraft centers. Traditional Torajan dinner with cultural performance.'},
+                {'day': 4, 'title': 'Departure', 
+                 'description': 'Morning breakfast at hotel. Final cultural experiences or souvenir shopping. Transfer back to Sultan Hasanuddin Airport (Makassar) for departure flight.'},
+            ]
+        else:
+            itinerary = self._get_generic_itinerary(days)
         
-        for item in template:
+        # Create itinerary items
+        for item in itinerary:
             ItineraryItem.objects.create(
                 package=tour,
                 day_number=item['day'],
                 title=item['title'],
                 description=item['description'],
             )
+    
+    def _get_generic_itinerary(self, days):
+        """Get generic itinerary template based on number of days."""
+        templates = {
+            2: [
+                {'day': 1, 'title': 'Arrival & Full Day Tour', 
+                 'description': 'Airport pickup, hotel check-in, and full day tour of main attractions. Enjoy local experiences and cultural activities. Evening dinner and rest.'},
+                {'day': 2, 'title': 'Departure', 
+                 'description': 'Morning breakfast and final activities. Souvenir shopping. Check-out and airport transfer for departure flight.'},
+            ],
+            3: [
+                {'day': 1, 'title': 'Arrival & Welcome', 
+                 'description': 'Airport pickup, hotel check-in, welcome dinner, and tour briefing. Introduction to local culture and customs.'},
+                {'day': 2, 'title': 'Full Day Tour', 
+                 'description': 'Visit main attractions, enjoy local experiences, and participate in cultural activities. Traditional lunch. Evening free time or optional activities.'},
+                {'day': 3, 'title': 'Departure', 
+                 'description': 'Morning breakfast at hotel. Final activities and souvenir shopping. Check-out and airport transfer for departure flight.'},
+            ],
+            4: [
+                {'day': 1, 'title': 'Arrival & City Tour', 
+                 'description': 'Airport pickup, hotel check-in, and afternoon city tour. Explore local landmarks and get oriented with the area. Evening dinner at local restaurant.'},
+                {'day': 2, 'title': 'Main Attractions', 
+                 'description': 'Full day tour of major attractions and landmarks. Visit historical sites, natural wonders, or cultural centers. Traditional lunch included.'},
+                {'day': 3, 'title': 'Cultural Experience', 
+                 'description': 'Visit cultural sites, local markets, and participate in traditional experiences. Learn about local customs and traditions. Evening cultural performance (if available).'},
+                {'day': 4, 'title': 'Departure', 
+                 'description': 'Morning breakfast at hotel. Free time for last-minute shopping or relaxation. Check-out and airport transfer for departure flight.'},
+            ],
+            5: [
+                {'day': 1, 'title': 'Arrival & Orientation', 
+                 'description': 'Airport pickup, hotel check-in, and welcome orientation. Introduction to the tour program and local area. Evening welcome dinner.'},
+                {'day': 2, 'title': 'Day Trip Adventure', 
+                 'description': 'Full day trip to nearby attractions or natural wonders. Explore unique destinations and enjoy outdoor activities. Packed lunch or local restaurant.'},
+                {'day': 3, 'title': 'City Exploration', 
+                 'description': 'Explore the city, visit museums, historical sites, and enjoy local cuisine. Learn about local history and culture. Evening free time.'},
+                {'day': 4, 'title': 'Cultural Immersion', 
+                 'description': 'Deep dive into local culture, traditions, and experiences. Visit traditional villages, participate in workshops, or attend cultural events. Traditional dinner with cultural show.'},
+                {'day': 5, 'title': 'Departure', 
+                 'description': 'Morning breakfast at hotel. Final activities, last-minute shopping, and souvenir hunting. Check-out and airport transfer for departure flight.'},
+            ],
+        }
+        return templates.get(days, templates[3])
 
     def _create_bookings(self, resellers, tours):
         """Create mock bookings with payments and seat slots."""

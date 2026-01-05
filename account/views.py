@@ -160,11 +160,15 @@ class BaseAdminProfileViewSet(viewsets.ModelViewSet):
         
         if not user and email and password:
             with transaction.atomic():
+                user_role = self.get_user_role()
+                # Staff users need is_staff=True to access admin endpoints
+                is_staff = user_role == UserRole.STAFF
                 user = CustomUser.objects.create_user(
                     email=email,
                     password=password,
-                    role=self.get_user_role(),
+                    role=user_role,
                     is_active=True,
+                    is_staff=is_staff,
                 )
                 validated_data["user"] = user
         elif user:
@@ -369,6 +373,7 @@ class LogoutView(APIView):
     Also blacklists the refresh token if provided.
     """
     permission_classes = [permissions.AllowAny]  # Allow unauthenticated access
+    authentication_classes = []  # No authentication required for logout
 
     def post(self, request):
         """Logout user by clearing authentication cookies."""
@@ -725,6 +730,10 @@ class ActivateDeactivateAccountView(APIView):
     Works for all user types (STAFF, SUPPLIER, RESELLER).
     Accepts profile_type and profile_id to identify which profile to update.
     """
+    from account.authentication import CookieJWTAuthentication
+    
+    # Only use JWT auth (cookie-based), skip SessionAuth to avoid CSRF requirement
+    authentication_classes = [CookieJWTAuthentication]
     permission_classes = [permissions.IsAdminUser]
 
     def post(self, request, profile_type, profile_id):
