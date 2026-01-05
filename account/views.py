@@ -401,20 +401,42 @@ class LogoutView(APIView):
         
         # Cookie settings - must match EXACTLY how they were set during login
         is_secure = not settings.DEBUG
+        cookie_domain = None if settings.DEBUG else None
         
-        # For cookie deletion to work, we need to try multiple approaches
-        # because browsers can be finicky about cookie deletion
+        # Clear access_token cookie
+        # For proper deletion, all parameters must match how the cookie was set
+        response.delete_cookie(
+            'access_token',
+            path='/',
+            domain=cookie_domain,
+            samesite='Lax',
+        )
         
-        # Method 1: Delete with no domain (works for localhost)
-        response.delete_cookie('access_token', path='/', samesite='Lax')
-        response.delete_cookie('refresh_token', path='/', samesite='Lax')
+        # Clear refresh_token cookie
+        response.delete_cookie(
+            'refresh_token',
+            path='/',
+            domain=cookie_domain,
+            samesite='Lax',
+        )
         
-        # Method 2: Also set to empty with max_age=0 (belt and suspenders)
+        # Clear csrftoken cookie (set by Django CSRF middleware)
+        response.delete_cookie(
+            'csrftoken',
+            path='/',
+            domain=cookie_domain,
+            samesite='Lax',
+        )
+        
+        # Also set cookies to empty with max_age=0 as a fallback
+        # This ensures deletion even if delete_cookie parameters don't match exactly
         response.set_cookie(
             'access_token',
             value='',
             max_age=0,
+            expires='Thu, 01 Jan 1970 00:00:00 GMT',
             path='/',
+            domain=cookie_domain,
             httponly=True,
             secure=is_secure,
             samesite='Lax',
@@ -424,13 +446,27 @@ class LogoutView(APIView):
             'refresh_token',
             value='',
             max_age=0,
+            expires='Thu, 01 Jan 1970 00:00:00 GMT',
             path='/',
+            domain=cookie_domain,
             httponly=True,
             secure=is_secure,
             samesite='Lax',
         )
         
-        logger.info(f"Logout cookies cleared (DEBUG={settings.DEBUG}, secure={is_secure})")
+        # csrftoken is not httpOnly, so we can clear it normally
+        response.set_cookie(
+            'csrftoken',
+            value='',
+            max_age=0,
+            expires='Thu, 01 Jan 1970 00:00:00 GMT',
+            path='/',
+            domain=cookie_domain,
+            secure=is_secure,
+            samesite='Lax',
+        )
+        
+        logger.info(f"Logout cookies cleared (DEBUG={settings.DEBUG}, secure={is_secure}, domain={cookie_domain})")
         
         return response
 
