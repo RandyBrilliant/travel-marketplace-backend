@@ -75,7 +75,13 @@ if not DEBUG:
     SECURE_HSTS_SECONDS = 31536000  # 1 year
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
-    # SSL redirect - only enable after SSL certificates are set up
+    
+    # Trust proxy headers from nginx (required when behind reverse proxy)
+    # This tells Django to trust X-Forwarded-Proto header from nginx
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    
+    # SSL redirect - DISABLED because nginx already handles HTTP->HTTPS redirect
+    # Setting this to True causes redirect loops when behind nginx
     SECURE_SSL_REDIRECT = get_env_bool("SECURE_SSL_REDIRECT", False)
     SESSION_COOKIE_SECURE = get_env_bool("SESSION_COOKIE_SECURE", False)
     CSRF_COOKIE_SECURE = get_env_bool("CSRF_COOKIE_SECURE", False)
