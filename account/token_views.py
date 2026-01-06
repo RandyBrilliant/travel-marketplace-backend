@@ -9,8 +9,8 @@ from account.token_serializers import CustomTokenObtainPairSerializer
 
 
 class LoginThrottle(AnonRateThrottle):
-    """Custom throttle for login endpoint - 5 requests per minute."""
-    rate = '5/minute'
+    """Custom throttle for login endpoint - 20 requests per minute."""
+    rate = '20/minute'
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):

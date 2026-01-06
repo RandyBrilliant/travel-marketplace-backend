@@ -900,6 +900,85 @@ class RegisterResellerView(APIView):
                     logger = logging.getLogger(__name__)
                     logger.error(f"Failed to send verification email: {str(e)}")
 
+                # Clear login throttle cache for this IP to allow immediate login after registration
+                # This prevents "too many requests" error when user tries to login right after registration
+                try:
+                    from django.core.cache import cache
+                    # Get IP address (handles both direct and proxied requests)
+                    ip_address = request.META.get('REMOTE_ADDR')
+                    if not ip_address:
+                        forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR', '')
+                        if forwarded_for:
+                            ip_address = forwarded_for.split(',')[0].strip()
+                    
+                    if ip_address:
+                        # DRF AnonRateThrottle cache key format: throttle_anon_<ip_address>
+                        # Clear the throttle cache for this IP
+                        cache_key = f'throttle_anon_{ip_address}'
+                        cache.delete(cache_key)
+                except Exception as e:
+                    # Log but don't fail registration if throttle clearing fails
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Failed to clear login throttle cache: {str(e)}")
+
+                # Auto-login: Generate tokens and set them in cookies
+                try:
+                    from account.token_serializers import CustomTokenObtainPairSerializer
+                    # Use the serializer to generate tokens (same way as login)
+                    token_serializer = CustomTokenObtainPairSerializer()
+                    # Manually validate with user's email and password
+                    # We need to create a data dict with email and password
+                    # But we don't want to store password, so we'll use the serializer's get_token method directly
+                    refresh_token_obj = CustomTokenObtainPairSerializer.get_token(user)
+                    access_token = str(refresh_token_obj.access_token)
+                    refresh_token = str(refresh_token_obj)
+                    
+                    # Create response with user info
+                    response = Response(
+                        {
+                            'detail': 'Reseller account created successfully. You have been automatically logged in.',
+                            'user': {
+                                'id': user.id,
+                                'email': user.email,
+                                'role': user.role,
+                            }
+                        },
+                        status=status.HTTP_201_CREATED
+                    )
+                    
+                    # Set httpOnly cookies (same as login endpoint)
+                    is_secure = not settings.DEBUG
+                    max_age_access = int(settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME'].total_seconds())
+                    max_age_refresh = int(settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME'].total_seconds())
+                    
+                    response.set_cookie(
+                        key='access_token',
+                        value=access_token,
+                        max_age=max_age_access,
+                        httponly=True,
+                        secure=is_secure,
+                        samesite='Lax',
+                        path='/',
+                    )
+                    
+                    response.set_cookie(
+                        key='refresh_token',
+                        value=refresh_token,
+                        max_age=max_age_refresh,
+                        httponly=True,
+                        secure=is_secure,
+                        samesite='Lax',
+                        path='/',
+                    )
+                    
+                    return response
+                    
+                except Exception as e:
+                    # If token generation fails, still return success but without auto-login
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.error(f"Failed to generate tokens for auto-login: {str(e)}", exc_info=True)
                 return Response(
                     {
                         'detail': 'Reseller account created successfully. Please check your email to verify your account.',
