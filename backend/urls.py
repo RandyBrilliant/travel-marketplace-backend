@@ -28,6 +28,7 @@ from account.views import (
     ResetPasswordConfirmView,
     ActivateDeactivateAccountView,
     RegisterResellerView,
+    RegisterSupplierView,
 )
 from travel.views import (
     SupplierTourPackageViewSet,
@@ -108,8 +109,9 @@ api_v1_patterns = [
     path("token/refresh/", CustomTokenRefreshView.as_view(), name="token_refresh"),
     path("token/logout/", LogoutView.as_view(), name="token_logout"),
     path("token/me/", CurrentUserView.as_view(), name="token_me"),
-    # Public registration endpoint
+    # Public registration endpoints
     path("register/reseller/", RegisterResellerView.as_view(), name="register-reseller"),
+    path("register/supplier/", RegisterSupplierView.as_view(), name="register-supplier"),
     # Password change endpoint (works for all user types)
     path("change-password/", ChangePasswordView.as_view(), name="change-password"),
     # Email verification endpoints

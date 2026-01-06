@@ -993,3 +993,169 @@ class RegisterResellerView(APIView):
                 {'detail': f'An error occurred during registration: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class RegisterSupplierView(APIView):
+    """
+    Public API endpoint for supplier registration.
+    Creates a new user with SUPPLIER role and associated SupplierProfile.
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        """
+        Register a new supplier account.
+
+        Expected request body:
+        {
+            "email": "supplier@example.com",
+            "password": "securepassword123",
+            "company_name": "PT Contoh Wisata",
+            "contact_person": "Nama PIC",
+            "contact_phone": "+6281234567890",
+            "address": "Alamat lengkap" (optional)
+        }
+        """
+        email = request.data.get('email')
+        password = request.data.get('password')
+        company_name = request.data.get('company_name')
+        contact_person = request.data.get('contact_person')
+        contact_phone = request.data.get('contact_phone')
+        address = request.data.get('address', '')
+
+        # Validate required fields
+        missing_fields = {}
+        if not email:
+            missing_fields['email'] = ['This field is required.']
+        if not password:
+            missing_fields['password'] = ['This field is required.']
+        if not company_name:
+            missing_fields['company_name'] = ['This field is required.']
+        if not contact_person:
+            missing_fields['contact_person'] = ['This field is required.']
+        if not contact_phone:
+            missing_fields['contact_phone'] = ['This field is required.']
+
+        if missing_fields:
+            return Response(missing_fields, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if user with this email already exists
+        if CustomUser.objects.filter(email=email).exists():
+            return Response(
+                {'email': ['A user with this email already exists.']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate password
+        try:
+            from django.contrib.auth.password_validation import validate_password
+
+            validate_password(password)
+        except Exception as e:
+            return Response(
+                {'password': list(e.messages) if hasattr(e, 'messages') else [str(e)]},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            with transaction.atomic():
+                # Create user as supplier
+                user = CustomUser.objects.create_user(
+                    email=email,
+                    password=password,
+                    role=UserRole.SUPPLIER,
+                    is_active=True,
+                )
+
+                # Create supplier profile
+                SupplierProfile.objects.create(
+                    user=user,
+                    company_name=company_name,
+                    contact_person=contact_person,
+                    contact_phone=contact_phone,
+                    address=address,
+                )
+
+                # Send email verification (best-effort)
+                try:
+                    send_email_verification.delay(user.id)
+                except Exception as e:
+                    import logging
+
+                    logger = logging.getLogger(__name__)
+                    logger.error(f"Failed to send verification email: {str(e)}")
+
+                # Auto-login supplier similar to reseller registration
+                try:
+                    from account.token_serializers import CustomTokenObtainPairSerializer
+
+                    refresh_token_obj = CustomTokenObtainPairSerializer.get_token(user)
+                    access_token = str(refresh_token_obj.access_token)
+                    refresh_token = str(refresh_token_obj)
+
+                    response = Response(
+                        {
+                            'detail': 'Supplier account created successfully. You have been automatically logged in.',
+                            'user': {
+                                'id': user.id,
+                                'email': user.email,
+                                'role': user.role,
+                            },
+                        },
+                        status=status.HTTP_201_CREATED,
+                    )
+
+                    is_secure = not settings.DEBUG
+                    max_age_access = int(
+                        settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME'].total_seconds()
+                    )
+                    max_age_refresh = int(
+                        settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME'].total_seconds()
+                    )
+
+                    response.set_cookie(
+                        key='access_token',
+                        value=access_token,
+                        max_age=max_age_access,
+                        httponly=True,
+                        secure=is_secure,
+                        samesite='Lax',
+                        path='/',
+                    )
+
+                    response.set_cookie(
+                        key='refresh_token',
+                        value=refresh_token,
+                        max_age=max_age_refresh,
+                        httponly=True,
+                        secure=is_secure,
+                        samesite='Lax',
+                        path='/',
+                    )
+
+                    return response
+                except Exception as e:
+                    import logging
+
+                    logger = logging.getLogger(__name__)
+                    logger.error(
+                        f"Failed to generate tokens for supplier auto-login: {str(e)}",
+                        exc_info=True,
+                    )
+
+                # Fallback: account created but no auto-login
+                return Response(
+                    {
+                        'detail': 'Supplier account created successfully. Please check your email to verify your account and then login.',
+                        'user_id': user.id,
+                        'email': user.email,
+                    },
+                    status=status.HTTP_201_CREATED,
+                )
+
+        except Exception as e:
+            return Response(
+                {'detail': f'An error occurred during supplier registration: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
