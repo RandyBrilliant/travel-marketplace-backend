@@ -113,6 +113,13 @@ class SupplierTourPackageViewSet(viewsets.ModelViewSet):
                             "detail": "Unable to create tour package. Please ensure the tour name is unique."
                         }
                     )
+                elif "nights_not_greater_than_days" in error_msg.lower():
+                    raise ValidationError(
+                        {
+                            "nights": "Number of nights cannot be greater than number of days.",
+                            "detail": "Please ensure the number of nights is less than or equal to the number of days."
+                        }
+                    )
                 else:
                     raise ValidationError(
                         {"detail": "Unable to create tour package. Please check your input and try again."}
@@ -305,7 +312,23 @@ class SupplierItineraryItemViewSet(viewsets.ModelViewSet):
         try:
             supplier_profile = SupplierProfile.objects.get(user=self.request.user)
             package = TourPackage.objects.get(pk=package_id, supplier=supplier_profile)
-            serializer.save(package=package)
+            try:
+                serializer.save(package=package)
+            except IntegrityError as e:
+                error_msg = str(e)
+                # Handle unique (package, day_number) constraint with a friendly message
+                if "itineraryitem_package_id_day_number" in error_msg or "day_number" in error_msg:
+                    raise ValidationError(
+                        {
+                            "day_number": [
+                                "Itinerary untuk hari ini sudah ada. Tambahkan aktivitas tambahan di deskripsi hari tersebut."
+                            ]
+                        }
+                    )
+                # Fallback generic validation error
+                raise ValidationError(
+                    {"detail": "Unable to create itinerary item. Please check your input and try again."}
+                )
         except TourPackage.DoesNotExist:
             raise ValidationError(
                 {"package": ["Tour package not found or you don't have permission to access it."]}
@@ -343,7 +366,9 @@ class PublicTourPackageListView(APIView):
         ).select_related(
             "supplier", "supplier__user"
         ).prefetch_related(
-            "reseller_groups", "reseller_groups__resellers"
+            "reseller_groups",
+            "reseller_groups__resellers",
+            "images",  # used by TourPackageListSerializer.get_main_image_url
         )
         
         # Filter by supplier if provided

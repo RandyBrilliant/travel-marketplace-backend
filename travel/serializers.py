@@ -54,6 +54,33 @@ class ItineraryItemSerializer(serializers.ModelSerializer):
         fields = ["id", "day_number", "title", "description"]
         read_only_fields = ["id"]
 
+    def validate(self, attrs):
+        """
+        Ensure day_number is unique per package for this itinerary.
+        We keep one itinerary row per day; multiple activities should be in description.
+        """
+        # Package is provided via serializer.save(package=...) in the view
+        package = getattr(self.instance, "package", None)
+        if not package and "package" in attrs:
+            package = attrs["package"]
+
+        day_number = attrs.get("day_number", getattr(self.instance, "day_number", None))
+
+        if package and day_number is not None:
+            qs = ItineraryItem.objects.filter(package=package, day_number=day_number)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError(
+                    {
+                        "day_number": [
+                            "Itinerary untuk hari ini sudah ada. Tambahkan aktivitas tambahan di deskripsi hari tersebut."
+                        ]
+                    }
+                )
+
+        return attrs
+
 
 class TourImageSerializer(serializers.ModelSerializer):
     """Serializer for tour gallery images (read-only for list/detail)."""
@@ -351,10 +378,25 @@ class TourPackageListSerializer(serializers.ModelSerializer):
         ]
     
     def get_main_image_url(self, obj):
-        """Return absolute URL for main image if exists."""
+        """
+        Return absolute URL for main image if exists.
+        Fallback to primary gallery image (or first gallery image) when main_image is not set.
+        """
+        request = self.context.get("request")
+        
+        # Prefer explicit main_image
         if obj.main_image:
-            request = self.context.get("request")
             return build_absolute_image_url(obj.main_image.url, request)
+        
+        # Fallback to primary gallery image, then first gallery image
+        primary_image = obj.images.filter(is_primary=True).first()
+        if primary_image and primary_image.image:
+            return build_absolute_image_url(primary_image.image.url, request)
+        
+        first_image = obj.images.first()
+        if first_image and first_image.image:
+            return build_absolute_image_url(first_image.image.url, request)
+        
         return None
 
 
@@ -365,6 +407,7 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
     duration_display = serializers.CharField(read_only=True)
     group_size_display = serializers.CharField(read_only=True)
     main_image_url = serializers.SerializerMethodField()
+    itinerary_pdf_url = serializers.SerializerMethodField()
     images = TourImageSerializer(many=True, read_only=True)
     itinerary_items = ItineraryItemSerializer(many=True, read_only=True)
     dates = serializers.SerializerMethodField()
@@ -395,6 +438,7 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
             "base_price",
             "badge",
             "main_image_url",
+            "itinerary_pdf_url",
             "images",
             "itinerary_items",
             "dates",
@@ -409,6 +453,7 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
             "duration_display",
             "group_size_display",
             "main_image_url",
+            "itinerary_pdf_url",
             "created_at",
         ]
     
@@ -417,6 +462,13 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
         if obj.main_image:
             request = self.context.get("request")
             return build_absolute_image_url(obj.main_image.url, request)
+        return None
+    
+    def get_itinerary_pdf_url(self, obj):
+        """Return absolute URL for itinerary PDF if exists."""
+        if obj.itinerary_pdf:
+            request = self.context.get("request")
+            return build_absolute_image_url(obj.itinerary_pdf.url, request)
         return None
     
     def get_dates(self, obj):
@@ -473,6 +525,9 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
             "is_active",
             "is_featured",
             "reseller_groups",
+            # Commission fields (now editable by suppliers as well)
+            "commission",
+            "commission_notes",
         ]
         read_only_fields = ["id", "supplier", "slug"]
     
@@ -508,6 +563,24 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
             except json.JSONDecodeError:
                 raise serializers.ValidationError("Invalid JSON format")
         return value
+    
+    def validate(self, attrs):
+        """Validate that nights is not greater than days."""
+        days = attrs.get('days')
+        nights = attrs.get('nights')
+        
+        # If updating, get existing values if not provided
+        if self.instance:
+            days = days if days is not None else self.instance.days
+            nights = nights if nights is not None else self.instance.nights
+        
+        if days is not None and nights is not None:
+            if nights > days:
+                raise serializers.ValidationError({
+                    'nights': f'Number of nights ({nights}) cannot be greater than number of days ({days}).'
+                })
+        
+        return attrs
     
     def validate_slug(self, value):
         """Auto-generate slug from name if not provided."""
@@ -597,6 +670,24 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
             "commission_notes",
         ]
         read_only_fields = ["id", "slug"]
+    
+    def validate(self, attrs):
+        """Validate that nights is not greater than days."""
+        days = attrs.get('days')
+        nights = attrs.get('nights')
+        
+        # If updating, get existing values if not provided
+        if self.instance:
+            days = days if days is not None else self.instance.days
+            nights = nights if nights is not None else self.instance.nights
+        
+        if days is not None and nights is not None:
+            if nights > days:
+                raise serializers.ValidationError({
+                    'nights': f'Number of nights ({nights}) cannot be greater than number of days ({days}).'
+                })
+        
+        return attrs
     
     def validate_slug(self, value):
         """Auto-generate slug from name if not provided."""
