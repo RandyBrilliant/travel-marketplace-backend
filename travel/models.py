@@ -31,6 +31,16 @@ class TourType(models.TextChoices):
     MUSLIM = "MUSLIM", _("Muslim Tour")
 
 
+class GroupType(models.TextChoices):
+    """Group type options for tour packages."""
+    SMALL_GROUP = "SMALL_GROUP", _("Small Group")
+    PRIVATE = "PRIVATE", _("Private")
+    LARGE_GROUP = "LARGE_GROUP", _("Large Group")
+    FAMILY = "FAMILY", _("Family")
+    COUPLE = "COUPLE", _("Couple")
+    SOLO = "SOLO", _("Solo")
+
+
 class ResellerGroup(models.Model):
     """
     Group of resellers that can be assigned to specific tour packages.
@@ -98,17 +108,14 @@ class TourPackage(models.Model):
     )
     name = models.CharField(max_length=255)
     slug = models.SlugField(max_length=255, unique=True)
-    summary = models.TextField()
+    summary = models.TextField(
+        help_text=_("Summary of the tour package."),
+    )
     description = models.TextField(
-        blank=True,
         help_text=_("Detailed description of the tour package."),
     )
 
     # Location information
-    city = models.CharField(
-        max_length=255,
-        help_text=_("City where the tour takes place (e.g., 'Beijing', 'Tokyo')."),
-    )
     country = models.CharField(
         max_length=255,
         help_text=_("Country where the tour takes place (e.g., 'China', 'Japan')."),
@@ -128,9 +135,10 @@ class TourPackage(models.Model):
         help_text=_("Maximum number of participants in a group."),
     )
     group_type = models.CharField(
-        max_length=50,
-        default="Small Group",
-        help_text=_("Type of group (e.g., 'Small Group', 'Private', 'Large Group')."),
+        max_length=20,
+        choices=GroupType.choices,
+        default=GroupType.SMALL_GROUP,
+        help_text=_("Type of group for this tour package."),
     )
 
     # Tour type (for Indonesian citizens)
@@ -146,11 +154,6 @@ class TourPackage(models.Model):
         max_length=50,
         choices=TourCategory.choices,
         help_text=_("Primary category for the tour."),
-    )
-    tags = models.JSONField(
-        default=list,
-        blank=True,
-        help_text=_("Additional tags/categories as a list of strings."),
     )
 
     # Highlights/Features
@@ -191,11 +194,6 @@ class TourPackage(models.Model):
         validators=[MinValueValidator(1)],
         help_text=_("Reference price in IDR (Indonesian Rupiah). Must be at least 1 IDR. Actual price can vary per date."),
     )
-    currency = models.CharField(
-        max_length=10,
-        default="IDR",
-        help_text=_("Currency code. Defaults to IDR (Indonesian Rupiah)."),
-    )
 
     # Featured badge
     badge = models.CharField(
@@ -223,26 +221,10 @@ class TourPackage(models.Model):
     )
 
     # Commission settings (Admin-only editable)
-    commission_rate = models.DecimalField(
-        max_digits=5,
-        decimal_places=2,
-        default=10.00,
-        validators=[MinValueValidator(0.00), MaxValueValidator(100.00)],
-        help_text=_("Default commission percentage for resellers (0-100). Admin-only field."),
-    )
-    commission_type = models.CharField(
-        max_length=20,
-        choices=[
-            ("PERCENTAGE", _("Percentage")),
-            ("FIXED", _("Fixed Amount")),
-        ],
-        default="PERCENTAGE",
-        help_text=_("Type of commission calculation. Admin-only field."),
-    )
-    fixed_commission_amount = models.PositiveIntegerField(
+    commission = models.PositiveIntegerField(
         null=True,
         blank=True,
-        help_text=_("Fixed commission amount in IDR (if commission_type is FIXED). Admin-only field."),
+        help_text=_("Commission amount for the tour package."),
     )
     commission_notes = models.TextField(
         blank=True,
@@ -277,7 +259,6 @@ class TourPackage(models.Model):
         ordering = ["-is_featured", "-created_at"]
         indexes = [
             models.Index(fields=["category", "is_active"]),
-            models.Index(fields=["city", "country"]),
             models.Index(fields=["is_featured"]),
             models.Index(fields=["tour_type", "is_active"]),
             models.Index(fields=["supplier", "is_active"]),
@@ -288,14 +269,13 @@ class TourPackage(models.Model):
                 name='nights_not_greater_than_days'
             ),
             models.CheckConstraint(
-                check=models.Q(fixed_commission_amount__isnull=True) | 
-                       (models.Q(commission_type='FIXED') & models.Q(fixed_commission_amount__gte=1)),
-                name='fixed_commission_valid_when_fixed_type'
+                check=models.Q(commission__isnull=True) | (models.Q(commission__gte=1)),
+                name='commission_valid'
             ),
         ]
 
     def __str__(self) -> str:
-        return f"{self.name} - {self.city}, {self.country}"
+        return f"{self.name}, {self.country}"
     
     @property
     def duration_display(self):
@@ -305,18 +285,19 @@ class TourPackage(models.Model):
     @property
     def group_size_display(self):
         """Return formatted group size string (e.g., 'Small Group (Max 12)')."""
-        return f"{self.group_type} (Max {self.max_group_size})"
+        group_type_label = GroupType(self.group_type).label if self.group_type else "Group"
+        return f"{group_type_label} (Max {self.max_group_size})"
     
     def calculate_commission(self, booking_amount):
         """
         Calculate commission amount based on commission settings.
         Returns the commission amount in IDR as an integer.
+        
+        If commission is set, returns the fixed commission amount.
+        Otherwise returns 0.
         """
-        if self.commission_type == "PERCENTAGE":
-            # Calculate percentage and round to nearest integer (IDR doesn't have decimals)
-            return int(round((booking_amount * self.commission_rate) / 100))
-        elif self.commission_type == "FIXED" and self.fixed_commission_amount:
-            return self.fixed_commission_amount
+        if self.commission:
+            return self.commission
         return 0
     
     def get_reseller_commission(self, reseller):
@@ -539,8 +520,16 @@ class TourImage(models.Model):
                 })
     
     def save(self, *args, **kwargs):
-        """Validate before saving."""
-        self.full_clean()
+        """Validate before saving, with better error handling."""
+        try:
+            self.full_clean()
+        except ValidationError as e:
+            # Provide better error messages
+            if 'image' in e.message_dict:
+                raise ValidationError({
+                    'image': ['Gambar wajib diisi. Silakan pilih file gambar untuk diunggah.']
+                })
+            raise
         super().save(*args, **kwargs)
     
     def __str__(self) -> str:

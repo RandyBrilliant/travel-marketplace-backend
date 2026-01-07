@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 from rest_framework.views import APIView
 from django.db import transaction, models
+from django.db.utils import IntegrityError
 from django.utils.text import slugify
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
@@ -18,6 +19,7 @@ from .serializers import (
     AdminTourPackageSerializer,
     TourDateSerializer,
     TourImageSerializer,
+    TourImageCreateUpdateSerializer,
     ItineraryItemSerializer,
     ResellerTourCommissionSerializer,
     ResellerGroupSerializer,
@@ -62,7 +64,7 @@ class SupplierTourPackageViewSet(viewsets.ModelViewSet):
     permission_classes = [IsSupplier]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ["category", "tour_type", "is_active", "is_featured"]
-    search_fields = ["name", "city", "country", "summary"]
+    search_fields = ["name", "country", "summary"]
     ordering_fields = ["created_at", "updated_at", "name", "base_price"]
     ordering = ["-created_at"]
     
@@ -99,7 +101,22 @@ class SupplierTourPackageViewSet(viewsets.ModelViewSet):
         """Set the supplier when creating a tour package."""
         try:
             supplier_profile = SupplierProfile.objects.get(user=self.request.user)
-            serializer.save(supplier=supplier_profile)
+            try:
+                serializer.save(supplier=supplier_profile)
+            except IntegrityError as e:
+                # Provide user-friendly error messages for integrity errors
+                error_msg = str(e)
+                if "slug" in error_msg.lower():
+                    raise ValidationError(
+                        {
+                            "slug": "A tour package with this name already exists. Please choose a different name.",
+                            "detail": "Unable to create tour package. Please ensure the tour name is unique."
+                        }
+                    )
+                else:
+                    raise ValidationError(
+                        {"detail": "Unable to create tour package. Please check your input and try again."}
+                    )
         except SupplierProfile.DoesNotExist:
             raise ValidationError(
                 {"detail": "Supplier profile not found. Please complete your profile setup."}
@@ -167,6 +184,10 @@ class SupplierTourDateViewSet(viewsets.ModelViewSet):
     
     permission_classes = [IsSupplier]
     serializer_class = TourDateSerializer
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ["package", "is_high_season"]
+    ordering_fields = ["departure_date", "price"]
+    ordering = ["departure_date"]
     
     def get_queryset(self):
         """
@@ -213,7 +234,16 @@ class SupplierTourImageViewSet(viewsets.ModelViewSet):
     """
     
     permission_classes = [IsSupplier]
-    serializer_class = TourImageSerializer
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ["package", "is_primary"]
+    ordering_fields = ["order", "created_at"]
+    ordering = ["order", "id"]
+    
+    def get_serializer_class(self):
+        """Use different serializers for create/update vs list/detail."""
+        if self.action in ["create", "update", "partial_update"]:
+            return TourImageCreateUpdateSerializer
+        return TourImageSerializer
     
     def get_queryset(self):
         """Return only images for packages belonging to the authenticated supplier."""
@@ -250,6 +280,10 @@ class SupplierItineraryItemViewSet(viewsets.ModelViewSet):
     
     permission_classes = [IsSupplier]
     serializer_class = ItineraryItemSerializer
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ["package"]
+    ordering_fields = ["day_number", "id"]
+    ordering = ["day_number", "id"]
     
     def get_queryset(self):
         """Return only itinerary items for packages belonging to the authenticated supplier."""
@@ -347,7 +381,6 @@ class PublicTourPackageListView(APIView):
         if search:
             queryset = queryset.filter(
                 models.Q(name__icontains=search) |
-                models.Q(city__icontains=search) |
                 models.Q(country__icontains=search) |
                 models.Q(summary__icontains=search)
             )

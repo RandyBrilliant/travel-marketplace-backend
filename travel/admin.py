@@ -17,10 +17,10 @@ from .models import (
 
 @admin.register(TourPackage)
 class TourPackageAdmin(admin.ModelAdmin):
-    list_display = ["name", "supplier", "city", "country", "tour_type", "base_price", "currency", "is_active", "is_featured", "reseller_groups_count"]
+    list_display = ["name", "supplier", "country", "tour_type", "base_price", "is_active", "is_featured", "reseller_groups_count"]
     list_display_links = ["name"]
-    list_filter = ["tour_type", "category", "is_active", "is_featured", "currency", "created_at"]
-    search_fields = ["name", "city", "country", "supplier__company_name", "slug"]
+    list_filter = ["tour_type", "category", "is_active", "is_featured", "created_at"]
+    search_fields = ["name", "country", "supplier__company_name", "slug"]
     filter_horizontal = ["reseller_groups"]
     readonly_fields = ["slug", "duration_display", "group_size_display", "created_at", "updated_at"]
     date_hierarchy = "created_at"
@@ -30,16 +30,16 @@ class TourPackageAdmin(admin.ModelAdmin):
             "fields": ("supplier", "name", "slug", "summary", "description")
         }),
         ("Location", {
-            "fields": ("city", "country")
+            "fields": ("country",)
         }),
         ("Duration & Group", {
             "fields": ("days", "nights", "duration_display", "max_group_size", "group_type", "group_size_display")
         }),
         ("Tour Details", {
-            "fields": ("tour_type", "category", "tags", "highlights", "inclusions", "exclusions")
+            "fields": ("tour_type", "category", "highlights", "inclusions", "exclusions")
         }),
         ("Pricing", {
-            "fields": ("base_price", "currency")
+            "fields": ("base_price",)
         }),
         ("Media", {
             "fields": ("main_image", "badge")
@@ -51,7 +51,7 @@ class TourPackageAdmin(admin.ModelAdmin):
             "fields": ("is_active", "is_featured", "reseller_groups")
         }),
         ("Commission Settings (Admin Only)", {
-            "fields": ("commission_rate", "commission_type", "fixed_commission_amount", "commission_notes"),
+            "fields": ("commission", "commission_notes"),
             "classes": ("collapse",)
         }),
         ("Timestamps", {
@@ -85,7 +85,7 @@ class TourDateAdmin(admin.ModelAdmin):
     list_display = ["package", "departure_date", "price", "total_seats", "remaining_seats", "is_high_season"]
     list_display_links = ["package", "departure_date"]
     list_filter = ["departure_date", "is_high_season", "package__supplier"]
-    search_fields = ["package__name", "package__city", "package__country"]
+    search_fields = ["package__name", "package__country"]
     readonly_fields = ["remaining_seats", "available_seats_count", "booked_seats_count"]
     date_hierarchy = "departure_date"
     
@@ -217,7 +217,7 @@ class TourImageAdmin(admin.ModelAdmin):
     list_display = ["package", "image", "order", "is_primary", "created_at"]
     list_display_links = ["package"]
     list_filter = ["is_primary", "package__supplier", "created_at"]
-    search_fields = ["package__name", "package__city", "package__country"]
+    search_fields = ["package__name", "package__country"]
     readonly_fields = ["image_preview", "created_at"]
     ordering = ["package", "order"]
     

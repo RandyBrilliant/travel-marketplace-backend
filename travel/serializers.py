@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.utils.text import slugify
 from django.conf import settings
 import os
+import json
 from .models import (
     TourPackage,
     TourDate,
@@ -55,13 +56,13 @@ class ItineraryItemSerializer(serializers.ModelSerializer):
 
 
 class TourImageSerializer(serializers.ModelSerializer):
-    """Serializer for tour gallery images."""
+    """Serializer for tour gallery images (read-only for list/detail)."""
     
     image = serializers.SerializerMethodField()
     
     class Meta:
         model = TourImage
-        fields = ["id", "image", "caption", "order", "is_primary", "created_at"]
+        fields = ["id", "image", "caption", "order", "is_primary", "created_at", "package"]
         read_only_fields = ["id", "created_at"]
     
     def get_image(self, obj):
@@ -72,11 +73,121 @@ class TourImageSerializer(serializers.ModelSerializer):
         return None
 
 
+class TourImageCreateUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for creating/updating tour images (accepts image file)."""
+    
+    image_url = serializers.SerializerMethodField(read_only=True)
+    
+    class Meta:
+        model = TourImage
+        fields = ["id", "package", "image", "caption", "order", "is_primary", "created_at", "image_url"]
+        read_only_fields = ["id", "created_at", "image_url"]
+    
+    def get_image_url(self, obj):
+        """Return absolute URL for image."""
+        if obj.image:
+            request = self.context.get("request")
+            return build_absolute_image_url(obj.image.url, request)
+        return None
+    
+    def validate_image(self, value):
+        """Validate that image is provided."""
+        if not value:
+            raise serializers.ValidationError("Image file is required.")
+        return value
+    
+    def create(self, validated_data):
+        """Create tour image and optimize it to WebP format."""
+        from .utils import optimize_image_to_webp
+        
+        instance = super().create(validated_data)
+        
+        # Optimize image immediately after creation
+        if instance.image:
+            try:
+                optimize_image_to_webp(instance.image, max_width=1920, max_height=1920, quality=85)
+                # Save the optimized image
+                instance.save(update_fields=['image'])
+            except Exception as e:
+                # Log error but don't fail the creation
+                import sys
+                print(f"Warning: Failed to optimize image: {str(e)}", file=sys.stderr)
+        
+        return instance
+    
+    def update(self, instance, validated_data):
+        """Update tour image and optimize it to WebP format if image changed."""
+        from .utils import optimize_image_to_webp
+        
+        image_changed = 'image' in validated_data and validated_data['image'] != instance.image
+        
+        instance = super().update(instance, validated_data)
+        
+        # Optimize image if it was updated
+        if image_changed and instance.image:
+            try:
+                optimize_image_to_webp(instance.image, max_width=1920, max_height=1920, quality=85)
+                # Save the optimized image
+                instance.save(update_fields=['image'])
+            except Exception as e:
+                # Log error but don't fail the update
+                import sys
+                print(f"Warning: Failed to optimize image: {str(e)}", file=sys.stderr)
+        
+        return instance
+
+
+class SeatSlotSerializer(serializers.ModelSerializer):
+    """Serializer for seat slots within a tour date."""
+    
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    booking_id = serializers.IntegerField(source="booking.id", read_only=True, allow_null=True)
+    booking_number = serializers.CharField(source="booking.booking_number", read_only=True, allow_null=True)
+    
+    class Meta:
+        model = SeatSlot
+        fields = [
+            "id",
+            "seat_number",
+            "status",
+            "status_display",
+            "booking_id",
+            "booking_number",
+            "passenger_name",
+            "passenger_email",
+            "passenger_phone",
+            "passenger_date_of_birth",
+            "passenger_gender",
+            "passenger_nationality",
+            "passport_number",
+            "passport_issue_date",
+            "passport_expiry_date",
+            "passport_issue_country",
+        ]
+        read_only_fields = [
+            "id",
+            "status_display",
+            "booking_id",
+            "booking_number",
+            "passenger_name",
+            "passenger_email",
+            "passenger_phone",
+            "passenger_date_of_birth",
+            "passenger_gender",
+            "passenger_nationality",
+            "passport_number",
+            "passport_issue_date",
+            "passport_expiry_date",
+            "passport_issue_country",
+        ]
+
+
 class TourDateSerializer(serializers.ModelSerializer):
     """Serializer for tour dates."""
     
     available_seats_count = serializers.IntegerField(read_only=True)
     booked_seats_count = serializers.IntegerField(read_only=True)
+    seat_slots = serializers.SerializerMethodField()
     
     class Meta:
         model = TourDate
@@ -89,8 +200,15 @@ class TourDateSerializer(serializers.ModelSerializer):
             "is_high_season",
             "available_seats_count",
             "booked_seats_count",
+            "seat_slots",
         ]
-        read_only_fields = ["id", "remaining_seats", "available_seats_count", "booked_seats_count"]
+        read_only_fields = ["id", "remaining_seats", "available_seats_count", "booked_seats_count", "seat_slots"]
+    
+    def get_seat_slots(self, obj):
+        """Return seat slots ordered by seat number."""
+        # Get seat slots, ordered by seat number (natural sort)
+        slots = obj.seat_slots.all().order_by('seat_number')
+        return SeatSlotSerializer(slots, many=True, context=self.context).data
 
 
 class TourPackageSerializer(serializers.ModelSerializer):
@@ -103,6 +221,8 @@ class TourPackageSerializer(serializers.ModelSerializer):
     dates = TourDateSerializer(many=True, read_only=True)
     duration_display = serializers.CharField(read_only=True)
     group_size_display = serializers.CharField(read_only=True)
+    main_image_url = serializers.SerializerMethodField()
+    itinerary_pdf_url = serializers.SerializerMethodField()
     
     class Meta:
         model = TourPackage
@@ -114,7 +234,6 @@ class TourPackageSerializer(serializers.ModelSerializer):
             "slug",
             "summary",
             "description",
-            "city",
             "country",
             "days",
             "nights",
@@ -124,7 +243,6 @@ class TourPackageSerializer(serializers.ModelSerializer):
             "group_size_display",
             "tour_type",
             "category",
-            "tags",
             "highlights",
             "inclusions",
             "exclusions",
@@ -132,23 +250,21 @@ class TourPackageSerializer(serializers.ModelSerializer):
             "cancellation_policy",
             "important_notes",
             "base_price",
-            "currency",
             "badge",
             "main_image",
+            "main_image_url",
             "itinerary_pdf",
+            "itinerary_pdf_url",
             "is_active",
             "is_featured",
             "itinerary_items",
             "images",
             "dates",
             "reseller_groups",
+            "commission",
+            "commission_notes",
             "created_at",
             "updated_at",
-            # Commission fields (read-only for suppliers)
-            "commission_rate",
-            "commission_type",
-            "fixed_commission_amount",
-            "commission_notes",
         ]
         read_only_fields = [
             "id",
@@ -159,12 +275,26 @@ class TourPackageSerializer(serializers.ModelSerializer):
             "updated_at",
             "duration_display",
             "group_size_display",
+            "main_image_url",
+            "itinerary_pdf_url",
             # Commission fields are admin-only
-            "commission_rate",
-            "commission_type",
-            "fixed_commission_amount",
+            "commission",
             "commission_notes",
         ]
+    
+    def get_main_image_url(self, obj):
+        """Return absolute URL for main image if exists."""
+        if obj.main_image:
+            request = self.context.get("request")
+            return build_absolute_image_url(obj.main_image.url, request)
+        return None
+    
+    def get_itinerary_pdf_url(self, obj):
+        """Return absolute URL for itinerary PDF if exists."""
+        if obj.itinerary_pdf:
+            request = self.context.get("request")
+            return build_absolute_image_url(obj.itinerary_pdf.url, request)
+        return None
     
     def validate_slug(self, value):
         """Auto-generate slug from name if not provided."""
@@ -205,7 +335,6 @@ class TourPackageListSerializer(serializers.ModelSerializer):
             "name",
             "slug",
             "summary",
-            "city",
             "country",
             "days",
             "nights",
@@ -213,7 +342,6 @@ class TourPackageListSerializer(serializers.ModelSerializer):
             "tour_type",
             "category",
             "base_price",
-            "currency",
             "badge",
             "main_image_url",
             "is_active",
@@ -249,7 +377,6 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
             "slug",
             "summary",
             "description",
-            "city",
             "country",
             "days",
             "nights",
@@ -259,7 +386,6 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
             "group_size_display",
             "tour_type",
             "category",
-            "tags",
             "highlights",
             "inclusions",
             "exclusions",
@@ -267,7 +393,6 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
             "cancellation_policy",
             "important_notes",
             "base_price",
-            "currency",
             "badge",
             "main_image_url",
             "images",
@@ -328,7 +453,6 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
             "slug",
             "summary",
             "description",
-            "city",
             "country",
             "days",
             "nights",
@@ -336,7 +460,6 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
             "group_type",
             "tour_type",
             "category",
-            "tags",
             "highlights",
             "inclusions",
             "exclusions",
@@ -344,7 +467,6 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
             "cancellation_policy",
             "important_notes",
             "base_price",
-            "currency",
             "badge",
             "main_image",
             "itinerary_pdf",
@@ -353,6 +475,39 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
             "reseller_groups",
         ]
         read_only_fields = ["id", "supplier", "slug"]
+    
+    def validate_highlights(self, value):
+        """Convert list to JSON if needed."""
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                raise serializers.ValidationError("Invalid JSON format")
+        return value
+    
+    def validate_inclusions(self, value):
+        """Convert list to JSON if needed."""
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                raise serializers.ValidationError("Invalid JSON format")
+        return value
+    
+    def validate_exclusions(self, value):
+        """Convert list to JSON if needed."""
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                raise serializers.ValidationError("Invalid JSON format")
+        return value
     
     def validate_slug(self, value):
         """Auto-generate slug from name if not provided."""
@@ -371,6 +526,28 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
                     queryset = queryset.exclude(pk=self.instance.pk)
                 counter += 1
         return value
+    
+    def create(self, validated_data):
+        """Create tour package and auto-generate slug if needed."""
+        # Ensure slug is generated from name if not provided or empty
+        name = validated_data.get("name")
+        if not name:
+            raise serializers.ValidationError({"name": "Name is required to create a tour package."})
+        
+        # Remove slug from validated_data if it's empty or not provided
+        slug = validated_data.pop("slug", None)
+        if not slug or slug == "":
+            slug = slugify(name)
+        
+        # Ensure uniqueness
+        base_slug = slug
+        counter = 1
+        while TourPackage.objects.filter(slug=slug).exists():
+            slug = f"{base_slug}-{counter}"
+            counter += 1
+        
+        validated_data["slug"] = slug
+        return super().create(validated_data)
 
 
 class AdminTourPackageSerializer(serializers.ModelSerializer):
@@ -395,7 +572,6 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
             "slug",
             "summary",
             "description",
-            "city",
             "country",
             "days",
             "nights",
@@ -403,7 +579,6 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
             "group_type",
             "tour_type",
             "category",
-            "tags",
             "highlights",
             "inclusions",
             "exclusions",
@@ -411,7 +586,6 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
             "cancellation_policy",
             "important_notes",
             "base_price",
-            "currency",
             "badge",
             "main_image",
             "itinerary_pdf",
@@ -419,9 +593,7 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
             "is_featured",
             "reseller_groups",
             # Commission fields (editable for admin)
-            "commission_rate",
-            "commission_type",
-            "fixed_commission_amount",
+            "commission",
             "commission_notes",
         ]
         read_only_fields = ["id", "slug"]
