@@ -1,10 +1,8 @@
 from django.contrib import admin
-from django.utils.html import format_html
 from .models import (
     TourPackage,
     TourDate,
     TourImage,
-    ItineraryItem,
     SeatSlot,
     Booking,
     Payment,
@@ -27,7 +25,7 @@ class TourPackageAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ("Basic Information", {
-            "fields": ("supplier", "name", "slug", "summary", "description")
+            "fields": ("supplier", "name", "slug", "summary", "description", "itinerary")
         }),
         ("Location", {
             "fields": ("country",)
@@ -125,8 +123,8 @@ class ResellerGroupAdmin(admin.ModelAdmin):
 
 @admin.register(ResellerTourCommission)
 class ResellerTourCommissionAdmin(admin.ModelAdmin):
-    list_display = ["reseller", "tour_package", "commission_amount", "currency", "is_active"]
-    list_filter = ["is_active", "currency", "tour_package__tour_type"]
+    list_display = ["reseller", "tour_package", "commission_amount", "is_active"]
+    list_filter = ["is_active", "tour_package__tour_type"]
     search_fields = ["reseller__full_name", "tour_package__name"]
     raw_id_fields = ["reseller", "tour_package"]
 
@@ -174,9 +172,9 @@ class BookingAdmin(admin.ModelAdmin):
 
 @admin.register(Payment)
 class PaymentAdmin(admin.ModelAdmin):
-    list_display = ["booking", "amount_display", "currency", "status", "transfer_date", "reviewed_by", "reviewed_at", "created_at"]
+    list_display = ["booking", "amount_display", "status", "transfer_date", "reviewed_by", "reviewed_at", "created_at"]
     list_display_links = ["booking"]
-    list_filter = ["status", "currency", "created_at", "reviewed_at"]
+    list_filter = ["status", "created_at", "reviewed_at"]
     search_fields = ["booking__customer_name", "booking__customer_email", "sender_account_name", "sender_bank_name"]
     readonly_fields = ["created_at", "updated_at"]
     date_hierarchy = "created_at"
@@ -186,7 +184,7 @@ class PaymentAdmin(admin.ModelAdmin):
             "fields": ("booking",)
         }),
         ("Payment Details", {
-            "fields": ("amount", "currency", "transfer_date")
+            "fields": ("amount", "transfer_date")
         }),
         ("Transfer Information", {
             "fields": ("sender_account_name", "sender_bank_name", "sender_account_number", "proof_image")
@@ -207,7 +205,7 @@ class PaymentAdmin(admin.ModelAdmin):
     
     def amount_display(self, obj):
         """Display amount with currency formatting."""
-        return f"{obj.currency} {obj.amount:,}"
+        return f"Rp. {obj.amount:,}"
     amount_display.short_description = "Amount"
 
 
@@ -249,30 +247,6 @@ class TourImageAdmin(admin.ModelAdmin):
             )
         return "No image"
     image_preview.short_description = "Image Preview"
-
-
-@admin.register(ItineraryItem)
-class ItineraryItemAdmin(admin.ModelAdmin):
-    """Admin interface for ItineraryItem."""
-    list_display = ["package", "day_number", "title"]
-    list_display_links = ["package", "title"]
-    list_filter = ["day_number", "package__supplier"]
-    search_fields = ["package__name", "title", "description"]
-    ordering = ["package", "day_number"]
-    
-    fieldsets = (
-        ("Tour Information", {
-            "fields": ("package", "day_number")
-        }),
-        ("Itinerary Details", {
-            "fields": ("title", "description")
-        }),
-    )
-    
-    def get_queryset(self, request):
-        """Optimize queryset with select_related."""
-        qs = super().get_queryset(request)
-        return qs.select_related("package", "package__supplier")
 
 
 @admin.register(SeatSlot)
@@ -329,7 +303,7 @@ class ResellerCommissionAdmin(admin.ModelAdmin):
     
     def amount_display(self, obj):
         """Display amount with currency formatting."""
-        return f"Rp {obj.amount:,}"
+        return f"Rp. {obj.amount:,}"
     amount_display.short_description = "Amount"
     
     def get_queryset(self, request):

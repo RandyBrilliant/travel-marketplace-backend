@@ -1,6 +1,6 @@
 from django.conf import settings
 from django.db import models
-from django.core.validators import MinValueValidator, MaxValueValidator
+from django.core.validators import MinValueValidator
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -113,6 +113,9 @@ class TourPackage(models.Model):
     )
     description = models.TextField(
         help_text=_("Detailed description of the tour package."),
+    )
+    itinerary = models.TextField(
+        help_text=_("Day-by-day itinerary of the tour package."),
     )
 
     # Location information
@@ -534,30 +537,6 @@ class TourImage(models.Model):
     
     def __str__(self) -> str:
         return f"{self.package.name} - Image {self.order}"
-
-
-class ItineraryItem(models.Model):
-    """
-    Daily/step itinerary attached to a package.
-    """
-
-    package = models.ForeignKey(
-        TourPackage,
-        on_delete=models.CASCADE,
-        related_name="itinerary_items",
-    )
-    day_number = models.PositiveIntegerField()
-    title = models.CharField(max_length=255)
-    description = models.TextField(blank=True)
-
-    class Meta:
-        verbose_name = "Itinerary Item"
-        verbose_name_plural = "Itinerary Items"
-        unique_together = ("package", "day_number")
-        ordering = ["day_number", "id"]
-
-    def __str__(self) -> str:
-        return f"Day {self.day_number}: {self.title}"
 
 
 class SeatSlotStatus(models.TextChoices):
@@ -1059,11 +1038,6 @@ class ResellerTourCommission(models.Model):
         validators=[MinValueValidator(1)],
         help_text=_("Fixed commission amount in IDR for this reseller for this tour package. Must be greater than zero."),
     )
-    currency = models.CharField(
-        max_length=10,
-        default="IDR",
-        help_text=_("Currency code (e.g., 'IDR', 'USD')."),
-    )
     is_active = models.BooleanField(
         default=True,
         help_text=_("Whether this commission setting is active."),
@@ -1083,7 +1057,7 @@ class ResellerTourCommission(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.reseller.full_name} - {self.tour_package.name}: {self.commission_amount} {self.currency}"
+        return f"{self.reseller.full_name} - {self.tour_package.name}: {self.commission_amount} IDR"
 
 
 class ResellerCommission(models.Model):

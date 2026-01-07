@@ -7,18 +7,12 @@ from .models import (
     TourPackage,
     TourDate,
     TourImage,
-    ItineraryItem,
-    TourCategory,
-    TourType,
-    TourBadge,
     ResellerTourCommission,
     ResellerGroup,
     Booking,
-    BookingStatus,
     SeatSlot,
     SeatSlotStatus,
     Payment,
-    PaymentStatus,
     ResellerCommission,
 )
 from account.models import ResellerProfile, SupplierProfile
@@ -47,42 +41,6 @@ def build_absolute_image_url(relative_url, request=None):
     # Production: always use HTTPS
     default_domain = getattr(settings, 'API_DOMAIN', None) or os.environ.get('API_DOMAIN', 'api.goholiday.id')
     return f"https://{default_domain}{relative_url}"
-
-
-class ItineraryItemSerializer(serializers.ModelSerializer):
-    """Serializer for itinerary items (day-by-day itinerary)."""
-    
-    class Meta:
-        model = ItineraryItem
-        fields = ["id", "day_number", "title", "description"]
-        read_only_fields = ["id"]
-
-    def validate(self, attrs):
-        """
-        Ensure day_number is unique per package for this itinerary.
-        We keep one itinerary row per day; multiple activities should be in description.
-        """
-        # Package is provided via serializer.save(package=...) in the view
-        package = getattr(self.instance, "package", None)
-        if not package and "package" in attrs:
-            package = attrs["package"]
-
-        day_number = attrs.get("day_number", getattr(self.instance, "day_number", None))
-
-        if package and day_number is not None:
-            qs = ItineraryItem.objects.filter(package=package, day_number=day_number)
-            if self.instance:
-                qs = qs.exclude(pk=self.instance.pk)
-            if qs.exists():
-                raise serializers.ValidationError(
-                    {
-                        "day_number": [
-                            "Itinerary untuk hari ini sudah ada. Tambahkan aktivitas tambahan di deskripsi hari tersebut."
-                        ]
-                    }
-                )
-
-        return attrs
 
 
 class TourImageSerializer(serializers.ModelSerializer):
@@ -227,10 +185,45 @@ class TourDateSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "remaining_seats", "available_seats_count", "booked_seats_count", "seat_slots"]
     
+    def validate_departure_date(self, value):
+        """Validate departure date is in the future and not too far ahead."""
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        if value:
+            today = timezone.now().date()
+            
+            if value < today:
+                raise serializers.ValidationError("Departure date must be in the future.")
+            
+            # Limit advance bookings to 2 years
+            max_future_date = today + timedelta(days=730)
+            if value > max_future_date:
+                raise serializers.ValidationError("Departure date cannot be more than 2 years in the future.")
+        
+        return value
+    
+    def validate_price(self, value):
+        """Validate price is at least 1 IDR."""
+        if value is not None and value < 1:
+            raise serializers.ValidationError("Price must be at least 1 IDR.")
+        return value
+    
+    def validate_total_seats(self, value):
+        """Validate total seats is at least 1."""
+        if value is not None and value < 1:
+            raise serializers.ValidationError("Total seats must be at least 1.")
+        return value
+    
     def get_seat_slots(self, obj):
         """Return seat slots ordered by seat number."""
         # Get seat slots, ordered by seat number (natural sort)
-        slots = obj.seat_slots.all().order_by('seat_number')
+        # Use prefetch_related if available to avoid N+1 queries
+        if hasattr(obj, '_prefetched_objects_cache') and 'seat_slots' in obj._prefetched_objects_cache:
+            slots = obj._prefetched_objects_cache['seat_slots']
+        else:
+            slots = obj.seat_slots.all()
+        slots = sorted(slots, key=lambda x: (len(x.seat_number), x.seat_number))
         return SeatSlotSerializer(slots, many=True, context=self.context).data
 
 
@@ -239,7 +232,6 @@ class TourPackageSerializer(serializers.ModelSerializer):
     
     supplier = serializers.PrimaryKeyRelatedField(read_only=True)
     supplier_name = serializers.CharField(source="supplier.company_name", read_only=True)
-    itinerary_items = ItineraryItemSerializer(many=True, read_only=True)
     images = TourImageSerializer(many=True, read_only=True)
     dates = TourDateSerializer(many=True, read_only=True)
     duration_display = serializers.CharField(read_only=True)
@@ -257,6 +249,7 @@ class TourPackageSerializer(serializers.ModelSerializer):
             "slug",
             "summary",
             "description",
+            "itinerary",
             "country",
             "days",
             "nights",
@@ -280,7 +273,6 @@ class TourPackageSerializer(serializers.ModelSerializer):
             "itinerary_pdf_url",
             "is_active",
             "is_featured",
-            "itinerary_items",
             "images",
             "dates",
             "reseller_groups",
@@ -405,7 +397,6 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
     main_image_url = serializers.SerializerMethodField()
     itinerary_pdf_url = serializers.SerializerMethodField()
     images = TourImageSerializer(many=True, read_only=True)
-    itinerary_items = ItineraryItemSerializer(many=True, read_only=True)
     dates = serializers.SerializerMethodField()
     
     class Meta:
@@ -416,6 +407,7 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
             "slug",
             "summary",
             "description",
+            "itinerary",
             "country",
             "days",
             "nights",
@@ -436,7 +428,6 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
             "main_image_url",
             "itinerary_pdf_url",
             "images",
-            "itinerary_items",
             "dates",
             "supplier_name",
             "is_active",
@@ -471,13 +462,21 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
         """Return available tour dates (only future dates with available seats)."""
         from django.utils import timezone
         
-        # Get future dates with available seats
-        # Note: remaining_seats is a property, not a database field
-        # We need to filter by seat_slots__status instead
-        future_dates = obj.dates.filter(
-            departure_date__gte=timezone.now().date(),
-            seat_slots__status=SeatSlotStatus.AVAILABLE
-        ).distinct().order_by("departure_date")[:10]  # Limit to 10 upcoming dates
+        # Use prefetched dates if available to avoid additional queries
+        if hasattr(obj, '_prefetched_objects_cache') and 'dates' in obj._prefetched_objects_cache:
+            all_dates = obj._prefetched_objects_cache['dates']
+        else:
+            all_dates = obj.dates.prefetch_related("seat_slots").all()
+        
+        # Filter future dates with available seats
+        today = timezone.now().date()
+        future_dates = [
+            date for date in all_dates
+            if date.departure_date >= today and date.remaining_seats > 0
+        ]
+        
+        # Sort by departure date and limit to 10
+        future_dates = sorted(future_dates, key=lambda x: x.departure_date)[:10]
         
         return TourDateSerializer(future_dates, many=True, context=self.context).data
 
@@ -501,6 +500,7 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
             "slug",
             "summary",
             "description",
+            "itinerary",
             "country",
             "days",
             "nights",
@@ -641,6 +641,7 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
             "slug",
             "summary",
             "description",
+            "itinerary",
             "country",
             "days",
             "nights",

@@ -11,7 +11,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 
 from rest_framework.permissions import IsAdminUser, IsAuthenticatedOrReadOnly
 from account.models import UserRole, SupplierProfile, ResellerProfile
-from .models import TourPackage, TourDate, TourImage, ItineraryItem, ResellerTourCommission, ResellerGroup, Booking, BookingStatus, SeatSlotStatus, PaymentStatus
+from .models import TourPackage, TourDate, TourImage, ResellerTourCommission, ResellerGroup, Booking, BookingStatus, SeatSlotStatus, PaymentStatus
 from .serializers import (
     TourPackageSerializer,
     TourPackageListSerializer,
@@ -20,7 +20,6 @@ from .serializers import (
     TourDateSerializer,
     TourImageSerializer,
     TourImageCreateUpdateSerializer,
-    ItineraryItemSerializer,
     ResellerTourCommissionSerializer,
     ResellerGroupSerializer,
     BookingSerializer,
@@ -84,7 +83,7 @@ class SupplierTourPackageViewSet(viewsets.ModelViewSet):
             ).select_related(
                 "supplier", "supplier__user"
             ).prefetch_related(
-                "reseller_groups", "images", "itinerary_items", "dates"
+                "reseller_groups", "images", "dates"
             )
         except SupplierProfile.DoesNotExist:
             return TourPackage.objects.none()
@@ -147,8 +146,14 @@ class SupplierTourPackageViewSet(viewsets.ModelViewSet):
         elif request.method == "POST":
             serializer = TourDateSerializer(data=request.data, context={"request": request})
             serializer.is_valid(raise_exception=True)
-            serializer.save(package=tour_package)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            try:
+                tour_date = serializer.save(package=tour_package)
+                # Prefetch seat_slots for the response
+                tour_date = TourDate.objects.prefetch_related("seat_slots").get(pk=tour_date.pk)
+                response_serializer = TourDateSerializer(tour_date, context={"request": request})
+                return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+            except ValidationError as e:
+                raise ValidationError({"detail": str(e)})
     
     @action(detail=True, methods=["get", "post"], url_path="images")
     def manage_images(self, request, pk=None):
@@ -161,26 +166,15 @@ class SupplierTourPackageViewSet(viewsets.ModelViewSet):
             return Response(serializer.data)
         
         elif request.method == "POST":
-            serializer = TourImageSerializer(data=request.data, context={"request": request})
+            serializer = TourImageCreateUpdateSerializer(data=request.data, context={"request": request})
             serializer.is_valid(raise_exception=True)
-            serializer.save(package=tour_package)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-    
-    @action(detail=True, methods=["get", "post"], url_path="itinerary")
-    def manage_itinerary(self, request, pk=None):
-        """Manage itinerary items for a package."""
-        tour_package = self.get_object()
-        
-        if request.method == "GET":
-            items = tour_package.itinerary_items.all()
-            serializer = ItineraryItemSerializer(items, many=True)
-            return Response(serializer.data)
-        
-        elif request.method == "POST":
-            serializer = ItineraryItemSerializer(data=request.data)
-            serializer.is_valid(raise_exception=True)
-            serializer.save(package=tour_package)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            try:
+                tour_image = serializer.save(package=tour_package)
+                # Use read serializer for response
+                response_serializer = TourImageSerializer(tour_image, context={"request": request})
+                return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+            except ValidationError as e:
+                raise ValidationError({"detail": str(e)})
 
 
 class SupplierTourDateViewSet(viewsets.ModelViewSet):
@@ -273,62 +267,6 @@ class SupplierTourImageViewSet(viewsets.ModelViewSet):
             supplier_profile = SupplierProfile.objects.get(user=self.request.user)
             package = TourPackage.objects.get(pk=package_id, supplier=supplier_profile)
             serializer.save(package=package)
-        except TourPackage.DoesNotExist:
-            raise ValidationError(
-                {"package": ["Tour package not found or you don't have permission to access it."]}
-            )
-
-
-class SupplierItineraryItemViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for suppliers to manage itinerary items.
-    Suppliers can only manage itinerary items for their own tour packages.
-    """
-    
-    permission_classes = [IsSupplier]
-    serializer_class = ItineraryItemSerializer
-    filter_backends = [DjangoFilterBackend, OrderingFilter]
-    filterset_fields = ["package"]
-    ordering_fields = ["day_number", "id"]
-    ordering = ["day_number", "id"]
-    
-    def get_queryset(self):
-        """Return only itinerary items for packages belonging to the authenticated supplier."""
-        if not self.request.user.is_authenticated:
-            return ItineraryItem.objects.none()
-        
-        try:
-            supplier_profile = SupplierProfile.objects.get(user=self.request.user)
-            return ItineraryItem.objects.filter(package__supplier=supplier_profile)
-        except SupplierProfile.DoesNotExist:
-            return ItineraryItem.objects.none()
-    
-    def perform_create(self, serializer):
-        """Verify the package belongs to the supplier before creating."""
-        package_id = self.request.data.get("package")
-        if not package_id:
-            raise ValidationError({"package": ["This field is required."]})
-        
-        try:
-            supplier_profile = SupplierProfile.objects.get(user=self.request.user)
-            package = TourPackage.objects.get(pk=package_id, supplier=supplier_profile)
-            try:
-                serializer.save(package=package)
-            except IntegrityError as e:
-                error_msg = str(e)
-                # Handle unique (package, day_number) constraint with a friendly message
-                if "itineraryitem_package_id_day_number" in error_msg or "day_number" in error_msg:
-                    raise ValidationError(
-                        {
-                            "day_number": [
-                                "Itinerary untuk hari ini sudah ada. Tambahkan aktivitas tambahan di deskripsi hari tersebut."
-                            ]
-                        }
-                    )
-                # Fallback generic validation error
-                raise ValidationError(
-                    {"detail": "Unable to create itinerary item. Please check your input and try again."}
-                )
         except TourPackage.DoesNotExist:
             raise ValidationError(
                 {"package": ["Tour package not found or you don't have permission to access it."]}
@@ -469,7 +407,11 @@ class PublicTourPackageDetailView(APIView):
                 "supplier", "supplier__user"
             ).prefetch_related(
                 "reseller_groups", "reseller_groups__resellers",
-                "images", "itinerary_items", "dates"
+                "images",
+                models.Prefetch(
+                    "dates",
+                    queryset=TourDate.objects.prefetch_related("seat_slots").order_by("departure_date")
+                )
             ).get(pk=pk)
         except TourPackage.DoesNotExist:
             raise Http404("Tour package not found")
@@ -537,7 +479,6 @@ class AdminTourPackageViewSet(viewsets.ModelViewSet):
         ).prefetch_related(
             "reseller_groups",
             "images",
-            "itinerary_items",
             "dates",
         ).all()
         
