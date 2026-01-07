@@ -17,6 +17,9 @@ from .models import (
     BookingStatus,
     SeatSlot,
     SeatSlotStatus,
+    Payment,
+    PaymentStatus,
+    ResellerCommission,
 )
 from account.models import ResellerProfile, SupplierProfile
 
@@ -165,11 +168,10 @@ class TourImageCreateUpdateSerializer(serializers.ModelSerializer):
 
 
 class SeatSlotSerializer(serializers.ModelSerializer):
-    """Serializer for seat slots within a tour date."""
+    """Serializer for seat slots within a tour date with comprehensive passenger details."""
     
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     booking_id = serializers.IntegerField(source="booking.id", read_only=True, allow_null=True)
-    booking_number = serializers.CharField(source="booking.booking_number", read_only=True, allow_null=True)
     
     class Meta:
         model = SeatSlot
@@ -179,7 +181,6 @@ class SeatSlotSerializer(serializers.ModelSerializer):
             "status",
             "status_display",
             "booking_id",
-            "booking_number",
             "passenger_name",
             "passenger_email",
             "passenger_phone",
@@ -190,23 +191,18 @@ class SeatSlotSerializer(serializers.ModelSerializer):
             "passport_issue_date",
             "passport_expiry_date",
             "passport_issue_country",
+            "visa_required",
+            "visa_number",
+            "visa_issue_date",
+            "visa_expiry_date",
+            "visa_type",
+            "special_requests",
+            "emergency_contact_name",
+            "emergency_contact_phone",
+            "created_at",
+            "updated_at",
         ]
-        read_only_fields = [
-            "id",
-            "status_display",
-            "booking_id",
-            "booking_number",
-            "passenger_name",
-            "passenger_email",
-            "passenger_phone",
-            "passenger_date_of_birth",
-            "passenger_gender",
-            "passenger_nationality",
-            "passport_number",
-            "passport_issue_date",
-            "passport_expiry_date",
-            "passport_issue_country",
-        ]
+        read_only_fields = ["id", "status_display", "booking_id", "created_at", "updated_at"]
 
 
 class TourDateSerializer(serializers.ModelSerializer):
@@ -834,39 +830,6 @@ class BookingListSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at", "updated_at", "seats_booked", "total_amount"]
 
 
-class SeatSlotSerializer(serializers.ModelSerializer):
-    """Serializer for seat slot details."""
-    
-    class Meta:
-        model = SeatSlot
-        fields = [
-            "id",
-            "seat_number",
-            "status",
-            "passenger_name",
-            "passenger_email",
-            "passenger_phone",
-            "passenger_date_of_birth",
-            "passenger_gender",
-            "passenger_nationality",
-            "passport_number",
-            "passport_issue_date",
-            "passport_expiry_date",
-            "passport_issue_country",
-            "visa_required",
-            "visa_number",
-            "visa_issue_date",
-            "visa_expiry_date",
-            "visa_type",
-            "special_requests",
-            "emergency_contact_name",
-            "emergency_contact_phone",
-        ]
-        read_only_fields = [
-            "id",
-        ]
-
-
 class BookingSerializer(serializers.ModelSerializer):
     """Detailed serializer for booking detail view."""
     
@@ -915,3 +878,94 @@ class BookingSerializer(serializers.ModelSerializer):
             "subtotal",
         ]
 
+
+# ==================== PAYMENT SERIALIZERS ====================
+
+class PaymentSerializer(serializers.ModelSerializer):
+    """Serializer for payment records with validation."""
+    
+    booking_id = serializers.IntegerField(source="booking.id", read_only=True)
+    booking_customer_name = serializers.CharField(source="booking.customer_name", read_only=True)
+    booking_total_amount = serializers.IntegerField(source="booking.total_amount", read_only=True)
+    
+    class Meta:
+        model = Payment
+        fields = [
+            "id",
+            "booking",
+            "booking_id",
+            "booking_customer_name",
+            "booking_total_amount",
+            "amount",
+            "currency",
+            "transfer_date",
+            "sender_account_name",
+            "sender_bank_name",
+            "sender_account_number",
+            "proof_image",
+            "status",
+            "reviewed_by",
+            "reviewed_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "booking_id",
+            "booking_customer_name",
+            "booking_total_amount",
+            "status",
+            "reviewed_by",
+            "reviewed_at",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class PaymentApprovalSerializer(serializers.ModelSerializer):
+    """Serializer for approving/rejecting payments (admin use)."""
+    
+    class Meta:
+        model = Payment
+        fields = [
+            "id",
+            "status",
+            "reviewed_at",
+        ]
+        read_only_fields = [
+            "id",
+            "reviewed_at",
+        ]
+
+
+# ==================== COMMISSION SERIALIZERS ====================
+
+class ResellerCommissionSerializer(serializers.ModelSerializer):
+    """Serializer for reseller commissions per booking."""
+    
+    reseller_name = serializers.CharField(source="reseller.full_name", read_only=True)
+    reseller_email = serializers.EmailField(source="reseller.user.email", read_only=True)
+    booking_id = serializers.IntegerField(source="booking.id", read_only=True)
+    
+    class Meta:
+        model = ResellerCommission
+        fields = [
+            "id",
+            "booking",
+            "booking_id",
+            "reseller",
+            "reseller_name",
+            "reseller_email",
+            "level",
+            "amount",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "booking_id",
+            "reseller_name",
+            "reseller_email",
+            "created_at",
+            "updated_at",
+        ]

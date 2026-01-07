@@ -1,6 +1,5 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
-from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.utils.translation import gettext_lazy as _
 
@@ -202,26 +201,23 @@ class ResellerProfile(models.Model):
     )
 
     # Commission settings for this reseller (their own sales and downline override).
-    commission_rate = models.DecimalField(
-        max_digits=5,
-        decimal_places=2,
-        default=10.00,
-        validators=[MinValueValidator(0.00), MaxValueValidator(100.00)],
+    base_commission = models.PositiveIntegerField(
+        default=0,
+        validators=[MinValueValidator(0)],
         help_text=_(
-            "Default percentage this reseller earns from the commissionable "
-            "amount of their own bookings (0-100)."
+            "Base commission amount (fixed value) for each sale made directly "
+            "by this reseller."
         ),
     )
-    upline_commission_rate = models.DecimalField(
-        max_digits=5,
-        decimal_places=2,
-        default=3.00,
-        validators=[MinValueValidator(0.00), MaxValueValidator(100.00)],
+    upline_commission_amount = models.PositiveIntegerField(
+        default=0,
+        validators=[MinValueValidator(0)],
         help_text=_(
-            "Suggested percentage for direct upline override commissions, "
-            "if your business logic uses it (0-100)."
+            "Fixed commission amount this reseller earns for each sale made "
+            "by their direct downlines."
         ),
     )
+    
     # Banking information for commission payouts
     bank_name = models.CharField(
         max_length=255,

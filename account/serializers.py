@@ -95,32 +95,38 @@ class SupplierProfileSerializer(serializers.ModelSerializer):
 
 class ResellerProfileSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(read_only=True)
+    email = serializers.EmailField(source="user.email", read_only=True)
     sponsor = serializers.PrimaryKeyRelatedField(
         queryset=ResellerProfile.objects.all(),
         required=False,
         allow_null=True,
     )
+    sponsor_name = serializers.CharField(source="sponsor.full_name", read_only=True)
     sponsor_referral_code = serializers.CharField(
         write_only=True,
         required=False,
         allow_blank=True,
         help_text="Referral code of the sponsor (if joining under someone).",
     )
+    group_root_name = serializers.CharField(source="group_root.full_name", read_only=True, allow_null=True)
 
     class Meta:
         model = ResellerProfile
         fields = [
             "id",
             "user",
+            "email",
             "full_name",
             "contact_phone",
             "address",
             "referral_code",
             "sponsor",
+            "sponsor_name",
             "sponsor_referral_code",
             "group_root",
-            "commission_rate",
-            "upline_commission_rate",
+            "group_root_name",
+            "base_commission",
+            "upline_commission_amount",
             "bank_name",
             "bank_account_name",
             "bank_account_number",
@@ -132,26 +138,28 @@ class ResellerProfileSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "user",
+            "email",
             "referral_code",
             "group_root",
+            "group_root_name",
             "direct_downline_count",
             "created_at",
             "updated_at",
         ]
 
-    def validate_commission_rate(self, value):
-        """Validate commission rate is between 0 and 100."""
-        if value < 0 or value > 100:
+    def validate_base_commission(self, value):
+        """Validate base commission is non-negative."""
+        if value < 0:
             raise serializers.ValidationError(
-                "Commission rate must be between 0 and 100."
+                "Base commission must be greater than or equal to 0."
             )
         return value
 
-    def validate_upline_commission_rate(self, value):
-        """Validate upline commission rate is between 0 and 100."""
-        if value < 0 or value > 100:
+    def validate_upline_commission_amount(self, value):
+        """Validate upline commission amount is non-negative."""
+        if value < 0:
             raise serializers.ValidationError(
-                "Upline commission rate must be between 0 and 100."
+                "Upline commission amount must be greater than or equal to 0."
             )
         return value
 
@@ -174,22 +182,23 @@ class ResellerProfileSerializer(serializers.ModelSerializer):
         if not sponsor or not current_instance:
             return
         
+        # Check for self-sponsorship
+        if sponsor.pk == current_instance.pk:
+            raise serializers.ValidationError(
+                {"sponsor": "A reseller cannot be their own sponsor."}
+            )
+        
         # Check if sponsor is in the current reseller's downline (would create a circle)
         if current_instance.pk:
-            # Get all downlines of the current reseller
+            # Get all downlines of the current reseller using group_root
             downlines = current_instance.all_downlines()
             if sponsor in downlines:
                 raise serializers.ValidationError(
                     {"sponsor": f"Cannot set sponsor: {sponsor.full_name} is in your downline. This would create a circular relationship."}
                 )
-            # Also check direct downlines
-            if sponsor in current_instance.direct_downlines.all():
-                raise serializers.ValidationError(
-                    {"sponsor": f"Cannot set sponsor: {sponsor.full_name} is your direct downline. This would create a circular relationship."}
-                )
 
     def create(self, validated_data):
-        """Create reseller profile and automatically generate referral code if not provided."""
+        """Create reseller profile and automatically generate referral code."""
         # Handle sponsor_referral_code lookup
         sponsor_referral_code = validated_data.pop("sponsor_referral_code", None)
         sponsor = validated_data.get("sponsor")
@@ -203,22 +212,13 @@ class ResellerProfileSerializer(serializers.ModelSerializer):
                     {"sponsor_referral_code": f"Sponsor with referral code '{sponsor_referral_code}' does not exist."}
                 )
         
-        # Generate referral code if not provided (for regular users it's read-only, for admins it may be provided)
+        # Generate referral code if not provided
         referral_code = validated_data.get("referral_code")
         if not referral_code:
             validated_data["referral_code"] = generate_unique_referral_code()
         
-        # Note: Circular validation happens after creation since we need the instance
+        # Create instance (group_root will be set by model's save method)
         instance = super().create(validated_data)
-        
-        # Validate circular relationship after creation
-        if sponsor:
-            self._validate_no_circular_sponsor(sponsor, instance)
-            # If validation passes, update the sponsor (it was already set, but this ensures consistency)
-            if instance.sponsor != sponsor:
-                instance.sponsor = sponsor
-                instance.save()
-        
         return instance
 
     def update(self, instance, validated_data):
@@ -238,11 +238,6 @@ class ResellerProfileSerializer(serializers.ModelSerializer):
         
         # Validate sponsor if it's being set or changed
         if sponsor is not None:
-            # Prevent self-sponsorship
-            if sponsor.pk == instance.pk:
-                raise serializers.ValidationError(
-                    {"sponsor": "A reseller cannot be their own sponsor."}
-                )
             # Prevent circular relationships
             self._validate_no_circular_sponsor(sponsor, instance)
         
