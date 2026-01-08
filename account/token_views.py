@@ -9,8 +9,12 @@ from account.token_serializers import CustomTokenObtainPairSerializer
 
 
 class LoginThrottle(AnonRateThrottle):
-    """Custom throttle for login endpoint - 20 requests per minute."""
-    rate = '20/minute'
+    """Custom throttle for login endpoint - higher rate in development."""
+    def get_rate(self):
+        # Disable throttling in DEBUG mode, use higher rate in production
+        if settings.DEBUG:
+            return None  # No throttling in development
+        return '100/minute'  # Increased from 20/minute
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
@@ -21,7 +25,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
     """
 
     serializer_class = CustomTokenObtainPairSerializer
-    throttle_classes = [LoginThrottle]
+    throttle_classes = [LoginThrottle] if not settings.DEBUG else []
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)

@@ -869,6 +869,9 @@ class RegisterResellerView(APIView):
                     is_active=True,  # Resellers are active by default
                 )
 
+                # Import ResellerProfile before using it
+                from account.models import ResellerProfile
+                
                 # Handle sponsor referral code if provided
                 sponsor = None
                 if sponsor_referral_code:
@@ -882,7 +885,6 @@ class RegisterResellerView(APIView):
                         )
 
                 # Create reseller profile directly (bypass serializer since user is read-only)
-                from account.models import ResellerProfile
                 profile = ResellerProfile.objects.create(
                     user=user,
                     full_name=full_name,

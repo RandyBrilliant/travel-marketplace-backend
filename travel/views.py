@@ -5,6 +5,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.views import APIView
 from django.db import transaction, models
 from django.db.utils import IntegrityError
+from django.utils import timezone
 from django.utils.text import slugify
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
@@ -479,7 +480,7 @@ class AdminTourPackageViewSet(viewsets.ModelViewSet):
         ).prefetch_related(
             "reseller_groups",
             "images",
-            "dates",
+            "dates__seat_slots",
         ).all()
         
         # Filter by supplier
@@ -578,14 +579,22 @@ class AdminResellerTourCommissionViewSet(viewsets.ModelViewSet):
         return queryset
 
 
-class SupplierBookingViewSet(viewsets.ReadOnlyModelViewSet):
+class SupplierBookingViewSet(viewsets.ModelViewSet):
     """
-    ViewSet for suppliers to view bookings for their own tours.
-    Suppliers can only view bookings, not confirm or cancel them.
+    ViewSet for suppliers to view and manage bookings for their own tours.
+    Suppliers can update booking status and payment status.
     """
     
     permission_classes = [IsSupplier]
     queryset = Booking.objects.all()
+    
+    def get_serializer_class(self):
+        if self.action in ['update', 'partial_update']:
+            from .serializers import BookingUpdateSerializer
+            return BookingUpdateSerializer
+        if self.action == "list":
+            return BookingListSerializer
+        return BookingSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ["status", "tour_date", "tour_date__package"]
     search_fields = [
@@ -805,6 +814,46 @@ class SupplierBookingViewSet(viewsets.ReadOnlyModelViewSet):
             current_date += timedelta(days=1)
         
         return Response(chart_data)
+    
+    @action(detail=True, methods=["patch"], url_path="payment/status")
+    def update_payment_status(self, request, pk=None):
+        """Update payment status for a booking."""
+        booking = self.get_object()
+        
+        # Ensure supplier owns this booking's tour
+        if booking.tour_date.package.supplier.user != request.user:
+            return Response(
+                {"detail": "You do not have permission to update this booking."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        if not hasattr(booking, 'payment') or not booking.payment:
+            return Response(
+                {"detail": "Booking does not have a payment."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        new_status = request.data.get('status')
+        if not new_status:
+            return Response(
+                {"detail": "Status is required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if new_status not in [PaymentStatus.PENDING, PaymentStatus.APPROVED, PaymentStatus.REJECTED]:
+            return Response(
+                {"detail": f"Invalid status. Must be one of: {', '.join([PaymentStatus.PENDING, PaymentStatus.APPROVED, PaymentStatus.REJECTED])}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        payment = booking.payment
+        payment.status = new_status
+        payment.reviewed_by = request.user
+        payment.reviewed_at = timezone.now()
+        payment.save()
+        
+        serializer = self.get_serializer(booking)
+        return Response(serializer.data)
 
 
 class ResellerBookingViewSet(viewsets.ModelViewSet):
@@ -892,14 +941,23 @@ class ResellerBookingViewSet(viewsets.ModelViewSet):
             )
 
 
-class AdminBookingViewSet(viewsets.ReadOnlyModelViewSet):
+class AdminBookingViewSet(viewsets.ModelViewSet):
     """
     ViewSet for admin to view and manage bookings.
     Admin can view all bookings, filter by status, reseller, tour date, etc.
+    Admin can update booking status directly.
     """
     
     permission_classes = [IsAdminUser]
     queryset = Booking.objects.all()
+    
+    def get_serializer_class(self):
+        if self.action in ['update', 'partial_update']:
+            from .serializers import BookingUpdateSerializer
+            return BookingUpdateSerializer
+        if self.action == "list":
+            return BookingListSerializer
+        return BookingSerializer
     
     def get_queryset(self):
         """Optimize queryset by prefetching related objects."""
@@ -1193,6 +1251,79 @@ class AdminBookingViewSet(viewsets.ReadOnlyModelViewSet):
         
         # Release seat slots
         booking.seat_slots.update(status=SeatSlotStatus.AVAILABLE, booking=None)
+        
+        serializer = self.get_serializer(booking)
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=["post"], url_path="payment/approve")
+    def approve_payment(self, request, pk=None):
+        """Approve a payment for a booking."""
+        booking = self.get_object()
+        
+        if not hasattr(booking, 'payment') or not booking.payment:
+            return Response(
+                {"detail": "Booking does not have a payment."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        payment = booking.payment
+        payment.status = PaymentStatus.APPROVED
+        payment.reviewed_by = request.user
+        payment.reviewed_at = timezone.now()
+        payment.save()
+        
+        serializer = self.get_serializer(booking)
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=["post"], url_path="payment/reject")
+    def reject_payment(self, request, pk=None):
+        """Reject a payment for a booking."""
+        booking = self.get_object()
+        
+        if not hasattr(booking, 'payment') or not booking.payment:
+            return Response(
+                {"detail": "Booking does not have a payment."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        payment = booking.payment
+        payment.status = PaymentStatus.REJECTED
+        payment.reviewed_by = request.user
+        payment.reviewed_at = timezone.now()
+        payment.save()
+        
+        serializer = self.get_serializer(booking)
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=["patch"], url_path="payment/status")
+    def update_payment_status(self, request, pk=None):
+        """Update payment status for a booking."""
+        booking = self.get_object()
+        
+        if not hasattr(booking, 'payment') or not booking.payment:
+            return Response(
+                {"detail": "Booking does not have a payment."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        new_status = request.data.get('status')
+        if not new_status:
+            return Response(
+                {"detail": "Status is required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if new_status not in [PaymentStatus.PENDING, PaymentStatus.APPROVED, PaymentStatus.REJECTED]:
+            return Response(
+                {"detail": f"Invalid status. Must be one of: {', '.join([PaymentStatus.PENDING, PaymentStatus.APPROVED, PaymentStatus.REJECTED])}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        payment = booking.payment
+        payment.status = new_status
+        payment.reviewed_by = request.user
+        payment.reviewed_at = timezone.now()
+        payment.save()
         
         serializer = self.get_serializer(booking)
         return Response(serializer.data)

@@ -194,6 +194,23 @@ if DEBUG and not CORS_ALLOWED_ORIGINS:
     ]
 CORS_ALLOW_CREDENTIALS = True
 
+# Throttle configuration - disable in DEBUG mode, use higher limits in production
+if DEBUG:
+    # Disable throttling in development
+    REST_FRAMEWORK_THROTTLE_CLASSES = []
+    REST_FRAMEWORK_THROTTLE_RATES = {}
+else:
+    # Production throttling with higher limits
+    REST_FRAMEWORK_THROTTLE_CLASSES = [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle'
+    ]
+    REST_FRAMEWORK_THROTTLE_RATES = {
+        'anon': '10000/hour',  # Increased from 100/hour
+        'user': '100000/hour',  # Increased from 1000/hour
+        'login': '100/minute',  # Increased from 5/minute
+    }
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "account.authentication.CookieJWTAuthentication",  # Custom cookie-based JWT auth
@@ -206,15 +223,8 @@ REST_FRAMEWORK = {
     "DEFAULT_FILTER_BACKENDS": (
         "django_filters.rest_framework.DjangoFilterBackend",
     ),
-    'DEFAULT_THROTTLE_CLASSES': [
-        'rest_framework.throttling.AnonRateThrottle',
-        'rest_framework.throttling.UserRateThrottle'
-    ],
-    'DEFAULT_THROTTLE_RATES': {
-        'anon': '100/hour',
-        'user': '1000/hour',
-        'login': '5/minute',  # For login endpoints
-    },
+    'DEFAULT_THROTTLE_CLASSES': REST_FRAMEWORK_THROTTLE_CLASSES,
+    'DEFAULT_THROTTLE_RATES': REST_FRAMEWORK_THROTTLE_RATES,
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
     'PAGE_SIZE_QUERY_PARAM': 'page_size',

@@ -31,9 +31,9 @@ except ImportError:
 
 from account.models import CustomUser, SupplierProfile, ResellerProfile, StaffProfile, UserRole
 from travel.models import (
-    TourPackage, TourDate, TourImage, ItineraryItem, Booking, Payment,
+    TourPackage, TourDate, TourImage, Booking, Payment,
     SeatSlot, SeatSlotStatus, BookingStatus, PaymentStatus,
-    TourCategory, TourBadge, TourType, ResellerGroup
+    TourCategory, TourBadge, TourType, GroupType, ResellerGroup
 )
 
 
@@ -86,7 +86,6 @@ class Command(BaseCommand):
         SeatSlot.objects.all().delete()
         TourDate.objects.all().delete()
         TourImage.objects.all().delete()
-        ItineraryItem.objects.all().delete()
         TourPackage.objects.all().delete()
         ResellerGroup.objects.all().delete()
         ResellerProfile.objects.all().delete()
@@ -408,8 +407,8 @@ class Command(BaseCommand):
                 address=data['address'],
                 referral_code=referral_code,
                 sponsor=sponsor,
-                commission_rate=random.uniform(8.0, 15.0),
-                upline_commission_rate=random.uniform(2.0, 5.0),
+                base_commission=random.randint(50000, 200000),  # Fixed amount in IDR
+                upline_commission_amount=random.randint(25000, 100000),  # Fixed amount in IDR
                 bank_name=data['bank_name'],
                 bank_account_name=data['bank_account_name'],
                 bank_account_number=data['bank_account_number'],
@@ -479,15 +478,14 @@ class Command(BaseCommand):
                 'name': '3D2N Bali Cultural Experience',
                 'summary': 'Discover the rich culture and stunning landscapes of Bali',
                 'description': 'Experience the best of Bali with visits to ancient temples, rice terraces, and traditional villages. Includes accommodation, meals, and guided tours.',
-                'city': 'Ubud',
+                'itinerary': 'Day 1: Arrival in Bali & Ubud Orientation - Airport pickup from Ngurah Rai International Airport. Transfer to Ubud hotel with check-in. Welcome dinner at traditional Balinese restaurant.\n\nDay 2: Cultural Immersion Day - Early morning visit to Tegalalang Rice Terrace for sunrise views. Visit Tirta Empul Temple for holy water purification ritual. Explore Ubud Monkey Forest and learn about Balinese Hinduism.\n\nDay 3: Departure - Morning breakfast at hotel. Last-minute souvenir shopping at Ubud Market. Check-out and transfer to Ngurah Rai International Airport.',
                 'country': 'Indonesia',
                 'days': 3,
                 'nights': 2,
                 'max_group_size': 12,
-                'group_type': 'Small Group',
+                'group_type': GroupType.SMALL_GROUP,
                 'tour_type': TourType.CONVENTIONAL,
                 'category': TourCategory.CULTURAL,
-                'tags': ['Temple', 'Rice Terrace', 'Traditional'],
                 'highlights': ['Tegalalang Rice Terrace', 'Tirta Empul Temple', 'Ubud Monkey Forest', 'Traditional Balinese Dance'],
                 'inclusions': ['2 nights hotel accommodation', 'Daily breakfast', 'Airport transfers', 'English speaking guide', 'Entrance fees'],
                 'exclusions': ['International flights', 'Lunch and dinner', 'Travel insurance', 'Personal expenses'],
@@ -495,7 +493,6 @@ class Command(BaseCommand):
                 'cancellation_policy': 'Free cancellation up to 7 days before departure. 50% refund for cancellations 3-7 days before. No refund for cancellations less than 3 days.',
                 'important_notes': 'Please bring comfortable walking shoes and appropriate clothing for temple visits.',
                 'base_price': 3500000,
-                'currency': 'IDR',
                 'badge': TourBadge.BEST_SELLER,
                 'is_featured': True,
                 'reseller_groups': [0],  # Premium Partners
@@ -505,15 +502,13 @@ class Command(BaseCommand):
                 'name': '4D3N Bali Beach & Island Hopping',
                 'summary': 'Explore Bali\'s beautiful beaches and surrounding islands',
                 'description': 'Visit Nusa Penida, enjoy water sports, and relax on pristine beaches. Perfect for beach lovers and adventure seekers.',
-                'city': 'Nusa Dua',
                 'country': 'Indonesia',
                 'days': 4,
                 'nights': 3,
                 'max_group_size': 15,
-                'group_type': 'Small Group',
+                'group_type': GroupType.SMALL_GROUP,
                 'tour_type': TourType.CONVENTIONAL,
                 'category': TourCategory.ADVENTURE,
-                'tags': ['Beach', 'Island Hopping', 'Snorkeling'],
                 'highlights': ['Nusa Penida Island', 'Crystal Bay', 'Kelingking Beach', 'Snorkeling with Manta Rays', 'Water sports'],
                 'inclusions': ['3 nights beachfront hotel', 'Daily breakfast', 'Boat transfers', 'Snorkeling equipment', 'English speaking guide'],
                 'exclusions': ['International flights', 'Lunch and dinner', 'Travel insurance', 'Personal expenses'],
@@ -521,7 +516,6 @@ class Command(BaseCommand):
                 'cancellation_policy': 'Free cancellation up to 7 days before departure. 50% refund for cancellations 3-7 days before.',
                 'important_notes': 'Swimming skills recommended for water activities.',
                 'base_price': 4500000,
-                'currency': 'IDR',
                 'badge': TourBadge.POPULAR,
                 'is_featured': True,
                 'reseller_groups': [0, 3],  # Premium Partners & Bali Specialists
@@ -531,15 +525,13 @@ class Command(BaseCommand):
                 'name': '5D4N Bali Muslim Tour',
                 'summary': 'Halal-friendly tour of Bali with halal meals and prayer facilities',
                 'description': 'A specially curated tour for Muslim travelers with halal-certified restaurants, prayer facilities, and visits to all major attractions.',
-                'city': 'Denpasar',
                 'country': 'Indonesia',
                 'days': 5,
                 'nights': 4,
                 'max_group_size': 12,
-                'group_type': 'Small Group',
+                'group_type': GroupType.SMALL_GROUP,
                 'tour_type': TourType.MUSLIM,
                 'category': TourCategory.CULTURAL,
-                'tags': ['Halal', 'Muslim-Friendly', 'Temple'],
                 'highlights': ['Tanah Lot Temple', 'Uluwatu Temple', 'Halal restaurants', 'Prayer facilities', 'Cultural shows'],
                 'inclusions': ['4 nights halal-certified hotel', 'Halal breakfast and lunch', 'Private transportation', 'English speaking guide', 'Prayer time arrangements'],
                 'exclusions': ['International flights', 'Dinner', 'Travel insurance', 'Personal expenses'],
@@ -547,7 +539,6 @@ class Command(BaseCommand):
                 'cancellation_policy': 'Free cancellation up to 7 days before departure. 50% refund for cancellations 3-7 days before.',
                 'important_notes': 'All meals are halal-certified. Prayer times will be accommodated during the tour.',
                 'base_price': 5500000,
-                'currency': 'IDR',
                 'badge': TourBadge.NEW,
                 'is_featured': True,
                 'reseller_groups': [0, 3],  # Premium Partners & Bali Specialists
@@ -557,15 +548,13 @@ class Command(BaseCommand):
                 'name': '3D2N Yogyakarta Heritage Tour',
                 'summary': 'Explore the ancient Javanese kingdom and cultural heritage',
                 'description': 'Visit Borobudur and Prambanan temples, explore the Kraton palace, and experience traditional Javanese culture.',
-                'city': 'Yogyakarta',
                 'country': 'Indonesia',
                 'days': 3,
                 'nights': 2,
                 'max_group_size': 20,
-                'group_type': 'Large Group',
+                'group_type': GroupType.LARGE_GROUP,
                 'tour_type': TourType.CONVENTIONAL,
                 'category': TourCategory.CULTURAL,
-                'tags': ['Borobudur', 'Prambanan', 'Temple'],
                 'highlights': ['Borobudur Temple', 'Prambanan Temple', 'Kraton Palace', 'Taman Sari', 'Malioboro Street'],
                 'inclusions': ['2 nights hotel accommodation', 'Daily breakfast', 'Private transportation', 'English speaking guide', 'All entrance fees'],
                 'exclusions': ['International flights', 'Lunch and dinner', 'Travel insurance', 'Personal expenses'],
@@ -573,7 +562,6 @@ class Command(BaseCommand):
                 'cancellation_policy': 'Free cancellation up to 7 days before departure. 50% refund for cancellations 3-7 days before.',
                 'important_notes': 'Early morning visit to Borobudur recommended for sunrise view.',
                 'base_price': 2800000,
-                'currency': 'IDR',
                 'badge': TourBadge.BEST_SELLER,
                 'is_featured': True,
                 'reseller_groups': [],  # Available to all
@@ -583,15 +571,13 @@ class Command(BaseCommand):
                 'name': '4D3N Jogja & Solo Cultural Tour',
                 'summary': 'Immerse yourself in Javanese culture and royal heritage',
                 'description': 'Discover both Yogyakarta and Solo, visit ancient temples, royal palaces, and experience traditional batik making.',
-                'city': 'Yogyakarta',
                 'country': 'Indonesia',
                 'days': 4,
                 'nights': 3,
                 'max_group_size': 15,
-                'group_type': 'Small Group',
+                'group_type': GroupType.SMALL_GROUP,
                 'tour_type': TourType.CONVENTIONAL,
                 'category': TourCategory.CULTURAL,
-                'tags': ['Culture', 'Palace', 'Batik'],
                 'highlights': ['Borobudur Temple', 'Prambanan Temple', 'Kraton Solo', 'Batik Workshop', 'Traditional Market'],
                 'inclusions': ['3 nights hotel accommodation', 'Daily breakfast', 'Private transportation', 'English speaking guide', 'Batik workshop'],
                 'exclusions': ['International flights', 'Lunch and dinner', 'Travel insurance'],
@@ -599,7 +585,6 @@ class Command(BaseCommand):
                 'cancellation_policy': 'Free cancellation up to 7 days before departure.',
                 'important_notes': 'Comfortable clothes for batik workshop.',
                 'base_price': 3800000,
-                'currency': 'IDR',
                 'badge': None,
                 'is_featured': False,
                 'reseller_groups': [0, 1],  # Premium & Standard
@@ -609,15 +594,13 @@ class Command(BaseCommand):
                 'name': '2D1N Mount Bromo Sunrise Tour',
                 'summary': 'Witness the spectacular sunrise over Mount Bromo',
                 'description': 'Early morning trek to Mount Bromo viewpoint, watch the sunrise, and explore the volcanic landscape. Perfect for nature and photography enthusiasts.',
-                'city': 'Probolinggo',
                 'country': 'Indonesia',
                 'days': 2,
                 'nights': 1,
                 'max_group_size': 12,
-                'group_type': 'Small Group',
+                'group_type': GroupType.SMALL_GROUP,
                 'tour_type': TourType.CONVENTIONAL,
                 'category': TourCategory.ADVENTURE,
-                'tags': ['Volcano', 'Sunrise', 'Adventure'],
                 'highlights': ['Mount Bromo Sunrise', 'Savannah Viewpoint', 'Mount Bromo Crater', 'Sea of Sand', 'Madakaripura Waterfall'],
                 'inclusions': ['1 night hotel accommodation', 'Breakfast', 'Jeep transportation', 'English speaking guide', 'Entrance fees'],
                 'exclusions': ['Lunch and dinner', 'Travel insurance', 'Personal expenses'],
@@ -625,7 +608,6 @@ class Command(BaseCommand):
                 'cancellation_policy': 'Free cancellation up to 5 days before departure. 50% refund for cancellations 2-5 days before.',
                 'important_notes': 'Early departure (2-3 AM) for sunrise. Warm clothing recommended due to cold temperatures.',
                 'base_price': 1800000,
-                'currency': 'IDR',
                 'badge': TourBadge.POPULAR,
                 'is_featured': True,
                 'reseller_groups': [],  # Available to all
@@ -635,15 +617,13 @@ class Command(BaseCommand):
                 'name': '3D2N Bromo & Ijen Blue Fire Tour',
                 'summary': 'Experience two iconic volcanoes - Bromo and Ijen',
                 'description': 'Watch sunrise at Mount Bromo and see the famous blue fire at Ijen Crater. An unforgettable adventure through Java\'s volcanic landscape.',
-                'city': 'Banyuwangi',
                 'country': 'Indonesia',
                 'days': 3,
                 'nights': 2,
                 'max_group_size': 10,
-                'group_type': 'Small Group',
+                'group_type': GroupType.SMALL_GROUP,
                 'tour_type': TourType.CONVENTIONAL,
                 'category': TourCategory.ADVENTURE,
-                'tags': ['Volcano', 'Blue Fire', 'Adventure'],
                 'highlights': ['Mount Bromo Sunrise', 'Ijen Blue Fire', 'Ijen Crater', 'Sulfur Mining', 'Volcanic Landscape'],
                 'inclusions': ['2 nights hotel accommodation', 'Daily breakfast', 'Jeep transportation', 'English speaking guide', 'All entrance fees'],
                 'exclusions': ['Lunch and dinner', 'Travel insurance', 'Gas mask rental'],
@@ -651,7 +631,6 @@ class Command(BaseCommand):
                 'cancellation_policy': 'Free cancellation up to 7 days before departure.',
                 'important_notes': 'Strenuous activity. Good physical fitness required. Gas mask required for Ijen visit.',
                 'base_price': 3500000,
-                'currency': 'IDR',
                 'badge': TourBadge.TOP_RATED,
                 'is_featured': True,
                 'reseller_groups': [0, 1],  # Premium & Standard
@@ -661,15 +640,13 @@ class Command(BaseCommand):
                 'name': '5D4N Raja Ampat Diving Paradise',
                 'summary': 'Dive into the world\'s most biodiverse marine ecosystem',
                 'description': 'Experience world-class diving and snorkeling in Raja Ampat, home to 75% of the world\'s coral species. Perfect for divers and marine enthusiasts.',
-                'city': 'Raja Ampat',
                 'country': 'Indonesia',
                 'days': 5,
                 'nights': 4,
                 'max_group_size': 8,
-                'group_type': 'Small Group',
+                'group_type': GroupType.SMALL_GROUP,
                 'tour_type': TourType.CONVENTIONAL,
                 'category': TourCategory.ADVENTURE,
-                'tags': ['Diving', 'Snorkeling', 'Marine Life'],
                 'highlights': ['Manta Ray Spotting', 'Coral Reef Diving', 'Island Hopping', 'Bird Watching', 'Pristine Beaches'],
                 'inclusions': ['4 nights accommodation', 'All meals', 'Diving/snorkeling equipment', 'Boat transfers', 'English speaking guide'],
                 'exclusions': ['International flights', 'Travel insurance', 'Diving certification'],
@@ -677,7 +654,6 @@ class Command(BaseCommand):
                 'cancellation_policy': 'Free cancellation up to 14 days before departure. 30% refund for cancellations 7-14 days before.',
                 'important_notes': 'Diving certification required for diving activities. Snorkeling available for non-divers.',
                 'base_price': 12500000,
-                'currency': 'IDR',
                 'badge': TourBadge.BEST_SELLER,
                 'is_featured': True,
                 'reseller_groups': [0],  # Premium Partners only
@@ -687,15 +663,13 @@ class Command(BaseCommand):
                 'name': '3D2N Komodo Island Adventure',
                 'summary': 'Meet the legendary Komodo dragons in their natural habitat',
                 'description': 'Visit Komodo National Park, see Komodo dragons up close, enjoy pink beach, and experience one of Indonesia\'s most unique destinations.',
-                'city': 'Labuan Bajo',
                 'country': 'Indonesia',
                 'days': 3,
                 'nights': 2,
                 'max_group_size': 15,
-                'group_type': 'Small Group',
+                'group_type': GroupType.SMALL_GROUP,
                 'tour_type': TourType.CONVENTIONAL,
                 'category': TourCategory.ADVENTURE,
-                'tags': ['Komodo Dragon', 'National Park', 'Beach'],
                 'highlights': ['Komodo Dragon Sightings', 'Pink Beach', 'Padar Island', 'Snorkeling', 'Sunset Viewing'],
                 'inclusions': ['2 nights hotel/accommodation', 'Daily meals', 'Boat transportation', 'Park entrance fees', 'English speaking guide'],
                 'exclusions': ['International flights', 'Travel insurance', 'Personal expenses'],
@@ -703,7 +677,6 @@ class Command(BaseCommand):
                 'cancellation_policy': 'Free cancellation up to 7 days before departure.',
                 'important_notes': 'Follow guide instructions when near Komodo dragons. Sunscreen and hat recommended.',
                 'base_price': 4500000,
-                'currency': 'IDR',
                 'badge': TourBadge.POPULAR,
                 'is_featured': True,
                 'reseller_groups': [],  # Available to all
@@ -713,15 +686,13 @@ class Command(BaseCommand):
                 'name': '4D3N Komodo & Rinca Island Tour',
                 'summary': 'Comprehensive tour of Komodo National Park',
                 'description': 'Explore both Komodo and Rinca islands, see multiple dragons, enjoy world-class snorkeling, and relax on pristine beaches.',
-                'city': 'Labuan Bajo',
                 'country': 'Indonesia',
                 'days': 4,
                 'nights': 3,
                 'max_group_size': 12,
-                'group_type': 'Small Group',
+                'group_type': GroupType.SMALL_GROUP,
                 'tour_type': TourType.CONVENTIONAL,
                 'category': TourCategory.ADVENTURE,
-                'tags': ['Komodo Dragon', 'Island Hopping', 'Snorkeling'],
                 'highlights': ['Komodo Island', 'Rinca Island', 'Pink Beach', 'Manta Point', 'Kanawa Island'],
                 'inclusions': ['3 nights accommodation', 'All meals', 'Boat transportation', 'All entrance fees', 'English speaking guide'],
                 'exclusions': ['International flights', 'Travel insurance'],
@@ -729,7 +700,6 @@ class Command(BaseCommand):
                 'cancellation_policy': 'Free cancellation up to 7 days before departure.',
                 'important_notes': 'Physical activity involved. Follow safety guidelines around Komodo dragons.',
                 'base_price': 6500000,
-                'currency': 'IDR',
                 'badge': None,
                 'is_featured': False,
                 'reseller_groups': [0, 1],  # Premium & Standard
@@ -739,15 +709,13 @@ class Command(BaseCommand):
                 'name': '4D3N Lombok Beach Paradise',
                 'summary': 'Discover the pristine beaches and waterfalls of Lombok',
                 'description': 'Experience Lombok\'s stunning beaches, waterfalls, and traditional Sasak culture. Visit Gili Islands and enjoy water activities.',
-                'city': 'Senggigi',
                 'country': 'Indonesia',
                 'days': 4,
                 'nights': 3,
                 'max_group_size': 15,
-                'group_type': 'Small Group',
+                'group_type': GroupType.SMALL_GROUP,
                 'tour_type': TourType.CONVENTIONAL,
                 'category': TourCategory.BEACH,
-                'tags': ['Beach', 'Gili Islands', 'Waterfall'],
                 'highlights': ['Gili Trawangan', 'Sendang Gile Waterfall', 'Sasak Village', 'Snorkeling', 'Sunset Viewing'],
                 'inclusions': ['3 nights beachfront hotel', 'Daily breakfast', 'Boat transfers to Gili', 'English speaking guide', 'Snorkeling equipment'],
                 'exclusions': ['Lunch and dinner', 'Travel insurance', 'Personal expenses'],
@@ -755,7 +723,6 @@ class Command(BaseCommand):
                 'cancellation_policy': 'Free cancellation up to 7 days before departure.',
                 'important_notes': 'Swimming skills recommended. Sunscreen essential.',
                 'base_price': 3800000,
-                'currency': 'IDR',
                 'badge': TourBadge.NEW,
                 'is_featured': False,
                 'reseller_groups': [1, 2],  # Standard & New Partners
@@ -765,15 +732,13 @@ class Command(BaseCommand):
                 'name': '2D1N Jakarta City Experience',
                 'summary': 'Explore the vibrant capital city of Indonesia',
                 'description': 'Discover Jakarta\'s modern attractions, historical sites, and culinary scene. Perfect for city lovers and food enthusiasts.',
-                'city': 'Jakarta',
                 'country': 'Indonesia',
                 'days': 2,
                 'nights': 1,
                 'max_group_size': 20,
-                'group_type': 'Large Group',
+                'group_type': GroupType.LARGE_GROUP,
                 'tour_type': TourType.CONVENTIONAL,
                 'category': TourCategory.CITY_BREAK,
-                'tags': ['City', 'Culture', 'Food'],
                 'highlights': ['National Monument', 'Old Batavia', 'Jakarta Cathedral', 'Istiqlal Mosque', 'Culinary Tour'],
                 'inclusions': ['1 night hotel accommodation', 'Breakfast', 'City tour transportation', 'English speaking guide', 'Entrance fees'],
                 'exclusions': ['Lunch and dinner', 'Travel insurance', 'Personal expenses'],
@@ -781,7 +746,6 @@ class Command(BaseCommand):
                 'cancellation_policy': 'Free cancellation up to 3 days before departure.',
                 'important_notes': 'Traffic can be heavy. Comfortable walking shoes recommended.',
                 'base_price': 1500000,
-                'currency': 'IDR',
                 'badge': None,
                 'is_featured': False,
                 'reseller_groups': [1, 2],  # Standard & New Partners
@@ -791,15 +755,13 @@ class Command(BaseCommand):
                 'name': '3D2N Bandung Highland Escape',
                 'summary': 'Enjoy cool weather and beautiful landscapes in Bandung',
                 'description': 'Experience Bandung\'s cool climate, volcanic hot springs, tea plantations, and shopping outlets. Perfect for relaxation and nature lovers.',
-                'city': 'Bandung',
                 'country': 'Indonesia',
                 'days': 3,
                 'nights': 2,
                 'max_group_size': 18,
-                'group_type': 'Large Group',
+                'group_type': GroupType.LARGE_GROUP,
                 'tour_type': TourType.CONVENTIONAL,
                 'category': TourCategory.NATURE,
-                'tags': ['Highland', 'Tea Plantation', 'Hot Spring'],
                 'highlights': ['Tangkuban Perahu Volcano', 'Kawah Putih', 'Ciater Hot Springs', 'Tea Plantations', 'Shopping Outlets'],
                 'inclusions': ['2 nights hotel accommodation', 'Daily breakfast', 'Private transportation', 'English speaking guide', 'Entrance fees'],
                 'exclusions': ['Lunch and dinner', 'Travel insurance', 'Personal expenses'],
@@ -807,7 +769,6 @@ class Command(BaseCommand):
                 'cancellation_policy': 'Free cancellation up to 5 days before departure.',
                 'important_notes': 'Cool weather, bring jacket. Mountain roads can be winding.',
                 'base_price': 2200000,
-                'currency': 'IDR',
                 'badge': None,
                 'is_featured': False,
                 'reseller_groups': [1],  # Standard Partners
@@ -817,15 +778,13 @@ class Command(BaseCommand):
                 'name': '4D3N Lake Toba Cultural Tour',
                 'summary': 'Experience the beauty and culture of Lake Toba',
                 'description': 'Visit the largest volcanic lake in Indonesia, learn about Batak culture, and enjoy the scenic beauty of Samosir Island.',
-                'city': 'Parapat',
                 'country': 'Indonesia',
                 'days': 4,
                 'nights': 3,
                 'max_group_size': 15,
-                'group_type': 'Small Group',
+                'group_type': GroupType.SMALL_GROUP,
                 'tour_type': TourType.CONVENTIONAL,
                 'category': TourCategory.CULTURAL,
-                'tags': ['Lake', 'Batak Culture', 'Nature'],
                 'highlights': ['Lake Toba', 'Samosir Island', 'Batak Houses', 'Traditional Dance', 'Sipiso-piso Waterfall'],
                 'inclusions': ['3 nights hotel accommodation', 'Daily breakfast', 'Boat transfers', 'English speaking guide', 'Cultural show'],
                 'exclusions': ['Lunch and dinner', 'Travel insurance', 'Personal expenses'],
@@ -833,7 +792,6 @@ class Command(BaseCommand):
                 'cancellation_policy': 'Free cancellation up to 7 days before departure.',
                 'important_notes': 'Relaxed pace, perfect for cultural immersion.',
                 'base_price': 3500000,
-                'currency': 'IDR',
                 'badge': None,
                 'is_featured': False,
                 'reseller_groups': [1],  # Standard Partners
@@ -843,15 +801,13 @@ class Command(BaseCommand):
                 'name': '4D3N Toraja Funeral Ceremony Experience',
                 'summary': 'Witness unique Torajan funeral ceremonies and traditional architecture',
                 'description': 'Experience the fascinating Torajan culture, traditional houses, burial cliffs, and if timing allows, witness a traditional funeral ceremony.',
-                'city': 'Rantepao',
                 'country': 'Indonesia',
                 'days': 4,
                 'nights': 3,
                 'max_group_size': 12,
-                'group_type': 'Small Group',
+                'group_type': GroupType.SMALL_GROUP,
                 'tour_type': TourType.CONVENTIONAL,
                 'category': TourCategory.CULTURAL,
-                'tags': ['Culture', 'Traditional', 'Funeral Ceremony'],
                 'highlights': ['Traditional Torajan Houses', 'Lemo Burial Cliffs', 'Kete Kesu Village', 'Buntu Kalando', 'Torajan Markets'],
                 'inclusions': ['3 nights hotel accommodation', 'Daily breakfast', 'Private transportation', 'English speaking guide', 'Cultural experiences'],
                 'exclusions': ['Lunch and dinner', 'Travel insurance', 'Personal expenses'],
@@ -859,7 +815,6 @@ class Command(BaseCommand):
                 'cancellation_policy': 'Free cancellation up to 7 days before departure.',
                 'important_notes': 'Cultural sensitivity important. Funeral ceremonies are sacred events.',
                 'base_price': 4200000,
-                'currency': 'IDR',
                 'badge': None,
                 'is_featured': False,
                 'reseller_groups': [0, 1],  # Premium & Standard
@@ -883,7 +838,7 @@ class Command(BaseCommand):
                 slug=slug,
                 summary=data['summary'],
                 description=data['description'],
-                city=data['city'],
+                itinerary=data.get('itinerary', ''),
                 country=data['country'],
                 days=data['days'],
                 nights=data['nights'],
@@ -891,7 +846,6 @@ class Command(BaseCommand):
                 group_type=data['group_type'],
                 tour_type=data['tour_type'],
                 category=data['category'],
-                tags=data['tags'],
                 highlights=data['highlights'],
                 inclusions=data['inclusions'],
                 exclusions=data['exclusions'],
@@ -899,12 +853,10 @@ class Command(BaseCommand):
                 cancellation_policy=data['cancellation_policy'],
                 important_notes=data['important_notes'],
                 base_price=data['base_price'],
-                currency=data['currency'],
                 badge=data['badge'],
                 is_active=True,
                 is_featured=data['is_featured'],
-                commission_rate=random.uniform(8.0, 12.0),
-                commission_type='PERCENTAGE',
+                commission=random.randint(100000, 500000),  # Fixed commission amount in IDR
             )
             
             # Assign reseller groups
@@ -915,8 +867,10 @@ class Command(BaseCommand):
             # Create tour dates
             self._create_tour_dates(tour, data['base_price'])
             
-            # Create itinerary items
-            self._create_itinerary_items(tour, data['days'])
+            # Create itinerary if not provided
+            if not data.get('itinerary'):
+                tour.itinerary = self._generate_itinerary_text(tour.name, data['days'], data.get('highlights', []))
+                tour.save()
             
             tours.append(tour)
         
@@ -947,11 +901,10 @@ class Command(BaseCommand):
             
             # TourDate automatically generates seat slots on save
 
-    def _create_itinerary_items(self, tour, days):
-        """Create detailed itinerary items for a tour package based on tour name and highlights."""
+    def _generate_itinerary_text(self, tour_name, days, highlights):
+        """Generate itinerary text for a tour package based on tour name and highlights."""
         # Get tour-specific itinerary based on tour name and highlights
-        tour_name_lower = tour.name.lower()
-        highlights = tour.highlights if hasattr(tour, 'highlights') and tour.highlights else []
+        tour_name_lower = tour_name.lower()
         
         # Create detailed itinerary based on tour characteristics
         if 'bali' in tour_name_lower:
@@ -1118,14 +1071,13 @@ class Command(BaseCommand):
         else:
             itinerary = self._get_generic_itinerary(days)
         
-        # Create itinerary items
-        for item in itinerary:
-            ItineraryItem.objects.create(
-                package=tour,
-                day_number=item['day'],
-                title=item['title'],
-                description=item['description'],
-            )
+        # Generate itinerary text from items
+        itinerary_text = '\n\n'.join([
+            f"Day {item['day']}: {item['title']}\n{item['description']}"
+            for item in itinerary
+        ])
+        
+        return itinerary_text
     
     def _get_generic_itinerary(self, days):
         """Get generic itinerary template based on number of days."""

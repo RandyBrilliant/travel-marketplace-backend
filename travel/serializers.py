@@ -631,12 +631,18 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
         queryset=ResellerGroup.objects.filter(is_active=True),
         required=False,
     )
+    supplier_name = serializers.CharField(source="supplier.company_name", read_only=True)
+    images = TourImageSerializer(many=True, read_only=True)
+    dates = TourDateSerializer(many=True, read_only=True)
+    duration_display = serializers.CharField(read_only=True)
+    group_size_display = serializers.CharField(read_only=True)
     
     class Meta:
         model = TourPackage
         fields = [
             "id",
             "supplier",
+            "supplier_name",
             "name",
             "slug",
             "summary",
@@ -645,8 +651,10 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
             "country",
             "days",
             "nights",
+            "duration_display",
             "max_group_size",
             "group_type",
+            "group_size_display",
             "tour_type",
             "category",
             "highlights",
@@ -662,11 +670,26 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
             "is_active",
             "is_featured",
             "reseller_groups",
+            "images",
+            "dates",
             # Commission fields (editable for admin)
             "commission",
             "commission_notes",
+            # Timestamps
+            "created_at",
+            "updated_at",
         ]
-        read_only_fields = ["id", "slug"]
+        read_only_fields = [
+            "id",
+            "slug",
+            "supplier_name",
+            "duration_display",
+            "group_size_display",
+            "images",
+            "dates",
+            "created_at",
+            "updated_at",
+        ]
     
     def validate(self, attrs):
         """Validate that nights is not greater than days."""
@@ -808,6 +831,7 @@ class BookingListSerializer(serializers.ModelSerializer):
     departure_date = serializers.DateField(source="tour_date.departure_date", read_only=True)
     seats_booked = serializers.IntegerField(read_only=True)
     total_amount = serializers.IntegerField(read_only=True)
+    payment_status = serializers.CharField(source="payment.status", read_only=True, allow_null=True)
     
     class Meta:
         model = Booking
@@ -825,10 +849,20 @@ class BookingListSerializer(serializers.ModelSerializer):
             "seats_booked",
             "platform_fee",
             "total_amount",
+            "payment_status",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at", "seats_booked", "total_amount"]
+        read_only_fields = ["id", "created_at", "updated_at", "seats_booked", "total_amount", "payment_status"]
+
+
+class BookingUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for updating booking status (admin only)."""
+    
+    class Meta:
+        model = Booking
+        fields = ["status", "notes"]
+        read_only_fields = ["id", "created_at", "updated_at"]
 
 
 class BookingSerializer(serializers.ModelSerializer):
@@ -844,6 +878,10 @@ class BookingSerializer(serializers.ModelSerializer):
     total_amount = serializers.IntegerField(read_only=True)
     subtotal = serializers.IntegerField(read_only=True)
     seat_slots = SeatSlotSerializer(many=True, read_only=True)
+    payment_status = serializers.CharField(source="payment.status", read_only=True, allow_null=True)
+    payment_amount = serializers.IntegerField(source="payment.amount", read_only=True, allow_null=True)
+    payment_proof_image = serializers.ImageField(source="payment.proof_image", read_only=True, allow_null=True)
+    payment_id = serializers.IntegerField(source="payment.id", read_only=True, allow_null=True)
     
     class Meta:
         model = Booking
@@ -867,6 +905,10 @@ class BookingSerializer(serializers.ModelSerializer):
             "total_amount",
             "notes",
             "seat_slots",
+            "payment_status",
+            "payment_amount",
+            "payment_proof_image",
+            "payment_id",
             "created_at",
             "updated_at",
         ]
@@ -877,6 +919,8 @@ class BookingSerializer(serializers.ModelSerializer):
             "seats_booked",
             "total_amount",
             "subtotal",
+            "payment_status",
+            "payment_amount",
         ]
 
 
