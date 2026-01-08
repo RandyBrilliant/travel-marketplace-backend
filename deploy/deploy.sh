@@ -51,14 +51,14 @@ chmod 666 logs/django.log 2>/dev/null || true
 echo -e "${GREEN}✓ Directories created${NC}"
 
 echo ""
-echo -e "${BLUE}[2/7] Pulling Docker images...${NC}"
+echo -e "${BLUE}[2/9] Pulling Docker images...${NC}"
 docker compose -f docker-compose.prod.yml pull --quiet || {
     echo -e "${YELLOW}⚠ Some images need to be built${NC}"
 }
 echo -e "${GREEN}✓ Images ready${NC}"
 
 echo ""
-echo -e "${BLUE}[3/7] Building application image...${NC}"
+echo -e "${BLUE}[3/9] Building application image...${NC}"
 docker compose -f docker-compose.prod.yml build --no-cache api celery celery-beat || {
     echo -e "${RED}Error: Failed to build images${NC}"
     exit 1
@@ -66,6 +66,7 @@ docker compose -f docker-compose.prod.yml build --no-cache api celery celery-bea
 echo -e "${GREEN}✓ Application built${NC}"
 
 echo ""
+<<<<<<< HEAD
 echo -e "${BLUE}[4/7] Checking SSL certificates and configuring Nginx...${NC}"
 # Verify nginx config files exist
 if [ ! -f "$APP_DIR/nginx/data.goholiday.id.http-only.conf" ]; then
@@ -101,16 +102,79 @@ else
         sed -i 's|- ./nginx/data.goholiday.id.conf:/etc/nginx/conf.d/data.goholiday.id.conf:ro|# - ./nginx/data.goholiday.id.conf:/etc/nginx/conf.d/data.goholiday.id.conf:ro|g' docker-compose.prod.yml
         sed -i 's|- ./nginx/ssl:/etc/nginx/ssl:ro|# - ./nginx/ssl:/etc/nginx/ssl:ro|g' docker-compose.prod.yml
     fi
+=======
+echo -e "${BLUE}[4/9] Checking SSL certificates and configuring Nginx...${NC}"
+if [ -f "$APP_DIR/nginx/ssl/fullchain.pem" ] && [ -f "$APP_DIR/nginx/ssl/privkey.pem" ]; then
+    echo -e "${GREEN}✓ SSL certificates found${NC}"
+else
+    echo -e "${YELLOW}  ⚠ SSL certificates not found, using HTTP-only configuration${NC}"
+    echo -e "${YELLOW}  → Switching to HTTP-only configuration...${NC}"
+>>>>>>> dev
 fi
 echo -e "${GREEN}✓ Nginx configuration ready${NC}"
 
 echo ""
+<<<<<<< HEAD
 echo -e "${BLUE}[5/7] Starting services...${NC}"
+=======
+echo -e "${BLUE}[5/9] Checking port availability...${NC}"
+# Check if port 80 is in use
+if command -v lsof > /dev/null 2>&1; then
+    PORT80_PID=$(sudo lsof -ti:80 2>/dev/null || true)
+elif command -v netstat > /dev/null 2>&1; then
+    PORT80_PID=$(sudo netstat -tlnp 2>/dev/null | grep ':80 ' | awk '{print $7}' | cut -d'/' -f1 | head -1 || true)
+elif command -v ss > /dev/null 2>&1; then
+    PORT80_PID=$(sudo ss -tlnp 2>/dev/null | grep ':80 ' | grep -oP 'pid=\K[0-9]+' | head -1 || true)
+else
+    PORT80_PID=""
+fi
+
+if [ -n "$PORT80_PID" ]; then
+    echo -e "${RED}Error: Port 80 is already in use (PID: $PORT80_PID)${NC}"
+    echo -e "${YELLOW}To identify what's using port 80, run:${NC}"
+    echo -e "  ${YELLOW}sudo lsof -i:80${NC}"
+    echo -e "  ${YELLOW}or${NC}"
+    echo -e "  ${YELLOW}sudo netstat -tlnp | grep ':80'${NC}"
+    echo ""
+    echo -e "${YELLOW}Common solutions:${NC}"
+    echo -e "  1. Stop Apache (if running): ${YELLOW}sudo systemctl stop apache2${NC}"
+    echo -e "  2. Stop other Nginx instances: ${YELLOW}sudo systemctl stop nginx${NC}"
+    echo -e "  3. Stop other Docker containers using port 80"
+    echo ""
+    exit 1
+fi
+
+# Check if port 443 is in use (if SSL is configured)
+if [ -f "$APP_DIR/nginx/ssl/fullchain.pem" ] && [ -f "$APP_DIR/nginx/ssl/privkey.pem" ]; then
+    if command -v lsof > /dev/null 2>&1; then
+        PORT443_PID=$(sudo lsof -ti:443 2>/dev/null || true)
+    elif command -v netstat > /dev/null 2>&1; then
+        PORT443_PID=$(sudo netstat -tlnp 2>/dev/null | grep ':443 ' | awk '{print $7}' | cut -d'/' -f1 | head -1 || true)
+    elif command -v ss > /dev/null 2>&1; then
+        PORT443_PID=$(sudo ss -tlnp 2>/dev/null | grep ':443 ' | grep -oP 'pid=\K[0-9]+' | head -1 || true)
+    else
+        PORT443_PID=""
+    fi
+    
+    if [ -n "$PORT443_PID" ]; then
+        echo -e "${YELLOW}  ⚠ Port 443 is in use (PID: $PORT443_PID)${NC}"
+        echo -e "${YELLOW}  → This may cause issues with SSL${NC}"
+    fi
+fi
+echo -e "${GREEN}✓ Ports available${NC}"
+
+echo ""
+echo -e "${BLUE}[6/9] Starting services...${NC}"
+>>>>>>> dev
 docker compose -f docker-compose.prod.yml up -d
 echo -e "${GREEN}✓ Services started${NC}"
 
 echo ""
+<<<<<<< HEAD
 echo -e "${BLUE}[6/7] Waiting for database to be ready...${NC}"
+=======
+echo -e "${BLUE}[7/9] Waiting for database to be ready...${NC}"
+>>>>>>> dev
 timeout=60
 counter=0
 while ! docker compose -f docker-compose.prod.yml exec -T db pg_isready -U "${SQL_USER:-postgres}" > /dev/null 2>&1; do
@@ -126,7 +190,11 @@ echo ""
 echo -e "${GREEN}✓ Database ready${NC}"
 
 echo ""
+<<<<<<< HEAD
 echo -e "${BLUE}[7/7] Running database migrations...${NC}"
+=======
+echo -e "${BLUE}[8/9] Running database migrations...${NC}"
+>>>>>>> dev
 if ! docker compose -f docker-compose.prod.yml exec -T api python manage.py migrate --noinput; then
     echo -e "${RED}Error: Migrations failed${NC}"
     echo -e "${YELLOW}Showing last 30 lines of API logs:${NC}"
@@ -136,7 +204,11 @@ fi
 echo -e "${GREEN}✓ Migrations completed${NC}"
 
 echo ""
+<<<<<<< HEAD
 echo -e "${BLUE}Collecting static files...${NC}"
+=======
+echo -e "${BLUE}[9/9] Collecting static files...${NC}"
+>>>>>>> dev
 docker compose -f docker-compose.prod.yml exec -T api python manage.py collectstatic --noinput --clear || {
     echo -e "${YELLOW}⚠ Static files collection had warnings${NC}"
 }

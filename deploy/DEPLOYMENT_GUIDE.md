@@ -284,6 +284,67 @@ docker compose -f docker-compose.prod.yml restart nginx
    docker system df
    ```
 
+### Port Already in Use (Port 80/443 Conflict)
+
+If you see an error like `failed to bind host port 0.0.0.0:80/tcp: address already in use`:
+
+1. **Identify what's using the port:**
+   ```bash
+   # Using lsof (if available)
+   sudo lsof -i:80
+   sudo lsof -i:443
+   
+   # Using netstat (alternative)
+   sudo netstat -tlnp | grep ':80'
+   sudo netstat -tlnp | grep ':443'
+   
+   # Using ss (alternative)
+   sudo ss -tlnp | grep ':80'
+   sudo ss -tlnp | grep ':443'
+   ```
+
+2. **Common solutions:**
+
+   **Stop Apache (if running):**
+   ```bash
+   sudo systemctl stop apache2
+   sudo systemctl disable apache2  # Prevent auto-start
+   ```
+
+   **Stop system Nginx (if running):**
+   ```bash
+   sudo systemctl stop nginx
+   sudo systemctl disable nginx  # Prevent auto-start
+   ```
+
+   **Stop other Docker containers using the port:**
+   ```bash
+   # List all containers
+   docker ps -a
+   
+   # Stop specific container
+   docker stop <container-name>
+   
+   # Or stop all containers
+   docker stop $(docker ps -q)
+   ```
+
+   **Check for other services:**
+   ```bash
+   # Check all listening ports
+   sudo netstat -tlnp
+   
+   # Check systemd services
+   sudo systemctl list-units --type=service | grep -E 'nginx|apache|httpd'
+   ```
+
+3. **After stopping the conflicting service, retry deployment:**
+   ```bash
+   sudo ./deploy/deploy.sh
+   ```
+
+**Note:** The deployment script now automatically checks for port conflicts before starting services and will provide helpful error messages if ports are in use.
+
 ### Database Connection Issues
 
 1. **Check database is running:**
