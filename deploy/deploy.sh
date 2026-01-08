@@ -68,37 +68,37 @@ echo -e "${GREEN}✓ Application built${NC}"
 echo ""
 echo -e "${BLUE}[4/7] Checking SSL certificates and configuring Nginx...${NC}"
 # Verify nginx config files exist
-if [ ! -f "$APP_DIR/nginx/api.goholiday.id.http-only.conf" ]; then
+if [ ! -f "$APP_DIR/nginx/data.goholiday.id.http-only.conf" ]; then
     echo -e "${RED}Error: HTTP-only nginx config not found!${NC}"
     exit 1
 fi
 
 # Check if SSL certificates exist
-if [ -f "$APP_DIR/nginx/ssl/api.goholiday.id/fullchain.pem" ] && \
-   [ -f "$APP_DIR/nginx/ssl/api.goholiday.id/privkey.pem" ] && \
-   [ -f "$APP_DIR/nginx/ssl/api.goholiday.id/chain.pem" ]; then
+if [ -f "$APP_DIR/nginx/ssl/data.goholiday.id/fullchain.pem" ] && \
+   [ -f "$APP_DIR/nginx/ssl/data.goholiday.id/privkey.pem" ] && \
+   [ -f "$APP_DIR/nginx/ssl/data.goholiday.id/chain.pem" ]; then
     echo "  ✓ SSL certificates found, using SSL configuration"
     # Verify SSL config file exists
-    if [ ! -f "$APP_DIR/nginx/api.goholiday.id.conf" ]; then
+    if [ ! -f "$APP_DIR/nginx/data.goholiday.id.conf" ]; then
         echo -e "${RED}Error: SSL nginx config not found!${NC}"
         exit 1
     fi
     # Ensure SSL config is active
-    if ! grep -q "./nginx/api.goholiday.id.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro" docker-compose.prod.yml || \
-       grep -q "# - ./nginx/api.goholiday.id.conf" docker-compose.prod.yml; then
+    if ! grep -q "./nginx/data.goholiday.id.conf:/etc/nginx/conf.d/data.goholiday.id.conf:ro" docker-compose.prod.yml || \
+       grep -q "# - ./nginx/data.goholiday.id.conf" docker-compose.prod.yml; then
         echo "  → Switching to SSL configuration..."
-        sed -i 's|# - ./nginx/api.goholiday.id.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|- ./nginx/api.goholiday.id.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|g' docker-compose.prod.yml
+        sed -i 's|# - ./nginx/data.goholiday.id.conf:/etc/nginx/conf.d/data.goholiday.id.conf:ro|- ./nginx/data.goholiday.id.conf:/etc/nginx/conf.d/data.goholiday.id.conf:ro|g' docker-compose.prod.yml
         sed -i 's|# - ./nginx/ssl:/etc/nginx/ssl:ro|- ./nginx/ssl:/etc/nginx/ssl:ro|g' docker-compose.prod.yml
-        sed -i 's|- ./nginx/api.goholiday.id.http-only.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|# - ./nginx/api.goholiday.id.http-only.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|g' docker-compose.prod.yml
+        sed -i 's|- ./nginx/data.goholiday.id.http-only.conf:/etc/nginx/conf.d/data.goholiday.id.conf:ro|# - ./nginx/data.goholiday.id.http-only.conf:/etc/nginx/conf.d/data.goholiday.id.conf:ro|g' docker-compose.prod.yml
     fi
 else
     echo "  ⚠ SSL certificates not found, using HTTP-only configuration"
     # Ensure HTTP-only config is active
-    if ! grep -q "./nginx/api.goholiday.id.http-only.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro" docker-compose.prod.yml || \
-       grep -q "# - ./nginx/api.goholiday.id.http-only.conf" docker-compose.prod.yml; then
+    if ! grep -q "./nginx/data.goholiday.id.http-only.conf:/etc/nginx/conf.d/data.goholiday.id.conf:ro" docker-compose.prod.yml || \
+       grep -q "# - ./nginx/data.goholiday.id.http-only.conf" docker-compose.prod.yml; then
         echo "  → Switching to HTTP-only configuration..."
-        sed -i 's|# - ./nginx/api.goholiday.id.http-only.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|- ./nginx/api.goholiday.id.http-only.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|g' docker-compose.prod.yml
-        sed -i 's|- ./nginx/api.goholiday.id.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|# - ./nginx/api.goholiday.id.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|g' docker-compose.prod.yml
+        sed -i 's|# - ./nginx/data.goholiday.id.http-only.conf:/etc/nginx/conf.d/data.goholiday.id.conf:ro|- ./nginx/data.goholiday.id.http-only.conf:/etc/nginx/conf.d/data.goholiday.id.conf:ro|g' docker-compose.prod.yml
+        sed -i 's|- ./nginx/data.goholiday.id.conf:/etc/nginx/conf.d/data.goholiday.id.conf:ro|# - ./nginx/data.goholiday.id.conf:/etc/nginx/conf.d/data.goholiday.id.conf:ro|g' docker-compose.prod.yml
         sed -i 's|- ./nginx/ssl:/etc/nginx/ssl:ro|# - ./nginx/ssl:/etc/nginx/ssl:ro|g' docker-compose.prod.yml
     fi
 fi

@@ -160,12 +160,12 @@ if [ -d "$APP_DIR/nginx/ssl" ]; then
     echo "  ✓ SSL certificates removed (can be regenerated)"
 fi
 
-# Reset docker-compose.prod.yml to HTTP-only config
+    # Reset docker-compose.prod.yml to HTTP-only config
 if [ -f "$APP_DIR/docker-compose.prod.yml" ]; then
     echo "  → Resetting nginx config to HTTP-only..."
     # Switch back to HTTP-only config
-    sed -i 's|# - ./nginx/api.goholiday.id.http-only.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|- ./nginx/api.goholiday.id.http-only.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|g' "$APP_DIR/docker-compose.prod.yml"
-    sed -i 's|- ./nginx/api.goholiday.id.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|# - ./nginx/api.goholiday.id.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|g' "$APP_DIR/docker-compose.prod.yml"
+    sed -i 's|# - ./nginx/data.goholiday.id.http-only.conf:/etc/nginx/conf.d/data.goholiday.id.conf:ro|- ./nginx/data.goholiday.id.http-only.conf:/etc/nginx/conf.d/data.goholiday.id.conf:ro|g' "$APP_DIR/docker-compose.prod.yml"
+    sed -i 's|- ./nginx/data.goholiday.id.conf:/etc/nginx/conf.d/data.goholiday.id.conf:ro|# - ./nginx/data.goholiday.id.conf:/etc/nginx/conf.d/data.goholiday.id.conf:ro|g' "$APP_DIR/docker-compose.prod.yml"
     sed -i 's|- ./nginx/ssl:/etc/nginx/ssl:ro|# - ./nginx/ssl:/etc/nginx/ssl:ro|g' "$APP_DIR/docker-compose.prod.yml"
     echo "  ✓ Docker Compose reset to HTTP-only configuration"
 fi

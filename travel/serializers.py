@@ -39,7 +39,7 @@ def build_absolute_image_url(relative_url, request=None):
         return f"http://localhost:8000{relative_url}"
     
     # Production: always use HTTPS
-    default_domain = getattr(settings, 'API_DOMAIN', None) or os.environ.get('API_DOMAIN', 'api.goholiday.id')
+    default_domain = getattr(settings, 'API_DOMAIN', None) or os.environ.get('API_DOMAIN', 'data.goholiday.id')
     return f"https://{default_domain}{relative_url}"
 
 

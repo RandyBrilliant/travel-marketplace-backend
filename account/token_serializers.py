@@ -79,8 +79,8 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             if settings.DEBUG:
                 return f"http://localhost:8000{relative_url}"
             # Production fallback - use API domain from settings or environment
-            # Default to api.goholiday.id with HTTPS in production
-            default_domain = getattr(settings, 'API_DOMAIN', None) or os.environ.get('API_DOMAIN', 'api.goholiday.id')
+            # Default to data.goholiday.id with HTTPS in production
+            default_domain = getattr(settings, 'API_DOMAIN', None) or os.environ.get('API_DOMAIN', 'data.goholiday.id')
             # Always use HTTPS in production (when not DEBUG)
             protocol = 'https' if not settings.DEBUG else 'http'
             return f"{protocol}://{default_domain}{relative_url}"
