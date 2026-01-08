@@ -1,0 +1,439 @@
+# Complete Deployment Guide
+## Travel Marketplace Backend - Digital Ocean (1 vCPU, 2GB RAM)
+
+This guide will walk you through deploying the Travel Marketplace Backend to a Digital Ocean droplet step by step.
+
+---
+
+## 📋 Prerequisites
+
+- A Digital Ocean droplet with Ubuntu 22.04+ (1 vCPU, 2GB RAM)
+- SSH access to your server
+- Domain name configured (e.g., `api.goholiday.id`)
+- DNS A record pointing to your server IP
+
+---
+
+## 🚀 Step-by-Step Deployment
+
+### Step 1: Initial Server Setup (One-Time)
+
+**On your server, run:**
+
+```bash
+# Clone your repository (if not already done)
+cd ~
+git clone https://github.com/your-username/travel-marketplace-backend.git
+cd travel-marketplace-backend
+
+# Run the setup script
+sudo ./deploy/setup.sh
+```
+
+**What this does:**
+- Updates system packages
+- Installs Docker and Docker Compose
+- Optimizes system for 2GB RAM
+- Creates 2GB swap file
+- Configures firewall (UFW)
+- Sets up necessary directories
+
+**Expected time:** 5-10 minutes
+
+---
+
+### Step 2: Configure Environment Variables
+
+**Create your `.env` file:**
+
+```bash
+cd ~/travel-marketplace-backend
+cp env.prod.example .env
+nano .env
+```
+
+**Required variables to set:**
+
+```bash
+# Django Settings
+SECRET_KEY=your-super-secret-key-here  # Generate with: python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+DEBUG=0
+ALLOWED_HOSTS=api.goholiday.id,your-server-ip
+CSRF_TRUSTED_ORIGINS=https://api.goholiday.id
+
+# Database
+SQL_DATABASE=travel_marketplace
+SQL_USER=travel_user
+SQL_PASSWORD=your-strong-database-password
+DATABASE_URL=postgresql://travel_user:your-strong-database-password@db:5432/travel_marketplace
+
+# Security (set after SSL setup)
+SECURE_SSL_REDIRECT=0  # Change to 1 after SSL setup
+SESSION_COOKIE_SECURE=0  # Change to 1 after SSL setup
+CSRF_COOKIE_SECURE=0  # Change to 1 after SSL setup
+
+# JWT Settings
+ACCESS_TOKEN_LIFETIME_MINUTES=15
+REFRESH_TOKEN_LIFETIME_DAYS=7
+
+# Email (if using email features)
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_HOST_USER=your-email@gmail.com
+EMAIL_HOST_PASSWORD=your-app-password
+EMAIL_USE_TLS=1
+DEFAULT_FROM_EMAIL=noreply@goholiday.id
+```
+
+**Save and exit:** `Ctrl+X`, then `Y`, then `Enter`
+
+---
+
+### Step 3: Deploy the Application
+
+**Run the deployment script:**
+
+```bash
+sudo ./deploy/deploy.sh
+```
+
+**What this does:**
+- Creates necessary directories
+- Pulls Docker images
+- Builds application images
+- Starts all services (API, Database, Redis, Celery, Nginx)
+- Runs database migrations
+- Collects static files
+
+**Expected time:** 5-10 minutes
+
+**After deployment, check status:**
+
+```bash
+docker compose -f docker-compose.prod.yml ps
+```
+
+All services should show "Up" and "healthy".
+
+---
+
+### Step 4: Create Superuser (Optional)
+
+**Create an admin user:**
+
+```bash
+docker compose -f docker-compose.prod.yml exec api python manage.py createsuperuser
+```
+
+Follow the prompts to create your admin account.
+
+---
+
+### Step 5: Setup SSL Certificate
+
+**⚠️ Important:** Make sure your DNS A record is pointing to your server IP before running this!
+
+**Run the SSL setup:**
+
+```bash
+sudo ./deploy/ssl-setup.sh
+```
+
+**What this does:**
+- Checks DNS configuration
+- Generates Let's Encrypt SSL certificate
+- Copies certificates to nginx directory
+- Updates Docker Compose to use SSL
+- Configures auto-renewal
+
+**Expected time:** 2-3 minutes
+
+**After SSL setup, update your `.env` file:**
+
+```bash
+nano .env
+```
+
+Change these values:
+```bash
+SECURE_SSL_REDIRECT=1
+SESSION_COOKIE_SECURE=1
+CSRF_COOKIE_SECURE=1
+```
+
+**Restart the API to apply changes:**
+
+```bash
+docker compose -f docker-compose.prod.yml restart api
+```
+
+---
+
+### Step 6: Verify Everything Works
+
+**Test your API:**
+
+```bash
+# Test HTTP (should redirect to HTTPS)
+curl -I http://api.goholiday.id/health/
+
+# Test HTTPS
+curl https://api.goholiday.id/health/
+```
+
+**Check service logs:**
+
+```bash
+# All services
+docker compose -f docker-compose.prod.yml logs -f
+
+# Specific service
+docker compose -f docker-compose.prod.yml logs -f api
+docker compose -f docker-compose.prod.yml logs -f nginx
+```
+
+---
+
+## 🔄 Updating the Application
+
+When you make code changes, use the update script:
+
+```bash
+sudo ./deploy/update.sh
+```
+
+**What this does:**
+- Pulls latest code (if using git)
+- Stops services
+- Rebuilds images
+- Restarts services
+- Runs migrations
+- Collects static files
+
+**⚠️ Note:** This causes ~30-60 seconds of downtime.
+
+---
+
+## 📊 Monitoring & Maintenance
+
+### Check Service Status
+
+```bash
+docker compose -f docker-compose.prod.yml ps
+```
+
+### View Logs
+
+```bash
+# All services
+docker compose -f docker-compose.prod.yml logs -f
+
+# Specific service
+docker compose -f docker-compose.prod.yml logs -f api
+docker compose -f docker-compose.prod.yml logs -f nginx
+docker compose -f docker-compose.prod.yml logs -f db
+```
+
+### Check Resource Usage
+
+```bash
+# Docker container stats
+docker stats
+
+# System resources
+free -h
+df -h
+htop
+```
+
+### Restart Services
+
+```bash
+# Restart all
+docker compose -f docker-compose.prod.yml restart
+
+# Restart specific service
+docker compose -f docker-compose.prod.yml restart api
+docker compose -f docker-compose.prod.yml restart nginx
+```
+
+---
+
+## 🛠️ Troubleshooting
+
+### Services Won't Start
+
+1. **Check logs:**
+   ```bash
+   docker compose -f docker-compose.prod.yml logs
+   ```
+
+2. **Check .env file:**
+   ```bash
+   cat .env
+   ```
+
+3. **Check disk space:**
+   ```bash
+   df -h
+   ```
+
+4. **Check Docker:**
+   ```bash
+   docker ps
+   docker system df
+   ```
+
+### Database Connection Issues
+
+1. **Check database is running:**
+   ```bash
+   docker compose -f docker-compose.prod.yml ps db
+   ```
+
+2. **Check database logs:**
+   ```bash
+   docker compose -f docker-compose.prod.yml logs db
+   ```
+
+3. **Verify credentials in .env:**
+   ```bash
+   grep SQL_ .env
+   ```
+
+### SSL Certificate Issues
+
+1. **Check certificate status:**
+   ```bash
+   sudo certbot certificates
+   ```
+
+2. **Test certificate renewal:**
+   ```bash
+   sudo certbot renew --dry-run
+   ```
+
+3. **Check nginx SSL config:**
+   ```bash
+   docker compose -f docker-compose.prod.yml exec nginx nginx -t
+   ```
+
+### Out of Memory Issues
+
+If you're running out of memory:
+
+1. **Check memory usage:**
+   ```bash
+   free -h
+   docker stats
+   ```
+
+2. **Restart services:**
+   ```bash
+   docker compose -f docker-compose.prod.yml restart
+   ```
+
+3. **Clean up Docker:**
+   ```bash
+   docker system prune -a
+   ```
+
+---
+
+## 📁 File Structure
+
+```
+travel-marketplace-backend/
+├── deploy/
+│   ├── setup.sh          # Initial server setup (one-time)
+│   ├── deploy.sh          # Main deployment script
+│   ├── update.sh          # Update script for code changes
+│   ├── ssl-setup.sh       # SSL certificate setup
+│   └── DEPLOYMENT_GUIDE.md # This file
+├── nginx/
+│   ├── nginx.conf         # Main nginx config
+│   ├── api.goholiday.id.conf          # SSL config
+│   ├── api.goholiday.id.http-only.conf # HTTP-only config
+│   └── ssl/               # SSL certificates (created by ssl-setup.sh)
+├── docker-compose.prod.yml # Docker Compose configuration
+├── .env                   # Environment variables (create from env.prod.example)
+└── ...
+```
+
+---
+
+## 🔐 Security Checklist
+
+- [ ] `DEBUG=0` in `.env`
+- [ ] Strong `SECRET_KEY` set
+- [ ] Strong database password
+- [ ] `ALLOWED_HOSTS` includes your domain
+- [ ] SSL certificate installed
+- [ ] `SECURE_SSL_REDIRECT=1` after SSL setup
+- [ ] `SESSION_COOKIE_SECURE=1` after SSL setup
+- [ ] `CSRF_COOKIE_SECURE=1` after SSL setup
+- [ ] Firewall (UFW) configured
+- [ ] SSH key authentication (disable password auth)
+
+---
+
+## 📞 Quick Reference
+
+### Common Commands
+
+```bash
+# Deploy
+sudo ./deploy/deploy.sh
+
+# Update
+sudo ./deploy/update.sh
+
+# Setup SSL
+sudo ./deploy/ssl-setup.sh
+
+# View logs
+docker compose -f docker-compose.prod.yml logs -f
+
+# Restart services
+docker compose -f docker-compose.prod.yml restart
+
+# Check status
+docker compose -f docker-compose.prod.yml ps
+
+# Access API shell
+docker compose -f docker-compose.prod.yml exec api python manage.py shell
+
+# Run migrations manually
+docker compose -f docker-compose.prod.yml exec api python manage.py migrate
+
+# Collect static files
+docker compose -f docker-compose.prod.yml exec api python manage.py collectstatic
+```
+
+---
+
+## 🎉 You're Done!
+
+Your Travel Marketplace Backend should now be running on:
+- **HTTP:** http://api.goholiday.id (redirects to HTTPS)
+- **HTTPS:** https://api.goholiday.id
+
+**Next Steps:**
+- Test your API endpoints
+- Configure your frontend to use the API
+- Set up monitoring (optional)
+- Schedule regular backups (optional)
+
+---
+
+## 📚 Additional Resources
+
+- [Docker Documentation](https://docs.docker.com/)
+- [Django Deployment Checklist](https://docs.djangoproject.com/en/stable/howto/deployment/checklist/)
+- [Let's Encrypt Documentation](https://letsencrypt.org/docs/)
+- [Digital Ocean Documentation](https://docs.digitalocean.com/)
+
+---
+
+**Need Help?** Check the logs first, then review the troubleshooting section above.
+

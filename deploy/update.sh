@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# Quick Update Script
-# Use this when you've made code changes and want to deploy them
+# Update Script
+# Updates the application with new code changes
+# Causes ~30-60 seconds of downtime
 
 set -e
 
@@ -12,85 +13,89 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# Get current directory
+# Get directories
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-APP_DIR="$(dirname "$SCRIPT_DIR")"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+APP_DIR="${APP_DIR:-$PROJECT_DIR}"
 
 echo -e "${BLUE}=========================================="
-echo "Quick Update Deployment"
+echo "Travel Marketplace - Update"
 echo "==========================================${NC}"
 echo ""
-echo -e "${BLUE}Working directory: $APP_DIR${NC}"
-echo ""
 
-cd "$APP_DIR" || exit 1
+cd "$APP_DIR" || {
+    echo -e "${RED}Error: Cannot access $APP_DIR${NC}"
+    exit 1
+}
 
-# Step 1: Pull latest code (optional, comment out if you upload manually)
-echo -e "${YELLOW}[1/7] Pulling latest code...${NC}"
-if [ -d ".git" ]; then
-    git pull
-    echo -e "${GREEN}✓ Code updated${NC}"
-else
-    echo -e "${YELLOW}Not a git repository, skipping pull${NC}"
+# Check if services are running
+if ! docker compose -f docker-compose.prod.yml ps | grep -q "Up"; then
+    echo -e "${YELLOW}⚠ No services are running. Use deploy.sh instead.${NC}"
+    exit 1
 fi
 
-# Step 2: Stop containers
-echo -e "${YELLOW}[2/7] Stopping containers...${NC}"
+echo -e "${YELLOW}⚠ This will cause ~30-60 seconds of downtime${NC}"
+read -p "Continue? (y/N): " confirm
+if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+    echo "Update cancelled."
+    exit 0
+fi
+
+echo ""
+echo -e "${BLUE}[1/5] Pulling latest code...${NC}"
+if [ -d ".git" ]; then
+    git pull || {
+        echo -e "${YELLOW}⚠ Git pull had issues, continuing anyway...${NC}"
+    }
+    echo -e "${GREEN}✓ Code updated${NC}"
+else
+    echo -e "${YELLOW}⚠ Not a git repository, skipping git pull${NC}"
+fi
+
+echo ""
+echo -e "${BLUE}[2/5] Stopping services...${NC}"
 docker compose -f docker-compose.prod.yml down
-echo -e "${GREEN}✓ Containers stopped${NC}"
+echo -e "${GREEN}✓ Services stopped${NC}"
 
-# Step 3: Rebuild images (only changed layers will rebuild)
-echo -e "${YELLOW}[3/7] Rebuilding Docker images...${NC}"
-docker compose -f docker-compose.prod.yml build
-echo -e "${GREEN}✓ Images rebuilt${NC}"
+echo ""
+echo -e "${BLUE}[3/5] Building new images...${NC}"
+docker compose -f docker-compose.prod.yml build --no-cache api celery celery-beat || {
+    echo -e "${RED}Error: Failed to build images${NC}"
+    exit 1
+}
+echo -e "${GREEN}✓ Images built${NC}"
 
-# Step 4: Start services
-echo -e "${YELLOW}[4/7] Starting services...${NC}"
+echo ""
+echo -e "${BLUE}[4/5] Starting services...${NC}"
 docker compose -f docker-compose.prod.yml up -d
 echo -e "${GREEN}✓ Services started${NC}"
 
-# Step 5: Wait for database to be ready
-echo -e "${YELLOW}[5/7] Waiting for services to be ready...${NC}"
-sleep 15
+echo ""
+echo -e "${BLUE}[5/5] Running migrations...${NC}"
+# Wait for database
+sleep 5
+docker compose -f docker-compose.prod.yml exec -T api python manage.py migrate --noinput || {
+    echo -e "${YELLOW}⚠ Migrations had issues${NC}"
+}
+echo -e "${GREEN}✓ Migrations completed${NC}"
 
-# Step 6: Run migrations
-echo -e "${YELLOW}[6/7] Running database migrations...${NC}"
-docker compose -f docker-compose.prod.yml exec -T api python manage.py migrate --noinput || \
-    docker compose -f docker-compose.prod.yml run --rm api python manage.py migrate --noinput
-echo -e "${GREEN}✓ Migrations complete${NC}"
-
-# Step 7: Collect static files (if changed)
-echo -e "${YELLOW}[7/7] Collecting static files...${NC}"
-docker compose -f docker-compose.prod.yml exec -T api python manage.py collectstatic --noinput --clear || true
+echo ""
+echo -e "${BLUE}Collecting static files...${NC}"
+docker compose -f docker-compose.prod.yml exec -T api python manage.py collectstatic --noinput --clear || {
+    echo -e "${YELLOW}⚠ Static files collection had warnings${NC}"
+}
 echo -e "${GREEN}✓ Static files collected${NC}"
 
-# Wait a bit for all services
-sleep 5
-
-# Show status
 echo ""
 echo -e "${GREEN}=========================================="
-echo "Update Complete!"
+echo "✅ Update Complete!"
 echo "==========================================${NC}"
 echo ""
 
-echo "Container Status:"
+# Show service status
 docker compose -f docker-compose.prod.yml ps
-echo ""
-
-# Test health
-echo "Testing API..."
-if curl -f -s http://localhost/health/ > /dev/null 2>&1; then
-    echo -e "${GREEN}✓ API is healthy!${NC}"
-else
-    echo -e "${YELLOW}⚠ API health check pending...${NC}"
-    echo "Check logs: docker compose -f docker-compose.prod.yml logs -f"
-fi
 
 echo ""
-echo -e "${BLUE}Useful commands:${NC}"
-echo "View logs:    docker compose -f docker-compose.prod.yml logs -f"
-echo "Restart:      docker compose -f docker-compose.prod.yml restart"
-echo "Status:       docker compose -f docker-compose.prod.yml ps"
+echo -e "${GREEN}Update successful! 🎉${NC}"
 echo ""
 

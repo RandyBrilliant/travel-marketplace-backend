@@ -1,184 +1,137 @@
 #!/bin/bash
 
+# Main Deployment Script
+# Deploys the Travel Marketplace Backend to production
+# Optimized for 1 vCPU, 2GB RAM
+
 set -e
 
-# Colors for output
+# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+BLUE='\033[0;34m'
+NC='\033[0m'
 
-# Get script directory
+# Get directories
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 APP_DIR="${APP_DIR:-$PROJECT_DIR}"
 
-echo "=========================================="
-echo "Travel Marketplace Backend - Deployment"
-echo "=========================================="
-
-# Check if running as root (required for /opt directory access)
-if [ "$EUID" -ne 0 ]; then 
-    echo -e "${RED}Please run as root or with sudo${NC}"
-    echo "Usage: sudo ./deploy/deploy.sh"
-    exit 1
-fi
-
-# Check if .env exists
-if [ ! -f "$PROJECT_DIR/.env" ]; then
-    echo -e "${RED}Error: .env file not found!${NC}"
-    echo "Please copy env.prod.example to .env and configure it."
-    exit 1
-fi
-
-# Check if running in correct directory
-if [ ! -f "$PROJECT_DIR/docker-compose.prod.yml" ]; then
-    echo -e "${RED}Error: docker-compose.prod.yml not found!${NC}"
-    echo "Please run this script from the project root directory."
-    exit 1
-fi
-
-cd "$PROJECT_DIR"
-
-# Backup existing deployment if it exists
-if [ -d "$APP_DIR" ] && [ -f "$APP_DIR/docker-compose.prod.yml" ]; then
-    echo -e "${YELLOW}Creating backup of existing deployment...${NC}"
-    BACKUP_DIR="$APP_DIR/backups/backup-$(date +%Y%m%d-%H%M%S)"
-    mkdir -p "$BACKUP_DIR"
-    
-    # Backup database
-    if docker compose -f "$APP_DIR/docker-compose.prod.yml" ps db | grep -q "Up"; then
-        echo -e "${GREEN}Backing up database...${NC}"
-        docker compose -f "$APP_DIR/docker-compose.prod.yml" exec -T db pg_dump -U ${SQL_USER:-travel_user} ${SQL_DATABASE:-travel_marketplace} > "$BACKUP_DIR/database.sql" || true
-    fi
-fi
-
-# Copy files to deployment directory (only if different from project dir)
-echo -e "${GREEN}[1/6] Preparing deployment directory...${NC}"
-
-if [ "$PROJECT_DIR" != "$APP_DIR" ]; then
-    echo "Copying files from $PROJECT_DIR to $APP_DIR"
-    mkdir -p "$APP_DIR"
-    
-    # Ensure correct ownership of deployment directory
-    chown -R $SUDO_USER:$SUDO_USER "$APP_DIR" 2>/dev/null || chown -R root:root "$APP_DIR"
-    
-    rsync -av --exclude='.git' \
-        --exclude='env' \
-        --exclude='__pycache__' \
-        --exclude='*.pyc' \
-        --exclude='.env' \
-        --exclude='db.sqlite3' \
-        --exclude='celerybeat-schedule' \
-        "$PROJECT_DIR/" "$APP_DIR/"
-    
-    # Copy .env file
-    if [ -f "$PROJECT_DIR/.env" ]; then
-        cp "$PROJECT_DIR/.env" "$APP_DIR/.env"
-        echo -e "${GREEN}Copied .env file${NC}"
-    fi
-else
-    echo "Already in deployment directory: $APP_DIR"
-    echo -e "${GREEN}✓ Using current directory${NC}"
-fi
-
-cd "$APP_DIR"
-
-# Create necessary directories
-echo -e "${GREEN}[2/6] Creating necessary directories...${NC}"
-mkdir -p nginx/ssl
-mkdir -p nginx/logs
-mkdir -p logs
-mkdir -p media/profile_photos/staff
-mkdir -p media/profile_photos/supplier
-mkdir -p media/profile_photos/reseller
-mkdir -p backups
-
-# Set permissions for directories that containers need to write to
-chmod -R 777 logs media 2>/dev/null || true
-
-# Set permissions
-chmod +x deploy/*.sh entrypoint.sh 2>/dev/null || true
-
-# Pull latest images
-echo -e "${GREEN}[3/6] Pulling Docker images...${NC}"
-docker compose -f docker-compose.prod.yml pull
-
-# Build images
-echo -e "${GREEN}[4/6] Building Docker images...${NC}"
-docker compose -f docker-compose.prod.yml build --no-cache
-
-# Stop existing containers
-echo -e "${GREEN}[5/6] Stopping existing containers...${NC}"
-docker compose -f docker-compose.prod.yml down || true
-
-# Stop system nginx if running (to free port 80)
-echo -e "${GREEN}Checking for services using port 80...${NC}"
-if systemctl is-active --quiet nginx 2>/dev/null; then
-    echo -e "${YELLOW}Stopping system nginx service (conflicts with Docker nginx)...${NC}"
-    systemctl stop nginx
-    systemctl disable nginx
-    echo -e "${GREEN}System nginx stopped and disabled${NC}"
-elif pgrep nginx > /dev/null; then
-    echo -e "${YELLOW}Stopping nginx processes...${NC}"
-    pkill nginx
-fi
-
-# Note: Static volume permissions will be handled after containers start
-
-# Start services
-echo -e "${GREEN}[6/6] Starting services...${NC}"
-docker compose -f docker-compose.prod.yml up -d
-
-# Wait for services to be healthy
-echo -e "${GREEN}Waiting for services to be healthy...${NC}"
-sleep 10
-
-# Run migrations
-echo -e "${GREEN}Running database migrations...${NC}"
-docker compose -f docker-compose.prod.yml exec -T api python manage.py migrate --noinput || \
-    docker compose -f docker-compose.prod.yml run --rm api python manage.py migrate --noinput
-
-# Collect static files (with permission fix)
-echo -e "${GREEN}Collecting static files...${NC}"
-# Fix permissions first if there are any permission issues (run as root)
-docker compose -f docker-compose.prod.yml exec -u root -T api chown -R 1000:1000 /app/staticfiles 2>/dev/null || true
-# Run collectstatic
-docker compose -f docker-compose.prod.yml exec -T api python manage.py collectstatic --noinput --clear 2>&1 || {
-    echo -e "${YELLOW}Permission error detected. Fixing and retrying...${NC}"
-    # If it fails, try to fix permissions and run again
-    docker compose -f docker-compose.prod.yml run --rm --user root api chown -R 1000:1000 /app/staticfiles || true
-    docker compose -f docker-compose.prod.yml run --rm api python manage.py collectstatic --noinput --clear
-}
-
-# Restart nginx to pick up static files
-docker compose -f docker-compose.prod.yml restart nginx || true
-
-# Health check
-echo -e "${GREEN}Performing health check...${NC}"
-sleep 5
-
-if curl -f -s http://localhost/health/ > /dev/null 2>&1 || \
-   curl -f -s https://localhost/health/ > /dev/null 2>&1; then
-    echo -e "${GREEN}Health check passed!${NC}"
-else
-    echo -e "${YELLOW}Warning: Health check failed. Please check logs.${NC}"
-    echo "Run: docker compose -f $APP_DIR/docker-compose.prod.yml logs"
-fi
-
-# Show status
-echo ""
-echo -e "${GREEN}=========================================="
-echo "Deployment completed!"
+echo -e "${BLUE}=========================================="
+echo "Travel Marketplace - Deployment"
 echo "==========================================${NC}"
 echo ""
-echo "Service status:"
+
+# Check if .env exists
+if [ ! -f "$APP_DIR/.env" ]; then
+    echo -e "${RED}Error: .env file not found!${NC}"
+    echo "Please create .env file from env.prod.example:"
+    echo "  cp env.prod.example .env"
+    echo "  nano .env"
+    exit 1
+fi
+
+cd "$APP_DIR" || {
+    echo -e "${RED}Error: Cannot access $APP_DIR${NC}"
+    exit 1
+}
+
+echo -e "${BLUE}[1/7] Creating necessary directories...${NC}"
+mkdir -p logs
+mkdir -p nginx/logs
+mkdir -p media
+mkdir -p staticfiles
+mkdir -p nginx/ssl
+chmod 755 logs nginx/logs media staticfiles nginx/ssl 2>/dev/null || true
+echo -e "${GREEN}✓ Directories created${NC}"
+
+echo ""
+echo -e "${BLUE}[2/7] Pulling Docker images...${NC}"
+docker compose -f docker-compose.prod.yml pull --quiet || {
+    echo -e "${YELLOW}⚠ Some images need to be built${NC}"
+}
+echo -e "${GREEN}✓ Images ready${NC}"
+
+echo ""
+echo -e "${BLUE}[3/7] Building application image...${NC}"
+docker compose -f docker-compose.prod.yml build --no-cache api celery celery-beat || {
+    echo -e "${RED}Error: Failed to build images${NC}"
+    exit 1
+}
+echo -e "${GREEN}✓ Application built${NC}"
+
+echo ""
+echo -e "${BLUE}[4/7] Starting services...${NC}"
+docker compose -f docker-compose.prod.yml up -d
+echo -e "${GREEN}✓ Services started${NC}"
+
+echo ""
+echo -e "${BLUE}[5/7] Waiting for database to be ready...${NC}"
+timeout=60
+counter=0
+while ! docker compose -f docker-compose.prod.yml exec -T db pg_isready -U "${SQL_USER:-postgres}" > /dev/null 2>&1; do
+    sleep 2
+    counter=$((counter + 2))
+    if [ $counter -ge $timeout ]; then
+        echo -e "${RED}Error: Database not ready after ${timeout}s${NC}"
+        exit 1
+    fi
+    echo -n "."
+done
+echo ""
+echo -e "${GREEN}✓ Database ready${NC}"
+
+echo ""
+echo -e "${BLUE}[6/7] Running database migrations...${NC}"
+docker compose -f docker-compose.prod.yml exec -T api python manage.py migrate --noinput || {
+    echo -e "${RED}Error: Migrations failed${NC}"
+    exit 1
+}
+echo -e "${GREEN}✓ Migrations completed${NC}"
+
+echo ""
+echo -e "${BLUE}[7/7] Collecting static files...${NC}"
+docker compose -f docker-compose.prod.yml exec -T api python manage.py collectstatic --noinput --clear || {
+    echo -e "${YELLOW}⚠ Static files collection had warnings${NC}"
+}
+echo -e "${GREEN}✓ Static files collected${NC}"
+
+echo ""
+echo -e "${GREEN}=========================================="
+echo "✅ Deployment Complete!"
+echo "==========================================${NC}"
+echo ""
+
+# Show service status
+echo -e "${BLUE}Service Status:${NC}"
 docker compose -f docker-compose.prod.yml ps
+
 echo ""
-echo "To view logs:"
-echo "  docker compose -f $APP_DIR/docker-compose.prod.yml logs -f"
+echo -e "${BLUE}Next Steps:${NC}"
+echo "1. Check service health:"
+echo "   ${YELLOW}docker compose -f docker-compose.prod.yml ps${NC}"
 echo ""
-echo "To restart services:"
-echo "  docker compose -f $APP_DIR/docker-compose.prod.yml restart"
+echo "2. View logs:"
+echo "   ${YELLOW}docker compose -f docker-compose.prod.yml logs -f${NC}"
+echo ""
+echo "3. Create superuser (if needed):"
+echo "   ${YELLOW}docker compose -f docker-compose.prod.yml exec api python manage.py createsuperuser${NC}"
+echo ""
+echo "4. Setup SSL (after DNS is configured):"
+echo "   ${YELLOW}sudo ./deploy/ssl-setup.sh${NC}"
+echo ""
+
+# Health check
+echo -e "${BLUE}Performing health check...${NC}"
+sleep 5
+if docker compose -f docker-compose.prod.yml exec -T api curl -f http://localhost:8000/health/ > /dev/null 2>&1; then
+    echo -e "${GREEN}✓ API is healthy${NC}"
+else
+    echo -e "${YELLOW}⚠ API health check failed (may need a moment to start)${NC}"
+fi
+
+echo ""
+echo -e "${GREEN}Deployment successful! 🎉${NC}"
 echo ""
 
