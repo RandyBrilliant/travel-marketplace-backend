@@ -66,12 +66,51 @@ docker compose -f docker-compose.prod.yml build --no-cache api celery celery-bea
 echo -e "${GREEN}✓ Application built${NC}"
 
 echo ""
-echo -e "${BLUE}[4/7] Starting services...${NC}"
+echo -e "${BLUE}[4/7] Checking SSL certificates and configuring Nginx...${NC}"
+# Verify nginx config files exist
+if [ ! -f "$APP_DIR/nginx/api.goholiday.id.http-only.conf" ]; then
+    echo -e "${RED}Error: HTTP-only nginx config not found!${NC}"
+    exit 1
+fi
+
+# Check if SSL certificates exist
+if [ -f "$APP_DIR/nginx/ssl/api.goholiday.id/fullchain.pem" ] && \
+   [ -f "$APP_DIR/nginx/ssl/api.goholiday.id/privkey.pem" ] && \
+   [ -f "$APP_DIR/nginx/ssl/api.goholiday.id/chain.pem" ]; then
+    echo "  ✓ SSL certificates found, using SSL configuration"
+    # Verify SSL config file exists
+    if [ ! -f "$APP_DIR/nginx/api.goholiday.id.conf" ]; then
+        echo -e "${RED}Error: SSL nginx config not found!${NC}"
+        exit 1
+    fi
+    # Ensure SSL config is active
+    if ! grep -q "./nginx/api.goholiday.id.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro" docker-compose.prod.yml || \
+       grep -q "# - ./nginx/api.goholiday.id.conf" docker-compose.prod.yml; then
+        echo "  → Switching to SSL configuration..."
+        sed -i 's|# - ./nginx/api.goholiday.id.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|- ./nginx/api.goholiday.id.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|g' docker-compose.prod.yml
+        sed -i 's|# - ./nginx/ssl:/etc/nginx/ssl:ro|- ./nginx/ssl:/etc/nginx/ssl:ro|g' docker-compose.prod.yml
+        sed -i 's|- ./nginx/api.goholiday.id.http-only.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|# - ./nginx/api.goholiday.id.http-only.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|g' docker-compose.prod.yml
+    fi
+else
+    echo "  ⚠ SSL certificates not found, using HTTP-only configuration"
+    # Ensure HTTP-only config is active
+    if ! grep -q "./nginx/api.goholiday.id.http-only.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro" docker-compose.prod.yml || \
+       grep -q "# - ./nginx/api.goholiday.id.http-only.conf" docker-compose.prod.yml; then
+        echo "  → Switching to HTTP-only configuration..."
+        sed -i 's|# - ./nginx/api.goholiday.id.http-only.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|- ./nginx/api.goholiday.id.http-only.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|g' docker-compose.prod.yml
+        sed -i 's|- ./nginx/api.goholiday.id.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|# - ./nginx/api.goholiday.id.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|g' docker-compose.prod.yml
+        sed -i 's|- ./nginx/ssl:/etc/nginx/ssl:ro|# - ./nginx/ssl:/etc/nginx/ssl:ro|g' docker-compose.prod.yml
+    fi
+fi
+echo -e "${GREEN}✓ Nginx configuration ready${NC}"
+
+echo ""
+echo -e "${BLUE}[5/7] Starting services...${NC}"
 docker compose -f docker-compose.prod.yml up -d
 echo -e "${GREEN}✓ Services started${NC}"
 
 echo ""
-echo -e "${BLUE}[5/7] Waiting for database to be ready...${NC}"
+echo -e "${BLUE}[6/7] Waiting for database to be ready...${NC}"
 timeout=60
 counter=0
 while ! docker compose -f docker-compose.prod.yml exec -T db pg_isready -U "${SQL_USER:-postgres}" > /dev/null 2>&1; do
@@ -87,7 +126,7 @@ echo ""
 echo -e "${GREEN}✓ Database ready${NC}"
 
 echo ""
-echo -e "${BLUE}[6/7] Running database migrations...${NC}"
+echo -e "${BLUE}[7/7] Running database migrations...${NC}"
 if ! docker compose -f docker-compose.prod.yml exec -T api python manage.py migrate --noinput; then
     echo -e "${RED}Error: Migrations failed${NC}"
     echo -e "${YELLOW}Showing last 30 lines of API logs:${NC}"
@@ -97,7 +136,7 @@ fi
 echo -e "${GREEN}✓ Migrations completed${NC}"
 
 echo ""
-echo -e "${BLUE}[7/7] Collecting static files...${NC}"
+echo -e "${BLUE}Collecting static files...${NC}"
 docker compose -f docker-compose.prod.yml exec -T api python manage.py collectstatic --noinput --clear || {
     echo -e "${YELLOW}⚠ Static files collection had warnings${NC}"
 }
@@ -131,6 +170,17 @@ echo ""
 # Health check
 echo -e "${BLUE}Performing health check...${NC}"
 sleep 5
+
+# Check nginx configuration
+if docker compose -f docker-compose.prod.yml exec -T nginx nginx -t > /dev/null 2>&1; then
+    echo -e "${GREEN}✓ Nginx configuration is valid${NC}"
+else
+    echo -e "${RED}✗ Nginx configuration error!${NC}"
+    docker compose -f docker-compose.prod.yml exec -T nginx nginx -t
+    exit 1
+fi
+
+# Check API health
 if docker compose -f docker-compose.prod.yml exec -T api curl -f http://localhost:8000/health/ > /dev/null 2>&1; then
     echo -e "${GREEN}✓ API is healthy${NC}"
 else

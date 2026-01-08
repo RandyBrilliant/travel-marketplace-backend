@@ -127,12 +127,26 @@ echo -e "${BLUE}Updating Docker Compose configuration for SSL...${NC}"
 cd "$APP_DIR"
 
 # Switch to SSL config in docker-compose.prod.yml
-sed -i 's|./nginx/api.goholiday.id.http-only.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|./nginx/api.goholiday.id.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|g' docker-compose.prod.yml
-sed -i 's|# - ./nginx/api.goholiday.id.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|- ./nginx/api.goholiday.id.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|g' docker-compose.prod.yml
-sed -i 's|# - ./nginx/ssl:/etc/nginx/ssl:ro|- ./nginx/ssl:/etc/nginx/ssl:ro|g' docker-compose.prod.yml
-
-# Comment out HTTP-only line
+# First, comment out HTTP-only config
 sed -i 's|- ./nginx/api.goholiday.id.http-only.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|# - ./nginx/api.goholiday.id.http-only.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|g' docker-compose.prod.yml
+
+# Then, uncomment and add SSL config
+if ! grep -q "./nginx/api.goholiday.id.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro" docker-compose.prod.yml || \
+   grep -q "# - ./nginx/api.goholiday.id.conf" docker-compose.prod.yml; then
+    # Add SSL config line (uncomment or add)
+    sed -i 's|# - ./nginx/api.goholiday.id.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|- ./nginx/api.goholiday.id.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro|g' docker-compose.prod.yml
+    # If it doesn't exist, add it after the HTTP-only line
+    if ! grep -q "./nginx/api.goholiday.id.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro" docker-compose.prod.yml; then
+        sed -i '/# - .\/nginx\/api.goholiday.id.http-only.conf/a\      - ./nginx/api.goholiday.id.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro' docker-compose.prod.yml
+    fi
+fi
+
+# Uncomment SSL volume
+sed -i 's|# - ./nginx/ssl:/etc/nginx/ssl:ro|- ./nginx/ssl:/etc/nginx/ssl:ro|g' docker-compose.prod.yml
+# If it doesn't exist, add it
+if ! grep -q "./nginx/ssl:/etc/nginx/ssl:ro" docker-compose.prod.yml; then
+    sed -i '/- .\/nginx\/api.goholiday.id.conf/a\      - ./nginx/ssl:/etc/nginx/ssl:ro' docker-compose.prod.yml
+fi
 
 echo -e "${GREEN}✓ Configuration updated${NC}"
 
@@ -141,6 +155,15 @@ echo ""
 echo -e "${BLUE}Starting Nginx with SSL...${NC}"
 docker compose -f docker-compose.prod.yml up -d nginx
 sleep 5
+
+# Verify nginx configuration
+if docker compose -f docker-compose.prod.yml exec -T nginx nginx -t > /dev/null 2>&1; then
+    echo -e "${GREEN}✓ Nginx configuration is valid${NC}"
+else
+    echo -e "${RED}Error: Nginx configuration is invalid!${NC}"
+    docker compose -f docker-compose.prod.yml exec -T nginx nginx -t
+    exit 1
+fi
 
 # Verify nginx is running
 if docker compose -f docker-compose.prod.yml ps nginx | grep -q "Up"; then
