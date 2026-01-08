@@ -166,12 +166,16 @@ class ResellerProfileSerializer(serializers.ModelSerializer):
     def validate_sponsor_referral_code(self, value):
         """Validate that sponsor referral code exists if provided."""
         if value:
+            # Normalize referral code: uppercase and strip whitespace
+            # Referral codes are uppercase by default, so normalize for consistency
+            normalized_code = value.upper().strip()
             try:
-                ResellerProfile.objects.get(referral_code=value)
+                ResellerProfile.objects.get(referral_code=normalized_code)
             except ResellerProfile.DoesNotExist:
                 raise serializers.ValidationError(
-                    f"Sponsor with referral code '{value}' does not exist."
+                    f"Sponsor with referral code '{normalized_code}' does not exist."
                 )
+            return normalized_code
         return value
 
     def _validate_no_circular_sponsor(self, sponsor, current_instance=None):
@@ -204,12 +208,14 @@ class ResellerProfileSerializer(serializers.ModelSerializer):
         sponsor = validated_data.get("sponsor")
         
         if sponsor_referral_code:
+            # Normalize referral code for lookup (uppercase and strip whitespace)
+            normalized_code = sponsor_referral_code.upper().strip()
             try:
-                sponsor = ResellerProfile.objects.get(referral_code=sponsor_referral_code)
+                sponsor = ResellerProfile.objects.get(referral_code=normalized_code)
                 validated_data["sponsor"] = sponsor
             except ResellerProfile.DoesNotExist:
                 raise serializers.ValidationError(
-                    {"sponsor_referral_code": f"Sponsor with referral code '{sponsor_referral_code}' does not exist."}
+                    {"sponsor_referral_code": f"Sponsor with referral code '{normalized_code}' does not exist."}
                 )
         
         # Generate referral code if not provided
@@ -228,12 +234,14 @@ class ResellerProfileSerializer(serializers.ModelSerializer):
         sponsor = validated_data.get("sponsor")
         
         if sponsor_referral_code:
+            # Normalize referral code for lookup (uppercase and strip whitespace)
+            normalized_code = sponsor_referral_code.upper().strip()
             try:
-                sponsor = ResellerProfile.objects.get(referral_code=sponsor_referral_code)
+                sponsor = ResellerProfile.objects.get(referral_code=normalized_code)
                 validated_data["sponsor"] = sponsor
             except ResellerProfile.DoesNotExist:
                 raise serializers.ValidationError(
-                    {"sponsor_referral_code": f"Sponsor with referral code '{sponsor_referral_code}' does not exist."}
+                    {"sponsor_referral_code": f"Sponsor with referral code '{normalized_code}' does not exist."}
                 )
         
         # Validate sponsor if it's being set or changed

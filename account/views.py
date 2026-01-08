@@ -2,13 +2,14 @@ from rest_framework import viewsets, permissions, status, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.throttling import AnonRateThrottle
 from django.db import transaction
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.encoding import force_str
 from django.utils.http import urlsafe_base64_decode
 from django.utils import timezone
 from django.conf import settings
-from account.tasks import send_email_verification, send_password_reset_email
+from account.tasks import send_email_verification, send_password_reset_email, send_welcome_email
 
 from account.models import (
     CustomUser,
@@ -26,6 +27,18 @@ from account.serializers import (
     AdminStaffProfileSerializer,
     ChangePasswordSerializer,
 )
+
+
+class RegistrationThrottle(AnonRateThrottle):
+    """
+    Custom throttle for public registration endpoints.
+    Prevents spam registration and account enumeration attacks.
+    """
+    def get_rate(self):
+        # Disable throttling in DEBUG mode, use stricter rate in production
+        if settings.DEBUG:
+            return None  # No throttling in development
+        return '5/hour'  # Max 5 registration attempts per IP per hour
 
 
 class BaseOwnProfileViewSet(viewsets.ModelViewSet):
@@ -439,6 +452,19 @@ class ChangePasswordView(APIView):
         try:
             user.set_password(new_password)
             user.save()
+            
+            # Log password change for audit trail
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(
+                f"Password changed",
+                extra={
+                    'user_id': user.id,
+                    'user_role': user.role,
+                    'ip_address': self.get_client_ip(request),
+                }
+            )
+            
             return Response(
                 {'detail': 'Password has been successfully changed.'},
                 status=status.HTTP_200_OK
@@ -448,6 +474,16 @@ class ChangePasswordView(APIView):
                 {'detail': f'An error occurred while changing password: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+    
+    @staticmethod
+    def get_client_ip(request):
+        """Extract client IP address from request, handling proxies."""
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            ip = x_forwarded_for.split(',')[0]
+        else:
+            ip = request.META.get('REMOTE_ADDR')
+        return ip
 
 
 # ==================== EMAIL VERIFICATION ENDPOINTS ====================
@@ -512,13 +548,10 @@ class RequestPasswordResetView(APIView):
         try:
             user = CustomUser.objects.get(email=email.lower().strip())
             
-            # Generate password reset token
-            from django.utils.encoding import force_bytes
-            from django.utils.http import urlsafe_base64_encode
-            
-            token = default_token_generator.make_token(user)
-            uid = urlsafe_base64_encode(force_bytes(user.pk))
-            reset_token = f"{uid}/{token}"
+            # Generate password reset token using utility function
+            from account.utils import generate_verification_token
+            uidb64, token = generate_verification_token(user)
+            reset_token = f"{uidb64}/{token}"
             
             # Send password reset email asynchronously
             send_password_reset_email.delay(user.id, reset_token)
@@ -553,13 +586,10 @@ class ResetPasswordView(APIView):
         try:
             user = CustomUser.objects.get(pk=user_id)
             
-            # Generate password reset token
-            from django.utils.encoding import force_bytes
-            from django.utils.http import urlsafe_base64_encode
-            
-            token = default_token_generator.make_token(user)
-            uid = urlsafe_base64_encode(force_bytes(user.pk))
-            reset_token = f"{uid}/{token}"
+            # Generate password reset token using utility function
+            from account.utils import generate_verification_token
+            uidb64, token = generate_verification_token(user)
+            reset_token = f"{uidb64}/{token}"
             
             # Send password reset email asynchronously
             send_password_reset_email.delay(user.id, reset_token)
@@ -584,6 +614,12 @@ class ResetPasswordConfirmView(APIView):
     """
     API endpoint to reset user password using uid and token from email link.
     No authentication required - uses token-based verification.
+    
+    Token Security:
+    - Tokens are generated using Django's make_token() with 1-day expiration
+    - Tokens are automatically invalidated when the password changes
+    - This is because tokens include a hash of the current password
+    - Cannot be reused after password reset
     """
     permission_classes = [permissions.AllowAny]
 
@@ -600,6 +636,7 @@ class ResetPasswordConfirmView(APIView):
             )
 
         # Check if token is valid
+        # Django's token includes password hash, so it's automatically invalidated after password change
         if not default_token_generator.check_token(user, token):
             return Response(
                 {'detail': 'Invalid or expired password reset token.'},
@@ -628,6 +665,17 @@ class ResetPasswordConfirmView(APIView):
         try:
             user.set_password(new_password)
             user.save()
+            
+            # Log password reset for audit trail
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(
+                f"Password reset successful",
+                extra={
+                    'user_id': user.id,
+                    'email': user.email,
+                }
+            )
             
             return Response(
                 {
@@ -799,8 +847,10 @@ class RegisterResellerView(APIView):
     """
     Public API endpoint for reseller registration.
     Creates a new user with RESELLER role and associated ResellerProfile.
+    Includes rate limiting to prevent spam and abuse.
     """
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [RegistrationThrottle]
 
     def post(self, request):
         """
@@ -825,6 +875,10 @@ class RegisterResellerView(APIView):
         address = request.data.get('address', '')
         sponsor_referral_code = request.data.get('sponsor_referral_code', '')
 
+        # Normalize email: lowercase and strip whitespace
+        if email:
+            email = email.lower().strip()
+
         # Validate required fields
         if not email:
             return Response(
@@ -842,7 +896,7 @@ class RegisterResellerView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Check if user with this email already exists
+        # Check if user with this email already exists (case-insensitive)
         if CustomUser.objects.filter(email=email).exists():
             return Response(
                 {'email': ['A user with this email already exists.']},
@@ -893,14 +947,14 @@ class RegisterResellerView(APIView):
                     sponsor=sponsor,
                 )
                 
-                # Send email verification
+                # Send welcome email
                 try:
-                    send_email_verification.delay(user.id)
+                    send_welcome_email.delay(user.id)
                 except Exception as e:
                     # Log error but don't fail registration
                     import logging
                     logger = logging.getLogger(__name__)
-                    logger.error(f"Failed to send verification email: {str(e)}")
+                    logger.error(f"Failed to send welcome email: {str(e)}")
 
                 # Clear login throttle cache for this IP to allow immediate login after registration
                 # This prevents "too many requests" error when user tries to login right after registration
@@ -1001,9 +1055,11 @@ class RegisterSupplierView(APIView):
     """
     Public API endpoint for supplier registration.
     Creates a new user with SUPPLIER role and associated SupplierProfile.
+    Includes rate limiting to prevent spam and abuse.
     """
 
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [RegistrationThrottle]
 
     def post(self, request):
         """
@@ -1026,6 +1082,10 @@ class RegisterSupplierView(APIView):
         contact_phone = request.data.get('contact_phone')
         address = request.data.get('address', '')
 
+        # Normalize email: lowercase and strip whitespace
+        if email:
+            email = email.lower().strip()
+
         # Validate required fields
         missing_fields = {}
         if not email:
@@ -1042,7 +1102,7 @@ class RegisterSupplierView(APIView):
         if missing_fields:
             return Response(missing_fields, status=status.HTTP_400_BAD_REQUEST)
 
-        # Check if user with this email already exists
+        # Check if user with this email already exists (case-insensitive)
         if CustomUser.objects.filter(email=email).exists():
             return Response(
                 {'email': ['A user with this email already exists.']},
@@ -1079,14 +1139,14 @@ class RegisterSupplierView(APIView):
                     address=address,
                 )
 
-                # Send email verification (best-effort)
+                # Send welcome email (best-effort)
                 try:
-                    send_email_verification.delay(user.id)
+                    send_welcome_email.delay(user.id)
                 except Exception as e:
                     import logging
 
                     logger = logging.getLogger(__name__)
-                    logger.error(f"Failed to send verification email: {str(e)}")
+                    logger.error(f"Failed to send welcome email: {str(e)}")
 
                 # Auto-login supplier similar to reseller registration
                 try:

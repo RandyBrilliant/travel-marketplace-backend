@@ -45,45 +45,28 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         return full_name or user.email, photo_url
 
     @classmethod
-    def _build_absolute_url(cls, relative_url, request=None):
+    def _build_absolute_url(cls, relative_url):
         """
-        Build absolute URL from relative path.
-        If request is provided, uses it. Otherwise tries Site framework or settings.
-        """
-        if not relative_url:
-            return None
+        Build absolute URL from relative path for embedding in JWT token.
         
-        if relative_url.startswith('http'):
+        Note: This method is called without request context in get_token().
+        For production, ensure API_DOMAIN is set in environment variables.
+        """
+        if not relative_url or relative_url.startswith('http'):
             return relative_url
         
         # Ensure it starts with /
         if not relative_url.startswith('/'):
             relative_url = '/' + relative_url
         
-        # Use request if available (most reliable)
-        if request:
-            return request.build_absolute_uri(relative_url)
+        # Use API domain from settings or environment
+        if settings.DEBUG:
+            base_url = 'http://localhost:8000'
+        else:
+            api_domain = getattr(settings, 'API_DOMAIN', None) or os.environ.get('API_DOMAIN', 'data.goholiday.id')
+            base_url = f'https://{api_domain}'
         
-        # Try to use Site framework if available
-        try:
-            # Check if sites app is installed before importing
-            if 'django.contrib.sites' in settings.INSTALLED_APPS:
-                from django.contrib.sites.models import Site
-                current_site = Site.objects.get_current()
-                protocol = 'https' if not settings.DEBUG else 'http'
-                return f"{protocol}://{current_site.domain}{relative_url}"
-            else:
-                raise ImportError("django.contrib.sites not in INSTALLED_APPS")
-        except (ImportError, RuntimeError, Exception):
-            # Fallback if sites framework not installed or other error
-            if settings.DEBUG:
-                return f"http://localhost:8000{relative_url}"
-            # Production fallback - use API domain from settings or environment
-            # Default to data.goholiday.id with HTTPS in production
-            default_domain = getattr(settings, 'API_DOMAIN', None) or os.environ.get('API_DOMAIN', 'data.goholiday.id')
-            # Always use HTTPS in production (when not DEBUG)
-            protocol = 'https' if not settings.DEBUG else 'http'
-            return f"{protocol}://{default_domain}{relative_url}"
+        return f'{base_url}{relative_url}'
 
     @classmethod
     def get_token(cls, user):
@@ -100,7 +83,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         token["full_name"] = full_name
         
         if photo_url:
-            # Build absolute URL (no request available in get_token, so use fallback)
+            # Build absolute URL for embedding in token
             absolute_url = cls._build_absolute_url(photo_url)
             if absolute_url:
                 token["profile_picture_url"] = absolute_url

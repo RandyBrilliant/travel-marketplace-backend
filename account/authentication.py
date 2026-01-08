@@ -9,7 +9,6 @@ Note: CSRF protection is not enforced here because:
 """
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken, AuthenticationFailed, TokenError
-from django.conf import settings
 
 
 class CookieJWTAuthentication(JWTAuthentication):

@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Verify Your Email - DCNetwork</title>
+    <title>Verifikasi Email Anda - DCNetwork</title>
     <style>
         * {
             margin: 0;
@@ -141,36 +141,36 @@
         
         <div class="content">
             <div class="greeting">
-                Hello{% if user.email %} {{ user.email }}{% endif %},
+                Halo{% if user.email %} {{ user.email }}{% endif %},
             </div>
             
             <div class="message">
-                Welcome to DCNetwork! We're excited to have you join our travel marketplace community.
+                Selamat datang di DCNetwork! Kami senang Anda bergabung dengan komunitas marketplace travel kami.
             </div>
             
             <div class="message">
-                To get started, please verify your email address by clicking the button below. This helps us ensure the security of your account.
+                Untuk memulai, silakan verifikasi alamat email Anda dengan mengklik tombol di bawah ini. Ini membantu kami memastikan keamanan akun Anda.
             </div>
             
             <div class="button-container">
-                <a href="{{ verification_url }}" class="button">Verify Email Address</a>
+                <a href="{{ verification_url }}" class="button">Verifikasi Alamat Email</a>
             </div>
             
             <div class="link-fallback">
-                <div class="link-fallback-text">Or copy and paste this link into your browser:</div>
+                <div class="link-fallback-text">Atau salin dan tempel tautan ini ke browser Anda:</div>
                 <div class="link-fallback-url">{{ verification_url }}</div>
             </div>
             
             <div class="note">
                 <div class="note-text">
-                    <strong>Note:</strong> This verification link will expire in 24 hours. If you didn't create an account with DCNetwork, please ignore this email.
+                    <strong>Catatan:</strong> Tautan verifikasi ini akan kadaluarsa dalam 24 jam. Jika Anda tidak membuat akun dengan DCNetwork, silakan abaikan email ini.
                 </div>
             </div>
         </div>
         
         <div class="footer">
-            <div class="footer-text">Need help? Contact our support team.</div>
-            <div class="footer-brand">&copy; {% now "Y" %} DCNetwork. All rights reserved.</div>
+            <div class="footer-text">Butuh bantuan? Hubungi tim dukungan kami.</div>
+            <div class="footer-brand">&copy; {% now "Y" %} DCNetwork. Semua hak dilindungi.</div>
         </div>
     </div>
 </body>

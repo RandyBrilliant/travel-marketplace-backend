@@ -119,16 +119,11 @@ def send_email_verification(self, user_id):
         user = CustomUser.objects.get(pk=user_id)
         logger.info(f"Found user: {user.email}")
         
-        # Generate verification token (you'll need to implement this)
-        # For now, using a simple approach - you might want to use django-allauth or similar
-        from django.contrib.auth.tokens import default_token_generator
-        from django.utils.encoding import force_bytes
-        from django.utils.http import urlsafe_base64_encode
+        # Generate verification token using utility function
+        from account.utils import generate_verification_token
+        uidb64, token = generate_verification_token(user)
         
-        token = default_token_generator.make_token(user)
-        uid = urlsafe_base64_encode(force_bytes(user.pk))
-        
-        verification_url = f"{settings.FRONTEND_URL}/verify-email/{uid}/{token}/"
+        verification_url = f"{settings.FRONTEND_URL}/verify-email/{uidb64}/{token}/"
         logger.info(f"Generated verification URL for user {user.email}")
         
         subject = "Verify your email address"

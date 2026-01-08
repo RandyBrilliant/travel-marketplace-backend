@@ -215,7 +215,6 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "account.authentication.CookieJWTAuthentication",  # Custom cookie-based JWT auth
         "rest_framework_simplejwt.authentication.JWTAuthentication",  # Fallback for backward compatibility
-        "rest_framework.authentication.SessionAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticatedOrReadOnly",
@@ -247,14 +246,19 @@ SIMPLE_JWT = {
     "AUTH_COOKIE_REFRESH": "refresh_token",  # Name of the refresh token cookie
     "AUTH_COOKIE_SECURE": not DEBUG,  # Set to True in production
     "AUTH_COOKIE_HTTP_ONLY": True,  # HttpOnly flag
-    "AUTH_COOKIE_SAMESITE": "Lax",  # SameSite policy
+    # SameSite cookie policy:
+    # - "Lax" (default): Cookies sent for top-level navigation and same-site requests
+    # - "Strict": Cookies only sent for same-site requests
+    # - "None": Cookies sent for all requests (requires Secure=True, use only for cross-domain)
+    # If frontend is cross-domain, use "SameSite=None; Secure" and update CORS
+    "AUTH_COOKIE_SAMESITE": "Lax",
 }
 
 AUTH_USER_MODEL = "account.CustomUser"
 
 # CSRF Settings for cookie-based authentication
 CSRF_COOKIE_HTTPONLY = False  # Must be False so frontend can read CSRF token if needed
-CSRF_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SAMESITE = 'Lax'  # Match AUTH_COOKIE_SAMESITE - use 'None' for cross-domain
 CSRF_COOKIE_SECURE = not DEBUG  # Use secure cookies in production
 CSRF_TRUSTED_ORIGINS = get_env_list("CSRF_TRUSTED_ORIGINS")
 

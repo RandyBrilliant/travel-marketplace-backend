@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Welcome to DCNetwork</title>
+    <title>Selamat Datang di DCNetwork</title>
     <style>
         * {
             margin: 0;
@@ -163,62 +163,62 @@
         
         <div class="content">
             <div class="greeting">
-                Hello {% if profile_name %}{{ profile_name }}{% else %}{{ user.email }}{% endif %},
+                Halo {% if profile_name %}{{ profile_name }}{% else %}{{ user.email }}{% endif %},
             </div>
             
             <div class="message">
-                Welcome to DCNetwork! We're thrilled to have you join our travel marketplace community. Your account has been successfully created and you're all set to start your journey with us.
+                Selamat datang di DCNetwork! Kami senang Anda bergabung dengan komunitas marketplace travel kami. Akun Anda telah berhasil dibuat dan Anda siap untuk memulai perjalanan Anda bersama kami.
             </div>
             
             {% if user.role == 'SUPPLIER' %}
             <div class="welcome-badge">
-                <div class="welcome-badge-title">You're registered as a Supplier!</div>
-                <div class="welcome-badge-text">Start listing your amazing tour packages and reach thousands of travelers around the world.</div>
+                <div class="welcome-badge-title">Anda terdaftar sebagai Supplier!</div>
+                <div class="welcome-badge-text">Mulai daftarkan paket tur menakjubkan Anda dan jangkau ribuan pelancong di seluruh dunia.</div>
             </div>
             {% elif user.role == 'RESELLER' %}
             <div class="welcome-badge">
-                <div class="welcome-badge-title">You're registered as a Reseller!</div>
-                <div class="welcome-badge-text">Start booking tours for your customers and earn commissions on every successful booking.</div>
+                <div class="welcome-badge-title">Anda terdaftar sebagai Reseller!</div>
+                <div class="welcome-badge-text">Mulai pesan tur untuk pelanggan Anda dan dapatkan komisi dari setiap pemesanan yang berhasil.</div>
             </div>
             {% elif user.role == 'STAFF' %}
             <div class="welcome-badge">
-                <div class="welcome-badge-title">You're registered as Staff!</div>
-                <div class="welcome-badge-text">Welcome to the team! You can now manage and oversee the marketplace operations.</div>
+                <div class="welcome-badge-title">Anda terdaftar sebagai Staff!</div>
+                <div class="welcome-badge-text">Selamat bergabung dengan tim! Anda sekarang dapat mengelola dan mengawasi operasi marketplace.</div>
             </div>
             {% endif %}
             
             <div class="features">
-                <div class="features-title">What you can do:</div>
+                <div class="features-title">Yang bisa Anda lakukan:</div>
                 {% if user.role == 'SUPPLIER' %}
-                <div class="feature-item">Create and manage tour packages</div>
-                <div class="feature-item">Set pricing and availability</div>
-                <div class="feature-item">Track bookings and manage dates</div>
-                <div class="feature-item">Upload photos and detailed itineraries</div>
+                <div class="feature-item">Membuat dan mengelola paket tur</div>
+                <div class="feature-item">Menetapkan harga dan ketersediaan</div>
+                <div class="feature-item">Melacak pemesanan dan mengelola tanggal</div>
+                <div class="feature-item">Mengunggah foto dan itinerari terperinci</div>
                 {% elif user.role == 'RESELLER' %}
-                <div class="feature-item">Browse available tour packages</div>
-                <div class="feature-item">Book tours for your customers</div>
-                <div class="feature-item">Earn commissions on bookings</div>
-                <div class="feature-item">Manage your reseller network</div>
+                <div class="feature-item">Menjelajahi paket tur yang tersedia</div>
+                <div class="feature-item">Memesan tur untuk pelanggan Anda</div>
+                <div class="feature-item">Dapatkan komisi dari pemesanan</div>
+                <div class="feature-item">Kelola jaringan reseller Anda</div>
                 {% else %}
-                <div class="feature-item">Access admin dashboard</div>
-                <div class="feature-item">Manage users and profiles</div>
-                <div class="feature-item">Oversee bookings and payments</div>
-                <div class="feature-item">Configure system settings</div>
+                <div class="feature-item">Akses dashboard admin</div>
+                <div class="feature-item">Kelola pengguna dan profil</div>
+                <div class="feature-item">Awasi pemesanan dan pembayaran</div>
+                <div class="feature-item">Konfigurasi pengaturan sistem</div>
                 {% endif %}
             </div>
             
             <div class="button-container">
-                <a href="{{ FRONTEND_URL }}/dashboard" class="button">Go to Dashboard</a>
+                <a href="{{ FRONTEND_URL }}/dashboard" class="button">Buka Dashboard</a>
             </div>
             
             <div class="message" style="margin-top: 32px;">
-                If you have any questions or need assistance, our support team is here to help. We're excited to see what you'll accomplish with DCNetwork!
+                Jika Anda memiliki pertanyaan atau membutuhkan bantuan, tim dukungan kami siap membantu. Kami bersemangat melihat apa yang akan Anda capai dengan DCNetwork!
             </div>
         </div>
         
         <div class="footer">
-            <div class="footer-text">Thank you for choosing DCNetwork!</div>
-            <div class="footer-brand">&copy; {% now "Y" %} DCNetwork. All rights reserved.</div>
+            <div class="footer-text">Terima kasih telah memilih DCNetwork!</div>
+            <div class="footer-brand">&copy; {% now "Y" %} DCNetwork. Semua hak dilindungi.</div>
         </div>
     </div>
 </body>
