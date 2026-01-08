@@ -75,11 +75,14 @@ export APP_DIR=$CUSTOM_DIR
 # Travel Marketplace Aliases
 alias tm-cd='cd \$APP_DIR'
 alias tm-deploy='cd \$APP_DIR && sudo -E ./deploy/deploy.sh'
+alias tm-update='cd \$APP_DIR && sudo -E ./deploy/rolling-update.sh'
+alias tm-quick-update='cd \$APP_DIR && sudo -E ./deploy/update.sh'
 alias tm-optimize='cd \$APP_DIR && sudo -E ./deploy/optimize-2gb.sh'
 alias tm-ssl='cd \$APP_DIR && sudo -E ./deploy/ssl-setup.sh'
 alias tm-logs='docker compose -f \$APP_DIR/docker-compose.prod.yml logs -f'
 alias tm-ps='docker compose -f \$APP_DIR/docker-compose.prod.yml ps'
 alias tm-restart='docker compose -f \$APP_DIR/docker-compose.prod.yml restart'
+alias tm-reload='docker compose -f \$APP_DIR/docker-compose.prod.yml restart api celery'
 alias tm-stop='docker compose -f \$APP_DIR/docker-compose.prod.yml down'
 alias tm-start='docker compose -f \$APP_DIR/docker-compose.prod.yml up -d'
 alias tm-stats='docker stats'
@@ -145,20 +148,23 @@ echo "  Directory: $CUSTOM_DIR"
 echo "  Shell RC: $SHELL_RC"
 echo ""
 echo -e "${BLUE}Available aliases (after reload):${NC}"
-echo "  ${GREEN}tm-cd${NC}         - Go to app directory"
-echo "  ${GREEN}tm-deploy${NC}     - Deploy application"
-echo "  ${GREEN}tm-optimize${NC}   - Run 2GB optimization"
-echo "  ${GREEN}tm-ssl${NC}        - Setup SSL certificates"
-echo "  ${GREEN}tm-logs${NC}       - View container logs"
-echo "  ${GREEN}tm-ps${NC}         - Container status"
-echo "  ${GREEN}tm-restart${NC}    - Restart services"
-echo "  ${GREEN}tm-stop${NC}       - Stop all services"
-echo "  ${GREEN}tm-start${NC}      - Start all services"
-echo "  ${GREEN}tm-stats${NC}      - Resource usage"
-echo "  ${GREEN}tm-backup${NC}     - Backup database"
-echo "  ${GREEN}tm-db-reset${NC}   - Reset database"
-echo "  ${GREEN}tm-env${NC}        - Edit .env file"
-echo "  ${GREEN}tm-health${NC}     - Check API health"
+echo "  ${GREEN}tm-cd${NC}            - Go to app directory"
+echo "  ${GREEN}tm-deploy${NC}        - Deploy application (full)"
+echo "  ${GREEN}tm-update${NC}        - Update with minimal downtime (recommended)"
+echo "  ${GREEN}tm-quick-update${NC}  - Quick update (~30s downtime)"
+echo "  ${GREEN}tm-reload${NC}        - Hot reload API (no downtime)"
+echo "  ${GREEN}tm-optimize${NC}      - Run 2GB optimization"
+echo "  ${GREEN}tm-ssl${NC}           - Setup SSL certificates"
+echo "  ${GREEN}tm-logs${NC}          - View container logs"
+echo "  ${GREEN}tm-ps${NC}            - Container status"
+echo "  ${GREEN}tm-restart${NC}       - Restart all services"
+echo "  ${GREEN}tm-stop${NC}          - Stop all services"
+echo "  ${GREEN}tm-start${NC}         - Start all services"
+echo "  ${GREEN}tm-stats${NC}         - Resource usage"
+echo "  ${GREEN}tm-backup${NC}        - Backup database"
+echo "  ${GREEN}tm-db-reset${NC}      - Reset database"
+echo "  ${GREEN}tm-env${NC}           - Edit .env file"
+echo "  ${GREEN}tm-health${NC}        - Check API health"
 echo ""
 echo -e "${YELLOW}⚠ Important: Reload your shell${NC}"
 echo "  Run: ${BLUE}source $SHELL_RC${NC}"

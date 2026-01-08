@@ -280,9 +280,12 @@ cat >> ~/.bashrc << 'EOF'
 # Travel Marketplace aliases
 export APP_DIR=/home/regretzz/travel-marketplace-backend
 alias tm-deploy='cd $APP_DIR && sudo -E ./deploy/deploy.sh'
+alias tm-update='cd $APP_DIR && sudo -E ./deploy/rolling-update.sh'
+alias tm-quick-update='cd $APP_DIR && sudo -E ./deploy/update.sh'
 alias tm-logs='docker compose -f $APP_DIR/docker-compose.prod.yml logs -f'
 alias tm-ps='docker compose -f $APP_DIR/docker-compose.prod.yml ps'
 alias tm-restart='docker compose -f $APP_DIR/docker-compose.prod.yml restart'
+alias tm-reload='docker compose -f $APP_DIR/docker-compose.prod.yml restart api celery'
 alias tm-stats='docker stats'
 alias tm-backup='cd $APP_DIR && sudo -E ./deploy/backup.sh'
 alias tm-db-reset='cd $APP_DIR && sudo -E ./deploy/reset-database.sh'

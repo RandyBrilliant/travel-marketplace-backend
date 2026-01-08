@@ -68,6 +68,39 @@ Add to crontab for daily backups:
 0 2 * * * /opt/travel-marketplace-backend/deploy/backup.sh
 ```
 
+### `update.sh`
+Quick update script for deploying code changes to production.
+
+**What it does:**
+- Pulls latest code (if git repository)
+- Stops all containers
+- Rebuilds Docker images
+- Starts services
+- Runs migrations
+- Collects static files
+
+**⚠️ Note:** Causes ~30-60 seconds of downtime
+
+**Usage:**
+```bash
+sudo ./deploy/update.sh
+```
+
+### `rolling-update.sh`
+Rolling update with minimal downtime (recommended for production).
+
+**What it does:**
+- Updates services one by one
+- Keeps services running during update
+- Minimal user impact (~2-5 seconds)
+
+**Usage:**
+```bash
+sudo ./deploy/rolling-update.sh
+```
+
+**See:** `deploy/UPDATE_GUIDE.md` for complete update strategies
+
 ### `reset-database.sh`
 Resets the database in Docker production environment.
 
