@@ -928,6 +928,9 @@ class ResellerBookingViewSet(viewsets.ModelViewSet):
     def get_serializer_class(self):
         if self.action == "list":
             return BookingListSerializer
+        if self.action == "create":
+            from .serializers import BookingCreateSerializer
+            return BookingCreateSerializer
         return BookingSerializer
     
     def perform_create(self, serializer):

@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from rest_framework.exceptions import ValidationError
 from django.utils.text import slugify
 from django.conf import settings
 import os
@@ -879,6 +880,122 @@ class BookingUpdateSerializer(serializers.ModelSerializer):
         model = Booking
         fields = ["status", "notes"]
         read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class SeatSlotCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating seat slots with passenger details during booking."""
+    
+    class Meta:
+        model = SeatSlot
+        fields = [
+            "seat_number",
+            "passenger_name",
+            "passenger_email",
+            "passenger_phone",
+            "passenger_date_of_birth",
+            "passenger_gender",
+            "passenger_nationality",
+            "passport_number",
+            "passport_issue_date",
+            "passport_expiry_date",
+            "passport_issue_country",
+            "visa_required",
+            "visa_number",
+            "visa_issue_date",
+            "visa_expiry_date",
+            "visa_type",
+            "special_requests",
+            "emergency_contact_name",
+            "emergency_contact_phone",
+        ]
+
+
+class BookingCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating bookings with seat slots and passenger details."""
+    
+    seat_slots = SeatSlotCreateSerializer(many=True, required=True)
+    
+    class Meta:
+        model = Booking
+        fields = [
+            "tour_date",
+            "customer_name",
+            "customer_email",
+            "customer_phone",
+            "platform_fee",
+            "notes",
+            "seat_slots",
+        ]
+    
+    def validate_seat_slots(self, value):
+        """Validate that at least one seat slot is provided."""
+        if not value or len(value) == 0:
+            raise serializers.ValidationError("At least one seat slot is required.")
+        return value
+    
+    def validate(self, attrs):
+        """Validate seat slots belong to the tour date."""
+        tour_date = attrs.get('tour_date')
+        seat_slots = attrs.get('seat_slots', [])
+        
+        if tour_date and seat_slots:
+            # Get available seat numbers for this tour date
+            available_seats = set(
+                tour_date.seat_slots.filter(status=SeatSlotStatus.AVAILABLE)
+                .values_list('seat_number', flat=True)
+            )
+            
+            # Check all requested seats are available
+            requested_seats = {slot['seat_number'] for slot in seat_slots}
+            unavailable_seats = requested_seats - available_seats
+            
+            if unavailable_seats:
+                raise serializers.ValidationError({
+                    'seat_slots': f'Seats {", ".join(unavailable_seats)} are not available.'
+                })
+            
+            # Check for duplicate seat numbers
+            if len(requested_seats) != len(seat_slots):
+                raise serializers.ValidationError({
+                    'seat_slots': 'Duplicate seat numbers are not allowed.'
+                })
+        
+        return attrs
+    
+    def create(self, validated_data):
+        """Create booking and assign seat slots with passenger details."""
+        from django.db import transaction
+        
+        seat_slots_data = validated_data.pop('seat_slots')
+        tour_date = validated_data['tour_date']
+        
+        with transaction.atomic():
+            # Create booking
+            booking = Booking.objects.create(**validated_data)
+            
+            # Assign seat slots and update passenger details
+            for slot_data in seat_slots_data:
+                seat_number = slot_data.pop('seat_number')
+                try:
+                    seat_slot = tour_date.seat_slots.get(
+                        seat_number=seat_number,
+                        status=SeatSlotStatus.AVAILABLE
+                    )
+                    # Update seat slot with passenger details and assign to booking
+                    # Convert empty strings to None for optional fields
+                    for key, value in slot_data.items():
+                        if value == "":
+                            value = None
+                        setattr(seat_slot, key, value)
+                    seat_slot.booking = booking
+                    seat_slot.status = SeatSlotStatus.BOOKED
+                    seat_slot.save()
+                except SeatSlot.DoesNotExist:
+                    raise ValidationError({
+                        'seat_slots': f'Seat {seat_number} is not available.'
+                    })
+            
+            return booking
 
 
 class BookingSerializer(serializers.ModelSerializer):

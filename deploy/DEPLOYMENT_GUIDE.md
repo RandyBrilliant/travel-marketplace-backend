@@ -58,8 +58,8 @@ nano .env
 # Django Settings
 SECRET_KEY=your-super-secret-key-here  # Generate with: python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
 DEBUG=0
-ALLOWED_HOSTS=api.goholiday.id,your-server-ip
-CSRF_TRUSTED_ORIGINS=https://api.goholiday.id
+ALLOWED_HOSTS=data.goholiday.id,your-server-ip
+CSRF_TRUSTED_ORIGINS=https://data.goholiday.id
 
 # Database
 SQL_DATABASE=travel_marketplace
@@ -175,10 +175,10 @@ docker compose -f docker-compose.prod.yml restart api
 
 ```bash
 # Test HTTP (should redirect to HTTPS)
-curl -I http://api.goholiday.id/health/
+curl -I http://data.goholiday.id/health/
 
 # Test HTTPS
-curl https://api.goholiday.id/health/
+curl https://data.goholiday.id/health/
 ```
 
 **Check service logs:**
@@ -283,6 +283,67 @@ docker compose -f docker-compose.prod.yml restart nginx
    docker ps
    docker system df
    ```
+
+### Port Already in Use (Port 80/443 Conflict)
+
+If you see an error like `failed to bind host port 0.0.0.0:80/tcp: address already in use`:
+
+1. **Identify what's using the port:**
+   ```bash
+   # Using lsof (if available)
+   sudo lsof -i:80
+   sudo lsof -i:443
+   
+   # Using netstat (alternative)
+   sudo netstat -tlnp | grep ':80'
+   sudo netstat -tlnp | grep ':443'
+   
+   # Using ss (alternative)
+   sudo ss -tlnp | grep ':80'
+   sudo ss -tlnp | grep ':443'
+   ```
+
+2. **Common solutions:**
+
+   **Stop Apache (if running):**
+   ```bash
+   sudo systemctl stop apache2
+   sudo systemctl disable apache2  # Prevent auto-start
+   ```
+
+   **Stop system Nginx (if running):**
+   ```bash
+   sudo systemctl stop nginx
+   sudo systemctl disable nginx  # Prevent auto-start
+   ```
+
+   **Stop other Docker containers using the port:**
+   ```bash
+   # List all containers
+   docker ps -a
+   
+   # Stop specific container
+   docker stop <container-name>
+   
+   # Or stop all containers
+   docker stop $(docker ps -q)
+   ```
+
+   **Check for other services:**
+   ```bash
+   # Check all listening ports
+   sudo netstat -tlnp
+   
+   # Check systemd services
+   sudo systemctl list-units --type=service | grep -E 'nginx|apache|httpd'
+   ```
+
+3. **After stopping the conflicting service, retry deployment:**
+   ```bash
+   sudo ./deploy/deploy.sh
+   ```
+
+**Note:** The deployment script now automatically checks for port conflicts before starting services and will provide helpful error messages if ports are in use.
 
 ### Database Connection Issues
 
