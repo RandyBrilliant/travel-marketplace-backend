@@ -68,6 +68,35 @@ Add to crontab for daily backups:
 0 2 * * * /opt/travel-marketplace-backend/deploy/backup.sh
 ```
 
+### `reset-database.sh`
+Resets the database in Docker production environment.
+
+**What it does:**
+- Optionally creates a backup before reset
+- Drops all database tables
+- Runs migrations to recreate the schema
+- Optionally creates a superuser
+
+**⚠️ WARNING:** This will delete all data in the database!
+
+**Usage:**
+```bash
+sudo ./deploy/reset-database.sh
+```
+
+**Alternative manual method:**
+```bash
+# Connect to database container and drop/recreate
+docker compose -f docker-compose.prod.yml exec db psql -U <user> -d postgres -c "DROP DATABASE IF EXISTS <database>;"
+docker compose -f docker-compose.prod.yml exec db psql -U <user> -d postgres -c "CREATE DATABASE <database>;"
+
+# Run migrations
+docker compose -f docker-compose.prod.yml exec api python manage.py migrate
+
+# Create superuser
+docker compose -f docker-compose.prod.yml exec api python manage.py createsuperuser
+```
+
 ## Deployment Workflow
 
 1. **Initial Setup** (one-time)
@@ -142,6 +171,9 @@ deploy/
 ├── ssl-setup.sh         # SSL certificate setup
 ├── deploy.sh            # Application deployment
 ├── backup.sh            # Backup script
+├── reset-database.sh    # Database reset script
+├── complete-reset.sh    # Complete Docker reset (removes everything)
+├── fresh-start.sh       # Fresh deployment after reset
 ├── README.md            # This file
 └── QUICK_DEPLOY.md      # Quick reference guide
 ```
