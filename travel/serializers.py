@@ -4,6 +4,7 @@ from django.utils.text import slugify
 from django.conf import settings
 import os
 import json
+import logging
 from .models import (
     TourPackage,
     TourDate,
@@ -16,32 +17,34 @@ from .models import (
     Payment,
     ResellerCommission,
 )
+from .utils import optimize_image_to_webp
 from account.models import ResellerProfile, SupplierProfile
+
+logger = logging.getLogger('travel')
 
 
 def build_absolute_image_url(relative_url, request=None):
     """
-    Build absolute HTTPS URL for images.
-    Uses request if available, otherwise falls back to production domain.
-    """
-    if not relative_url:
-        return None
+    Build absolute URL from relative path for embedding in JWT token.
     
-    # If already absolute, return as-is
-    if relative_url.startswith('http'):
+    Note: This method is called without request context in get_token().
+    For production, ensure API_DOMAIN is set in environment variables.
+    """
+    if not relative_url or relative_url.startswith('http'):
         return relative_url
     
-    # Use request if available (most reliable, respects X-Forwarded-Proto)
-    if request:
-        return request.build_absolute_uri(relative_url)
+    # Ensure it starts with /
+    if not relative_url.startswith('/'):
+        relative_url = '/' + relative_url
     
-    # Fallback for production (when no request available, e.g., in tokens)
+    # Use API domain from settings or environment
     if settings.DEBUG:
-        return f"http://localhost:8000{relative_url}"
+        base_url = 'http://localhost:8000'
+    else:
+        api_domain = getattr(settings, 'API_DOMAIN', None) or os.environ.get('API_DOMAIN', 'data.goholiday.id')
+        base_url = f'https://{api_domain}'
     
-    # Production: always use HTTPS
-    default_domain = getattr(settings, 'API_DOMAIN', None) or os.environ.get('API_DOMAIN', 'data.goholiday.id')
-    return f"https://{default_domain}{relative_url}"
+    return f'{base_url}{relative_url}'
 
 
 class TourImageSerializer(serializers.ModelSerializer):
@@ -82,13 +85,11 @@ class TourImageCreateUpdateSerializer(serializers.ModelSerializer):
     def validate_image(self, value):
         """Validate that image is provided."""
         if not value:
-            raise serializers.ValidationError("Image file is required.")
+            raise serializers.ValidationError("File gambar wajib diisi.")
         return value
     
     def create(self, validated_data):
         """Create tour image and optimize it to WebP format."""
-        from .utils import optimize_image_to_webp
-        
         instance = super().create(validated_data)
         
         # Optimize image immediately after creation
@@ -99,14 +100,12 @@ class TourImageCreateUpdateSerializer(serializers.ModelSerializer):
                 instance.save(update_fields=['image'])
             except Exception as e:
                 # Log error but don't fail the creation
-                import sys
-                print(f"Warning: Failed to optimize image: {str(e)}", file=sys.stderr)
+                logger.warning(f"Failed to optimize image {instance.image.name}: {str(e)}", exc_info=True)
         
         return instance
     
     def update(self, instance, validated_data):
         """Update tour image and optimize it to WebP format if image changed."""
-        from .utils import optimize_image_to_webp
         
         image_changed = 'image' in validated_data and validated_data['image'] != instance.image
         
@@ -156,8 +155,6 @@ class SeatSlotSerializer(serializers.ModelSerializer):
             "visa_expiry_date",
             "visa_type",
             "special_requests",
-            "emergency_contact_name",
-            "emergency_contact_phone",
             "created_at",
             "updated_at",
         ]
@@ -176,6 +173,7 @@ class TourDateSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "departure_date",
+            "airline",
             "price",
             "total_seats",
             "remaining_seats",
@@ -195,25 +193,25 @@ class TourDateSerializer(serializers.ModelSerializer):
             today = timezone.now().date()
             
             if value < today:
-                raise serializers.ValidationError("Departure date must be in the future.")
+                raise serializers.ValidationError("Tanggal keberangkatan harus di masa depan.")
             
             # Limit advance bookings to 2 years
             max_future_date = today + timedelta(days=730)
             if value > max_future_date:
-                raise serializers.ValidationError("Departure date cannot be more than 2 years in the future.")
+                raise serializers.ValidationError("Tanggal keberangkatan tidak boleh lebih dari 2 tahun ke depan.")
         
         return value
     
     def validate_price(self, value):
-        """Validate price is at least 1 IDR."""
-        if value is not None and value < 1:
-            raise serializers.ValidationError("Price must be at least 1 IDR.")
+        """Validate price is not negative."""
+        if value is not None and value < 0:
+            raise serializers.ValidationError("Harga tidak boleh negatif.")
         return value
     
     def validate_total_seats(self, value):
         """Validate total seats is at least 1."""
         if value is not None and value < 1:
-            raise serializers.ValidationError("Total seats must be at least 1.")
+            raise serializers.ValidationError("Total kursi harus minimal 1.")
         return value
     
     def get_seat_slots(self, obj):
@@ -237,7 +235,6 @@ class TourPackageSerializer(serializers.ModelSerializer):
     dates = TourDateSerializer(many=True, read_only=True)
     duration_display = serializers.CharField(read_only=True)
     group_size_display = serializers.CharField(read_only=True)
-    main_image_url = serializers.SerializerMethodField()
     itinerary_pdf_url = serializers.SerializerMethodField()
     
     class Meta:
@@ -248,37 +245,29 @@ class TourPackageSerializer(serializers.ModelSerializer):
             "supplier_name",
             "name",
             "slug",
-            "summary",
-            "description",
             "itinerary",
             "country",
             "days",
             "nights",
             "duration_display",
             "max_group_size",
-            "group_type",
             "group_size_display",
             "tour_type",
-            "category",
             "highlights",
             "inclusions",
             "exclusions",
-            "meeting_point",
             "cancellation_policy",
             "important_notes",
             "base_price",
-            "badge",
-            "main_image",
-            "main_image_url",
+            "visa_price",
+            "tipping_price",
             "itinerary_pdf",
             "itinerary_pdf_url",
             "is_active",
-            "is_featured",
             "images",
             "dates",
             "reseller_groups",
             "commission",
-            "commission_notes",
             "created_at",
             "updated_at",
         ]
@@ -291,19 +280,9 @@ class TourPackageSerializer(serializers.ModelSerializer):
             "updated_at",
             "duration_display",
             "group_size_display",
-            "main_image_url",
             "itinerary_pdf_url",
-            # Commission fields are admin-only
             "commission",
-            "commission_notes",
         ]
-    
-    def get_main_image_url(self, obj):
-        """Return absolute URL for main image if exists."""
-        if obj.main_image:
-            request = self.context.get("request")
-            return build_absolute_image_url(obj.main_image.url, request)
-        return None
     
     def get_itinerary_pdf_url(self, obj):
         """Return absolute URL for itinerary PDF if exists."""
@@ -315,26 +294,31 @@ class TourPackageSerializer(serializers.ModelSerializer):
     def validate_slug(self, value):
         """Auto-generate slug from name if not provided."""
         if not value and self.initial_data.get("name"):
-            value = slugify(self.initial_data["name"])
-            # Ensure uniqueness
-            base_slug = value
-            counter = 1
-            while TourPackage.objects.filter(slug=value).exists():
-                value = f"{base_slug}-{counter}"
-                counter += 1
+            value = self._generate_unique_slug(self.initial_data["name"])
         return value
     
     def create(self, validated_data):
         """Create tour package and auto-generate slug if needed."""
         if "slug" not in validated_data or not validated_data["slug"]:
-            validated_data["slug"] = slugify(validated_data["name"])
-            # Ensure uniqueness
-            base_slug = validated_data["slug"]
-            counter = 1
-            while TourPackage.objects.filter(slug=validated_data["slug"]).exists():
-                validated_data["slug"] = f"{base_slug}-{counter}"
-                counter += 1
+            validated_data["slug"] = self._generate_unique_slug(validated_data["name"])
         return super().create(validated_data)
+    
+    @staticmethod
+    def _generate_unique_slug(name, instance=None):
+        """Generate a unique slug from name."""
+        base_slug = slugify(name)
+        slug = base_slug
+        counter = 1
+        queryset = TourPackage.objects.filter(slug=slug)
+        if instance:
+            queryset = queryset.exclude(pk=instance.pk)
+        while queryset.exists():
+            slug = f"{base_slug}-{counter}"
+            queryset = TourPackage.objects.filter(slug=slug)
+            if instance:
+                queryset = queryset.exclude(pk=instance.pk)
+            counter += 1
+        return slug
 
 
 class TourPackageListSerializer(serializers.ModelSerializer):
@@ -350,44 +334,36 @@ class TourPackageListSerializer(serializers.ModelSerializer):
             "id",
             "name",
             "slug",
-            "summary",
             "country",
             "days",
             "nights",
             "duration_display",
             "tour_type",
-            "category",
             "base_price",
-            "badge",
-            "main_image_url",
             "is_active",
-            "is_featured",
             "supplier_name",
+            "main_image_url",
             "created_at",
         ]
     
     def get_main_image_url(self, obj):
         """
-        Return absolute URL for main image if exists.
-        Fallback to primary gallery image (or first gallery image) when main_image is not set.
+        Return absolute URL for primary image from gallery images.
+        Gets the image marked as primary (is_primary=True), or None if no primary image exists.
         """
-        request = self.context.get("request")
+        # Get primary image from prefetched images if available
+        if hasattr(obj, '_prefetched_objects_cache') and 'images' in obj._prefetched_objects_cache:
+            images = obj._prefetched_objects_cache['images']
+            primary_image = next((img for img in images if img.is_primary), None)
+        else:
+            # Fallback to query if not prefetched
+            primary_image = obj.images.filter(is_primary=True).first()
         
-        # Prefer explicit main_image
-        if obj.main_image:
-            return build_absolute_image_url(obj.main_image.url, request)
-        
-        # Fallback to primary gallery image, then first gallery image
-        primary_image = obj.images.filter(is_primary=True).first()
         if primary_image and primary_image.image:
+            request = self.context.get("request")
             return build_absolute_image_url(primary_image.image.url, request)
         
-        first_image = obj.images.first()
-        if first_image and first_image.image:
-            return build_absolute_image_url(first_image.image.url, request)
-        
         return None
-
 
 class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
     """Detailed serializer for public tour package detail view."""
@@ -395,7 +371,6 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
     supplier_name = serializers.CharField(source="supplier.company_name", read_only=True)
     duration_display = serializers.CharField(read_only=True)
     group_size_display = serializers.CharField(read_only=True)
-    main_image_url = serializers.SerializerMethodField()
     itinerary_pdf_url = serializers.SerializerMethodField()
     images = TourImageSerializer(many=True, read_only=True)
     dates = serializers.SerializerMethodField()
@@ -407,34 +382,28 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
             "id",
             "name",
             "slug",
-            "summary",
-            "description",
             "itinerary",
             "country",
             "days",
             "nights",
             "duration_display",
             "max_group_size",
-            "group_type",
             "group_size_display",
             "tour_type",
-            "category",
             "highlights",
             "inclusions",
             "exclusions",
-            "meeting_point",
             "cancellation_policy",
             "important_notes",
             "base_price",
-            "badge",
-            "main_image_url",
+            "visa_price",
+            "tipping_price",
             "itinerary_pdf_url",
             "images",
             "dates",
             "supplier_name",
             "reseller_commission",
             "is_active",
-            "is_featured",
             "created_at",
         ]
         read_only_fields = [
@@ -442,17 +411,9 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
             "slug",
             "duration_display",
             "group_size_display",
-            "main_image_url",
             "itinerary_pdf_url",
             "created_at",
         ]
-    
-    def get_main_image_url(self, obj):
-        """Return absolute URL for main image if exists."""
-        if obj.main_image:
-            request = self.context.get("request")
-            return build_absolute_image_url(obj.main_image.url, request)
-        return None
     
     def get_itinerary_pdf_url(self, obj):
         """Return absolute URL for itinerary PDF if exists."""
@@ -464,22 +425,18 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
     def get_dates(self, obj):
         """Return available tour dates (only future dates with available seats)."""
         from django.utils import timezone
+        from django.db.models import Count, Q
         
-        # Use prefetched dates if available to avoid additional queries
-        if hasattr(obj, '_prefetched_objects_cache') and 'dates' in obj._prefetched_objects_cache:
-            all_dates = obj._prefetched_objects_cache['dates']
-        else:
-            all_dates = obj.dates.prefetch_related("seat_slots").all()
-        
-        # Filter future dates with available seats
+        # Always query database for accurate filtering and counting
+        # Prefetching is handled in the view
         today = timezone.now().date()
-        future_dates = [
-            date for date in all_dates
-            if date.departure_date >= today and date.remaining_seats > 0
-        ]
-        
-        # Sort by departure date and limit to 10
-        future_dates = sorted(future_dates, key=lambda x: x.departure_date)[:10]
+        future_dates = obj.dates.filter(
+            departure_date__gte=today
+        ).annotate(
+            available_count=Count('seat_slots', filter=Q(seat_slots__status=SeatSlotStatus.AVAILABLE))
+        ).filter(
+            available_count__gt=0
+        ).prefetch_related("seat_slots").order_by("departure_date")[:10]
         
         return TourDateSerializer(future_dates, many=True, context=self.context).data
     
@@ -489,12 +446,16 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
         
         request = self.context.get("request")
         if request and request.user.is_authenticated and request.user.role == UserRole.RESELLER:
-            try:
-                reseller_profile = ResellerProfile.objects.get(user=request.user)
-                commission = obj.get_reseller_commission(reseller_profile)
-                return commission
-            except ResellerProfile.DoesNotExist:
-                return None
+            # Use prefetched reseller_profile if available to avoid N+1 query
+            if hasattr(request.user, 'reseller_profile'):
+                reseller_profile = request.user.reseller_profile
+            else:
+                try:
+                    reseller_profile = ResellerProfile.objects.select_related('user').get(user=request.user)
+                except ResellerProfile.DoesNotExist:
+                    return None
+            commission = obj.get_reseller_commission(reseller_profile)
+            return commission
         return None
 
 
@@ -515,32 +476,24 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
             "supplier",
             "name",
             "slug",
-            "summary",
-            "description",
             "itinerary",
             "country",
             "days",
             "nights",
             "max_group_size",
-            "group_type",
             "tour_type",
-            "category",
             "highlights",
             "inclusions",
             "exclusions",
-            "meeting_point",
             "cancellation_policy",
             "important_notes",
             "base_price",
-            "badge",
-            "main_image",
+            "visa_price",
+            "tipping_price",
             "itinerary_pdf",
             "is_active",
-            "is_featured",
             "reseller_groups",
-            # Commission fields (now editable by suppliers as well)
             "commission",
-            "commission_notes",
         ]
         read_only_fields = ["id", "supplier", "slug"]
     
@@ -552,7 +505,7 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
             try:
                 return json.loads(value)
             except json.JSONDecodeError:
-                raise serializers.ValidationError("Invalid JSON format")
+                raise serializers.ValidationError("Format JSON tidak valid")
         return value
     
     def validate_inclusions(self, value):
@@ -563,7 +516,7 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
             try:
                 return json.loads(value)
             except json.JSONDecodeError:
-                raise serializers.ValidationError("Invalid JSON format")
+                raise serializers.ValidationError("Format JSON tidak valid")
         return value
     
     def validate_exclusions(self, value):
@@ -574,7 +527,7 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
             try:
                 return json.loads(value)
             except json.JSONDecodeError:
-                raise serializers.ValidationError("Invalid JSON format")
+                raise serializers.ValidationError("Format JSON tidak valid")
         return value
     
     def validate(self, attrs):
@@ -590,7 +543,7 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
         if days is not None and nights is not None:
             if nights > days:
                 raise serializers.ValidationError({
-                    'nights': f'Number of nights ({nights}) cannot be greater than number of days ({days}).'
+                    'nights': f'Jumlah malam ({nights}) tidak boleh lebih besar dari jumlah hari ({days}).'
                 })
         
         return attrs
@@ -598,19 +551,7 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
     def validate_slug(self, value):
         """Auto-generate slug from name if not provided."""
         if not value and self.initial_data.get("name"):
-            value = slugify(self.initial_data["name"])
-            # Ensure uniqueness
-            base_slug = value
-            counter = 1
-            queryset = TourPackage.objects.filter(slug=value)
-            if self.instance:
-                queryset = queryset.exclude(pk=self.instance.pk)
-            while queryset.exists():
-                value = f"{base_slug}-{counter}"
-                queryset = TourPackage.objects.filter(slug=value)
-                if self.instance:
-                    queryset = queryset.exclude(pk=self.instance.pk)
-                counter += 1
+            value = TourPackageSerializer._generate_unique_slug(self.initial_data["name"], self.instance)
         return value
     
     def create(self, validated_data):
@@ -618,19 +559,12 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
         # Ensure slug is generated from name if not provided or empty
         name = validated_data.get("name")
         if not name:
-            raise serializers.ValidationError({"name": "Name is required to create a tour package."})
+            raise serializers.ValidationError({"name": "Nama wajib diisi untuk membuat paket tur."})
         
         # Remove slug from validated_data if it's empty or not provided
         slug = validated_data.pop("slug", None)
         if not slug or slug == "":
-            slug = slugify(name)
-        
-        # Ensure uniqueness
-        base_slug = slug
-        counter = 1
-        while TourPackage.objects.filter(slug=slug).exists():
-            slug = f"{base_slug}-{counter}"
-            counter += 1
+            slug = TourPackageSerializer._generate_unique_slug(name)
         
         validated_data["slug"] = slug
         return super().create(validated_data)
@@ -662,36 +596,29 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
             "supplier_name",
             "name",
             "slug",
-            "summary",
-            "description",
             "itinerary",
             "country",
             "days",
             "nights",
             "duration_display",
             "max_group_size",
-            "group_type",
             "group_size_display",
             "tour_type",
-            "category",
             "highlights",
             "inclusions",
             "exclusions",
-            "meeting_point",
             "cancellation_policy",
             "important_notes",
             "base_price",
-            "badge",
-            "main_image",
+            "visa_price",
+            "tipping_price",
             "itinerary_pdf",
             "is_active",
-            "is_featured",
             "reseller_groups",
             "images",
             "dates",
             # Commission fields (editable for admin)
             "commission",
-            "commission_notes",
             # Timestamps
             "created_at",
             "updated_at",
@@ -721,7 +648,7 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
         if days is not None and nights is not None:
             if nights > days:
                 raise serializers.ValidationError({
-                    'nights': f'Number of nights ({nights}) cannot be greater than number of days ({days}).'
+                    'nights': f'Jumlah malam ({nights}) tidak boleh lebih besar dari jumlah hari ({days}).'
                 })
         
         return attrs
@@ -729,19 +656,7 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
     def validate_slug(self, value):
         """Auto-generate slug from name if not provided."""
         if not value and self.initial_data.get("name"):
-            value = slugify(self.initial_data["name"])
-            # Ensure uniqueness
-            base_slug = value
-            counter = 1
-            queryset = TourPackage.objects.filter(slug=value)
-            if self.instance:
-                queryset = queryset.exclude(pk=self.instance.pk)
-            while queryset.exists():
-                value = f"{base_slug}-{counter}"
-                queryset = TourPackage.objects.filter(slug=value)
-                if self.instance:
-                    queryset = queryset.exclude(pk=self.instance.pk)
-                counter += 1
+            value = TourPackageSerializer._generate_unique_slug(self.initial_data["name"], self.instance)
         return value
 
 
@@ -764,7 +679,6 @@ class ResellerTourCommissionSerializer(serializers.ModelSerializer):
             "tour_package_name",
             "tour_package_slug",
             "commission_amount",
-            "currency",
             "is_active",
             "created_at",
             "updated_at",
@@ -803,21 +717,24 @@ class ResellerGroupSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "created_by", "created_by_name", "created_at", "updated_at"]
     
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-    
     def to_representation(self, instance):
         """Include reseller details in read operations."""
         representation = super().to_representation(instance)
         # Include reseller details if needed
+        # Use prefetched resellers to avoid N+1 queries
         if self.context.get("request") and hasattr(instance, "resellers"):
+            if hasattr(instance, '_prefetched_objects_cache') and 'resellers' in instance._prefetched_objects_cache:
+                resellers = instance._prefetched_objects_cache['resellers']
+            else:
+                resellers = instance.resellers.select_related('user').all()
+            
             representation["resellers"] = [
                 {
                     "id": r.id,
                     "full_name": r.full_name,
                     "email": r.user.email,
                 }
-                for r in instance.resellers.all()
+                for r in resellers
             ]
         return representation
     
@@ -905,8 +822,6 @@ class SeatSlotCreateSerializer(serializers.ModelSerializer):
             "visa_expiry_date",
             "visa_type",
             "special_requests",
-            "emergency_contact_name",
-            "emergency_contact_phone",
         ]
 
 
@@ -923,6 +838,7 @@ class BookingCreateSerializer(serializers.ModelSerializer):
             "customer_email",
             "customer_phone",
             "platform_fee",
+            "total_amount",
             "notes",
             "seat_slots",
         ]
@@ -930,7 +846,7 @@ class BookingCreateSerializer(serializers.ModelSerializer):
     def validate_seat_slots(self, value):
         """Validate that at least one seat slot is provided."""
         if not value or len(value) == 0:
-            raise serializers.ValidationError("At least one seat slot is required.")
+            raise serializers.ValidationError("Minimal satu kursi harus dipilih.")
         return value
     
     def validate(self, attrs):
@@ -951,13 +867,13 @@ class BookingCreateSerializer(serializers.ModelSerializer):
             
             if unavailable_seats:
                 raise serializers.ValidationError({
-                    'seat_slots': f'Seats {", ".join(unavailable_seats)} are not available.'
+                    'seat_slots': f'Kursi {", ".join(unavailable_seats)} tidak tersedia.'
                 })
             
             # Check for duplicate seat numbers
             if len(requested_seats) != len(seat_slots):
                 raise serializers.ValidationError({
-                    'seat_slots': 'Duplicate seat numbers are not allowed.'
+                    'seat_slots': 'Nomor kursi duplikat tidak diperbolehkan.'
                 })
         
         return attrs
@@ -965,35 +881,57 @@ class BookingCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """Create booking and assign seat slots with passenger details."""
         from django.db import transaction
+        from django.db.models import F
         
         seat_slots_data = validated_data.pop('seat_slots')
         tour_date = validated_data['tour_date']
         
         with transaction.atomic():
+            # Use select_for_update to prevent race conditions
+            seat_numbers = [slot['seat_number'] for slot in seat_slots_data]
+            seat_slots = list(
+                tour_date.seat_slots.select_for_update().filter(
+                    seat_number__in=seat_numbers,
+                    status=SeatSlotStatus.AVAILABLE
+                )
+            )
+            
+            # Check if all requested seats are available
+            available_seat_numbers = {slot.seat_number for slot in seat_slots}
+            requested_seat_numbers = set(seat_numbers)
+            unavailable_seats = requested_seat_numbers - available_seat_numbers
+            
+            if unavailable_seats:
+                raise ValidationError({
+                    'seat_slots': f'Kursi {", ".join(unavailable_seats)} tidak tersedia.'
+                })
+            
+            # Check for duplicates in request
+            if len(seat_numbers) != len(requested_seat_numbers):
+                raise ValidationError({
+                    'seat_slots': 'Nomor kursi duplikat tidak diperbolehkan.'
+                })
+            
             # Create booking
             booking = Booking.objects.create(**validated_data)
+            
+            # Create a mapping for quick lookup
+            seat_slot_map = {slot.seat_number: slot for slot in seat_slots}
             
             # Assign seat slots and update passenger details
             for slot_data in seat_slots_data:
                 seat_number = slot_data.pop('seat_number')
-                try:
-                    seat_slot = tour_date.seat_slots.get(
-                        seat_number=seat_number,
-                        status=SeatSlotStatus.AVAILABLE
-                    )
-                    # Update seat slot with passenger details and assign to booking
-                    # Convert empty strings to None for optional fields
-                    for key, value in slot_data.items():
-                        if value == "":
-                            value = None
-                        setattr(seat_slot, key, value)
-                    seat_slot.booking = booking
-                    seat_slot.status = SeatSlotStatus.BOOKED
-                    seat_slot.save()
-                except SeatSlot.DoesNotExist:
-                    raise ValidationError({
-                        'seat_slots': f'Seat {seat_number} is not available.'
-                    })
+                seat_slot = seat_slot_map[seat_number]
+                
+                # Update seat slot with passenger details and assign to booking
+                # Convert empty strings to None for optional fields
+                for key, value in slot_data.items():
+                    if value == "":
+                        value = None
+                    setattr(seat_slot, key, value)
+                seat_slot.booking = booking
+                seat_slot.status = SeatSlotStatus.BOOKED
+                seat_slot.save()
             
             return booking
 
@@ -1075,7 +1013,6 @@ class PaymentSerializer(serializers.ModelSerializer):
             "booking_customer_name",
             "booking_total_amount",
             "amount",
-            "currency",
             "transfer_date",
             "sender_account_name",
             "sender_bank_name",

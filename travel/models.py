@@ -7,39 +7,30 @@ from django.utils.translation import gettext_lazy as _
 from datetime import timedelta
 
 
-class TourCategory(models.TextChoices):
-    """Tour category/tag options."""
-    ADVENTURE = "ADVENTURE", _("Adventure")
-    CULTURAL = "CULTURAL", _("Cultural")
-    BEACH = "BEACH", _("Beach")
-    CITY_BREAK = "CITY_BREAK", _("City Break")
-    NATURE = "NATURE", _("Nature")
-    FAMILY = "FAMILY", _("Family")
-
-
-class TourBadge(models.TextChoices):
-    """Featured badge options for tours."""
-    BEST_SELLER = "BEST_SELLER", _("Best Seller")
-    POPULAR = "POPULAR", _("Popular")
-    TOP_RATED = "TOP_RATED", _("Top Rated")
-    NEW = "NEW", _("New")
-
-
 class TourType(models.TextChoices):
     """Tour type options for Indonesian citizens."""
     CONVENTIONAL = "CONVENTIONAL", _("Conventional Tour")
     MUSLIM = "MUSLIM", _("Muslim Tour")
 
 
-class GroupType(models.TextChoices):
-    """Group type options for tour packages."""
-    SMALL_GROUP = "SMALL_GROUP", _("Small Group")
-    PRIVATE = "PRIVATE", _("Private")
-    LARGE_GROUP = "LARGE_GROUP", _("Large Group")
-    FAMILY = "FAMILY", _("Family")
-    COUPLE = "COUPLE", _("Couple")
-    SOLO = "SOLO", _("Solo")
+class SeatSlotStatus(models.TextChoices):
+    """Status of individual seat slots."""
+    AVAILABLE = "AVAILABLE", _("Available")
+    RESERVED = "RESERVED", _("Reserved")
+    BOOKED = "BOOKED", _("Booked")
+    CANCELLED = "CANCELLED", _("Cancelled")
 
+
+class BookingStatus(models.TextChoices):
+    PENDING = "PENDING", _("Pending")
+    CONFIRMED = "CONFIRMED", _("Confirmed")
+    CANCELLED = "CANCELLED", _("Cancelled")
+
+
+class PaymentStatus(models.TextChoices):
+    PENDING = "PENDING", _("Pending review")
+    APPROVED = "APPROVED", _("Approved")
+    REJECTED = "REJECTED", _("Rejected")
 
 class ResellerGroup(models.Model):
     """
@@ -108,12 +99,6 @@ class TourPackage(models.Model):
     )
     name = models.CharField(max_length=255)
     slug = models.SlugField(max_length=255, unique=True)
-    summary = models.TextField(
-        help_text=_("Summary of the tour package."),
-    )
-    description = models.TextField(
-        help_text=_("Detailed description of the tour package."),
-    )
     itinerary = models.TextField(
         help_text=_("Day-by-day itinerary of the tour package."),
     )
@@ -137,12 +122,6 @@ class TourPackage(models.Model):
         default=12,
         help_text=_("Maximum number of participants in a group."),
     )
-    group_type = models.CharField(
-        max_length=20,
-        choices=GroupType.choices,
-        default=GroupType.SMALL_GROUP,
-        help_text=_("Type of group for this tour package."),
-    )
 
     # Tour type (for Indonesian citizens)
     tour_type = models.CharField(
@@ -150,13 +129,6 @@ class TourPackage(models.Model):
         choices=TourType.choices,
         default=TourType.CONVENTIONAL,
         help_text=_("Tour type: Conventional Tour or Muslim Tour (for Indonesian citizens)."),
-    )
-
-    # Categories/Tags
-    category = models.CharField(
-        max_length=50,
-        choices=TourCategory.choices,
-        help_text=_("Primary category for the tour."),
     )
 
     # Highlights/Features
@@ -178,11 +150,6 @@ class TourPackage(models.Model):
     )
 
     # Additional information
-    meeting_point = models.CharField(
-        max_length=500,
-        blank=True,
-        help_text=_("Where participants should meet for the tour."),
-    )
     cancellation_policy = models.TextField(
         blank=True,
         help_text=_("Cancellation and refund policy details."),
@@ -193,26 +160,20 @@ class TourPackage(models.Model):
     )
 
     # Pricing
-    base_price = models.PositiveIntegerField(
-        validators=[MinValueValidator(1)],
-        help_text=_("Reference price in IDR (Indonesian Rupiah). Must be at least 1 IDR. Actual price can vary per date."),
+    base_price = models.IntegerField(
+        validators=[MinValueValidator(0)],
+        help_text=_("Reference price in IDR (Indonesian Rupiah). Actual price can vary per date."),
+        default=0,
     )
-
-    # Featured badge
-    badge = models.CharField(
-        max_length=20,
-        choices=TourBadge.choices,
-        blank=True,
-        null=True,
-        help_text=_("Featured badge (e.g., 'BEST_SELLER', 'POPULAR')."),
+    visa_price = models.IntegerField(
+        validators=[MinValueValidator(0)],
+        help_text=_("Visa price in IDR (Indonesian Rupiah). Actual price can vary per date."),
+        default=0,
     )
-
-    # Images
-    main_image = models.ImageField(
-        upload_to="tours/main/",
-        blank=True,
-        null=True,
-        help_text=_("Main featured image for the tour."),
+    tipping_price = models.IntegerField(
+        validators=[MinValueValidator(0)],
+        help_text=_("Tipping price in IDR (Indonesian Rupiah). Actual price can vary per date."),
+        default=0,
     )
 
     # Itinerary PDF
@@ -224,22 +185,14 @@ class TourPackage(models.Model):
     )
 
     # Commission settings (Admin-only editable)
-    commission = models.PositiveIntegerField(
-        null=True,
-        blank=True,
+    commission = models.IntegerField(
+        validators=[MinValueValidator(0)],
         help_text=_("Commission amount for the tour package."),
-    )
-    commission_notes = models.TextField(
-        blank=True,
-        help_text=_("Admin notes about commission settings for this tour."),
+        default=0,
     )
 
     # Status
     is_active = models.BooleanField(default=True)
-    is_featured = models.BooleanField(
-        default=False,
-        help_text=_("Whether to feature this tour on the homepage."),
-    )
     
     # Reseller groups that can access this tour package
     # If empty, tour is visible to all resellers
@@ -259,12 +212,12 @@ class TourPackage(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["-is_featured", "-created_at"]
+        ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=["category", "is_active"]),
-            models.Index(fields=["is_featured"]),
             models.Index(fields=["tour_type", "is_active"]),
             models.Index(fields=["supplier", "is_active"]),
+            models.Index(fields=["slug"]),  # For slug-based lookups
+            models.Index(fields=["country"]),  # For country filtering
         ]
         constraints = [
             models.CheckConstraint(
@@ -272,7 +225,7 @@ class TourPackage(models.Model):
                 name='nights_not_greater_than_days'
             ),
             models.CheckConstraint(
-                check=models.Q(commission__isnull=True) | (models.Q(commission__gte=1)),
+                check=models.Q(commission__isnull=True) | (models.Q(commission__gte=0)),
                 name='commission_valid'
             ),
         ]
@@ -282,26 +235,9 @@ class TourPackage(models.Model):
     
     @property
     def duration_display(self):
-        """Return formatted duration string (e.g., '5 Day / 4 Night')."""
-        return f"{self.days} Day{'s' if self.days != 1 else ''} / {self.nights} Night{'s' if self.nights != 1 else ''}"
-    
-    @property
-    def group_size_display(self):
-        """Return formatted group size string (e.g., 'Small Group (Max 12)')."""
-        group_type_label = GroupType(self.group_type).label if self.group_type else "Group"
-        return f"{group_type_label} (Max {self.max_group_size})"
-    
-    def calculate_commission(self, booking_amount):
-        """
-        Calculate commission amount based on commission settings.
-        Returns the commission amount in IDR as an integer.
-        
-        If commission is set, returns the fixed commission amount.
-        Otherwise returns 0.
-        """
-        if self.commission:
-            return self.commission
-        return 0
+        """Return formatted duration string (e.g., '5 Hari / 4 Malam')."""
+        return f"{self.days} Hari / {self.nights} Malam"
+
     
     def get_reseller_commission(self, reseller):
         """
@@ -322,11 +258,6 @@ class TourPackage(models.Model):
     def get_active_tours(cls):
         """Get all active tour packages."""
         return cls.objects.filter(is_active=True)
-    
-    @classmethod
-    def get_featured_tours(cls):
-        """Get featured and active tour packages."""
-        return cls.objects.filter(is_active=True, is_featured=True)
 
 
 class TourDate(models.Model):
@@ -342,15 +273,21 @@ class TourDate(models.Model):
     departure_date = models.DateField(
         help_text=_("Departure date for this tour. Must be in the future.")
     )
-    price = models.PositiveIntegerField(
-        validators=[MinValueValidator(1)],
-        help_text=_("Price per person in IDR (Indonesian Rupiah) for this tour date. Must be greater than zero.")
+    price = models.IntegerField(
+        validators=[MinValueValidator(0)],
+        help_text=_("Price per person in IDR (Indonesian Rupiah) for this tour date."),
+        default=0,
     )
     total_seats = models.PositiveIntegerField(
         validators=[MinValueValidator(1)],
         help_text=_("Total number of seats available. Must be at least 1.")
     )
-
+    airline = models.CharField(
+        max_length=255,
+        help_text=_("Airline for this tour date."),
+        null=True,
+        blank=True,
+    )
     is_high_season = models.BooleanField(
         default=False,
         help_text=_("Mark if this date is considered high season."),
@@ -365,6 +302,17 @@ class TourDate(models.Model):
             models.Index(fields=["package", "departure_date"]),
             models.Index(fields=["departure_date", "is_high_season"]),
             models.Index(fields=["package", "is_high_season"]),
+            models.Index(fields=["departure_date"]),  # For filtering by date range
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(price__gte=0),
+                name='tour_date_price_non_negative'
+            ),
+            models.CheckConstraint(
+                check=models.Q(total_seats__gte=1),
+                name='tour_date_seats_positive'
+            ),
         ]
     
     def clean(self):
@@ -377,19 +325,19 @@ class TourDate(models.Model):
             # Ensure departure date is in the future
             if self.departure_date < today:
                 raise ValidationError({
-                    'departure_date': 'Departure date must be in the future.'
+                    'departure_date': 'Tanggal keberangkatan harus di masa depan.'
                 })
             
             # Optional: Limit advance bookings (e.g., 2 years)
             max_future_date = today + timedelta(days=730)
             if self.departure_date > max_future_date:
                 raise ValidationError({
-                    'departure_date': 'Departure date cannot be more than 2 years in the future.'
+                    'departure_date': 'Tanggal keberangkatan tidak boleh lebih dari 2 tahun ke depan.'
                 })
         
-        if self.price is not None and self.price < 1:
+        if self.price is not None and self.price < 0:
             raise ValidationError({
-                'price': 'Price must be at least 1 IDR.'
+                'price': 'Harga tidak boleh negatif.'
             })
     
     def save(self, *args, **kwargs):
@@ -409,33 +357,63 @@ class TourDate(models.Model):
         """
         Generate seat slots for this tour date based on total_seats.
         Can be called after creating a TourDate to auto-create all slots.
+        Optimized to use bulk_create for better performance.
         """
-        existing_slots = set(self.seat_slots.values_list('seat_number', flat=True))
+        existing_slots = set(
+            self.seat_slots.values_list('seat_number', flat=True)
+        )
         existing_count = len(existing_slots)
         
         if existing_count >= self.total_seats:
             return
         
         slots_to_create = []
-        slot_num = 1
+        slots_needed = self.total_seats - existing_count
         
-        while len(slots_to_create) + existing_count < self.total_seats:
-            # Find next available seat number
-            while str(slot_num) in existing_slots:
-                slot_num += 1
-            
-            slots_to_create.append(
-                SeatSlot(
-                    tour_date=self,
-                    seat_number=str(slot_num),
-                    status=SeatSlotStatus.AVAILABLE,
+        # Convert existing slots to integers for comparison (handle both int and string formats)
+        existing_nums = set()
+        for slot in existing_slots:
+            try:
+                existing_nums.add(int(slot))
+            except (ValueError, TypeError):
+                # If seat_number is not numeric, skip numeric generation
+                pass
+        
+        # Generate numeric seat numbers if all existing slots are numeric
+        if existing_nums or not existing_slots:
+            slot_num = 1
+            while len(slots_to_create) < slots_needed:
+                # Find next available seat number
+                while slot_num in existing_nums:
+                    slot_num += 1
+                
+                slots_to_create.append(
+                    SeatSlot(
+                        tour_date=self,
+                        seat_number=str(slot_num),
+                        status=SeatSlotStatus.AVAILABLE,
+                    )
                 )
-            )
-            existing_slots.add(str(slot_num))
-            slot_num += 1
+                existing_nums.add(slot_num)
+                slot_num += 1
+        else:
+            # If non-numeric seat numbers exist, use a different strategy
+            # Generate slots with a prefix to avoid conflicts
+            slot_num = existing_count + 1
+            while len(slots_to_create) < slots_needed:
+                seat_number = f"SEAT-{slot_num}"
+                if seat_number not in existing_slots:
+                    slots_to_create.append(
+                        SeatSlot(
+                            tour_date=self,
+                            seat_number=seat_number,
+                            status=SeatSlotStatus.AVAILABLE,
+                        )
+                    )
+                slot_num += 1
         
         if slots_to_create:
-            SeatSlot.objects.bulk_create(slots_to_create)
+            SeatSlot.objects.bulk_create(slots_to_create, batch_size=100)
     
     @property
     def remaining_seats(self):
@@ -451,6 +429,12 @@ class TourDate(models.Model):
     def booked_seats_count(self):
         """Return count of booked seat slots."""
         return self.seat_slots.filter(status=SeatSlotStatus.BOOKED).count()
+
+    @property
+    def duration_display(self):
+        """Return formatted duration string (e.g., '24 Januari 2026 - 29 Januari 2026')."""
+        end_date = self.departure_date + timedelta(days=self.package.days - 1)
+        return f"{self.departure_date.strftime('%d %B %Y')} - {end_date.strftime('%d %B %Y')}"
     
     @classmethod
     def get_available_dates(cls, package=None):
@@ -519,7 +503,7 @@ class TourImage(models.Model):
             ).exclude(pk=self.pk if self.pk else None)
             if existing_primary.exists():
                 raise ValidationError({
-                    'is_primary': 'Only one primary image is allowed per tour package.'
+                    'is_primary': 'Hanya satu gambar utama yang diperbolehkan per paket tur.'
                 })
     
     def save(self, *args, **kwargs):
@@ -537,14 +521,6 @@ class TourImage(models.Model):
     
     def __str__(self) -> str:
         return f"{self.package.name} - Image {self.order}"
-
-
-class SeatSlotStatus(models.TextChoices):
-    """Status of individual seat slots."""
-    AVAILABLE = "AVAILABLE", _("Available")
-    RESERVED = "RESERVED", _("Reserved")
-    BOOKED = "BOOKED", _("Booked")
-    CANCELLED = "CANCELLED", _("Cancelled")
 
 
 class SeatSlot(models.Model):
@@ -566,6 +542,7 @@ class SeatSlot(models.Model):
     seat_number = models.CharField(
         max_length=20,
         help_text=_("Seat identifier (e.g., 'A1', 'B12', or sequential number)."),
+        db_index=True,  # Index for faster lookups by seat number
     )
     booking = models.ForeignKey(
         "Booking",
@@ -662,16 +639,6 @@ class SeatSlot(models.Model):
         blank=True,
         help_text=_("Special requests or dietary restrictions."),
     )
-    emergency_contact_name = models.CharField(
-        max_length=255,
-        blank=True,
-        help_text=_("Emergency contact name."),
-    )
-    emergency_contact_phone = models.CharField(
-        max_length=50,
-        blank=True,
-        help_text=_("Emergency contact phone number."),
-    )
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -688,6 +655,13 @@ class SeatSlot(models.Model):
             models.Index(fields=["status"]),
             models.Index(fields=["passenger_email"]),
             models.Index(fields=["passport_number"]),
+            models.Index(fields=["tour_date", "booking"]),  # For booking-related queries
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=~models.Q(seat_number=''),
+                name='seat_number_not_empty'
+            ),
         ]
     
     def clean(self):
@@ -712,7 +686,7 @@ class SeatSlot(models.Model):
                 if old_status != new_status:
                     if new_status not in valid_transitions.get(old_status, []):
                         raise ValidationError({
-                            'status': f'Invalid status transition from {old_status} to {new_status}.'
+                            'status': f'Transisi status tidak valid dari {old_status} ke {new_status}.'
                         })
             except SeatSlot.DoesNotExist:
                 pass  # New instance, no validation needed
@@ -721,51 +695,51 @@ class SeatSlot(models.Model):
         if self.status == SeatSlotStatus.BOOKED:
             if not self.booking:
                 raise ValidationError({
-                    'booking': 'Booking is required when seat status is BOOKED.'
+                    'booking': 'Booking wajib diisi ketika status kursi adalah BOOKED.'
                 })
             if not self.passenger_name:
                 raise ValidationError({
-                    'passenger_name': 'Passenger name is required when seat is booked.'
+                    'passenger_name': 'Nama penumpang wajib diisi ketika kursi dipesan.'
                 })
             if not self.passenger_email:
                 raise ValidationError({
-                    'passenger_email': 'Passenger email is required when seat is booked.'
+                    'passenger_email': 'Email penumpang wajib diisi ketika kursi dipesan.'
                 })
             if not self.passport_number:
                 raise ValidationError({
-                    'passport_number': 'Passport number is required for booked seats.'
+                    'passport_number': 'Nomor paspor wajib diisi untuk kursi yang dipesan.'
                 })
         
         # Validate booking tour_date matches seat tour_date
         if self.booking and self.booking.tour_date != self.tour_date:
             raise ValidationError({
-                'booking': 'Booking tour date must match seat slot tour date.'
+                'booking': 'Tanggal tur booking harus sesuai dengan tanggal tur kursi.'
             })
         
         # Validate passport dates
         if self.passport_issue_date and self.passport_expiry_date:
             if self.passport_expiry_date <= self.passport_issue_date:
                 raise ValidationError({
-                    'passport_expiry_date': 'Passport expiry date must be after issue date.'
+                    'passport_expiry_date': 'Tanggal kedaluwarsa paspor harus setelah tanggal penerbitan.'
                 })
             
             # Check if expired
             if self.passport_expiry_date < timezone.now().date():
                 raise ValidationError({
-                    'passport_expiry_date': 'Passport has already expired.'
+                    'passport_expiry_date': 'Paspor sudah kedaluwarsa.'
                 })
         
         # Validate visa dates
         if self.visa_required:
             if not self.visa_number:
                 raise ValidationError({
-                    'visa_number': 'Visa number is required when visa is required.'
+                    'visa_number': 'Nomor visa wajib diisi ketika visa diperlukan.'
                 })
         
         if self.visa_issue_date and self.visa_expiry_date:
             if self.visa_expiry_date <= self.visa_issue_date:
                 raise ValidationError({
-                    'visa_expiry_date': 'Visa expiry date must be after issue date.'
+                    'visa_expiry_date': 'Tanggal kedaluwarsa visa harus setelah tanggal penerbitan.'
                 })
     
     def save(self, *args, **kwargs):
@@ -776,11 +750,6 @@ class SeatSlot(models.Model):
     def __str__(self) -> str:
         return f"{self.tour_date} - Seat {self.seat_number} ({self.status})"
 
-
-class BookingStatus(models.TextChoices):
-    PENDING = "PENDING", _("Pending")
-    CONFIRMED = "CONFIRMED", _("Confirmed")
-    CANCELLED = "CANCELLED", _("Cancelled")
 
 
 class Booking(models.Model):
@@ -843,11 +812,18 @@ class Booking(models.Model):
         default=BookingStatus.PENDING,
     )
 
-    # Platform fee (fixed at Rp. 50,000)
-    platform_fee = models.PositiveIntegerField(
+    # Platform fee (fixed at Rp. 50,000) for supplier
+    platform_fee = models.IntegerField(
+        validators=[MinValueValidator(0)],
         default=50000,
         help_text=_("Platform fee in IDR (default: Rp. 50,000)."),
     )
+    total_amount = models.IntegerField(
+        validators=[MinValueValidator(0)],
+        help_text=_("Total booking amount in IDR (Indonesian Rupiah)."),
+        default=0,
+    )
+
 
     notes = models.TextField(blank=True)
 
@@ -890,19 +866,6 @@ class Booking(models.Model):
             passenger_email=self.customer_email
         ).exists()
     
-    @property
-    def total_amount(self):
-        """Calculate total booking amount (tour price * seats + platform fee)."""
-        return (
-            self.tour_date.price * self.seats_booked +
-            self.platform_fee
-        )
-    
-    @property
-    def subtotal(self):
-        """Tour date price * number of seats (before platform fee)."""
-        return self.tour_date.price * self.seats_booked
-    
     def get_passenger_by_seat(self, seat_number):
         """Get passenger details for a specific seat."""
         return self.seat_slots.filter(seat_number=seat_number).first()
@@ -913,19 +876,22 @@ class Booking(models.Model):
     
     def can_be_confirmed(self):
         """Check if booking can be confirmed (has approved payment)."""
-        return (
-            self.status == BookingStatus.PENDING and
-            hasattr(self, 'payment') and
-            self.payment and
-            self.payment.status == PaymentStatus.APPROVED
-        )
+        if self.status != BookingStatus.PENDING:
+            return False
+        # Check if payment exists and is approved
+        # OneToOneField raises RelatedObjectDoesNotExist (subclass of AttributeError) if missing
+        try:
+            return self.payment.status == PaymentStatus.APPROVED
+        except AttributeError:
+            # Payment doesn't exist (OneToOneField raises RelatedObjectDoesNotExist)
+            return False
     
     def clean(self):
         """Validate booking has at least one seat slot."""
         super().clean()
         if self.pk and self.seat_slots.count() == 0:
             raise ValidationError({
-                'tour_date': 'Booking must have at least one seat slot.'
+                'tour_date': 'Booking harus memiliki minimal satu kursi.'
             })
     
     def save(self, *args, **kwargs):
@@ -933,11 +899,6 @@ class Booking(models.Model):
         self.full_clean()
         super().save(*args, **kwargs)
 
-
-class PaymentStatus(models.TextChoices):
-    PENDING = "PENDING", _("Pending review")
-    APPROVED = "APPROVED", _("Approved")
-    REJECTED = "REJECTED", _("Rejected")
 
 
 class Payment(models.Model):
@@ -950,12 +911,11 @@ class Payment(models.Model):
         on_delete=models.CASCADE,
         related_name="payment",
     )
-    amount = models.PositiveIntegerField(
-        validators=[MinValueValidator(1)],
-        help_text=_("Payment amount in IDR (Indonesian Rupiah). Must be greater than zero.")
+    amount = models.IntegerField(
+        validators=[MinValueValidator(0)],
+        help_text=_("Payment amount in IDR (Indonesian Rupiah)."),
+        default=0,
     )
-    currency = models.CharField(max_length=10, default="IDR")
-
     transfer_date = models.DateField(
         help_text=_("Date when the transfer was made. Cannot be in the future.")
     )
@@ -993,6 +953,15 @@ class Payment(models.Model):
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["status", "created_at"]),
+            models.Index(fields=["booking"]),  # For reverse lookups
+            models.Index(fields=["reviewed_by"]),  # For admin queries
+            models.Index(fields=["transfer_date"]),  # For date range queries
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(amount__gte=0),
+                name='payment_amount_non_negative'
+            ),
         ]
     
     def clean(self):
@@ -1004,7 +973,17 @@ class Payment(models.Model):
             today = timezone.now().date()
             if self.transfer_date > today:
                 raise ValidationError({
-                    'transfer_date': 'Transfer date cannot be in the future.'
+                    'transfer_date': 'Tanggal transfer tidak boleh di masa depan.'
+                })
+        
+        # Validate payment amount matches booking total (with small tolerance for rounding)
+        if self.booking_id and self.amount:
+            expected_amount = self.booking.total_amount
+            # Allow 1% tolerance for rounding differences
+            tolerance = int(expected_amount * 0.01)
+            if abs(self.amount - expected_amount) > tolerance:
+                raise ValidationError({
+                    'amount': f'Jumlah pembayaran ({self.amount:,} IDR) tidak sesuai dengan total booking ({expected_amount:,} IDR).'
                 })
     
     def save(self, *args, **kwargs):
@@ -1013,7 +992,7 @@ class Payment(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self) -> str:
-        return f"Payment for booking #{self.booking_id} - {self.amount} {self.currency}"
+        return f"Payment for booking #{self.booking_id} - Rp. {self.amount:,}"
 
 
 class ResellerTourCommission(models.Model):

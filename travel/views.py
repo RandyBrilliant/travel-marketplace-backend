@@ -3,10 +3,9 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 from rest_framework.views import APIView
-from django.db import transaction, models
+from django.db import models
 from django.db.utils import IntegrityError
 from django.utils import timezone
-from django.utils.text import slugify
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
@@ -63,8 +62,8 @@ class SupplierTourPackageViewSet(viewsets.ModelViewSet):
     
     permission_classes = [IsSupplier]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ["category", "tour_type", "is_active", "is_featured"]
-    search_fields = ["name", "country", "summary"]
+    filterset_fields = ["tour_type", "is_active"]
+    search_fields = ["name", "country"]
     ordering_fields = ["created_at", "updated_at", "name", "base_price"]
     ordering = ["-created_at"]
     
@@ -109,24 +108,24 @@ class SupplierTourPackageViewSet(viewsets.ModelViewSet):
                 if "slug" in error_msg.lower():
                     raise ValidationError(
                         {
-                            "slug": "A tour package with this name already exists. Please choose a different name.",
-                            "detail": "Unable to create tour package. Please ensure the tour name is unique."
+                            "slug": "Paket tur dengan nama ini sudah ada. Silakan pilih nama yang berbeda.",
+                            "detail": "Tidak dapat membuat paket tur. Pastikan nama tur unik."
                         }
                     )
                 elif "nights_not_greater_than_days" in error_msg.lower():
                     raise ValidationError(
                         {
-                            "nights": "Number of nights cannot be greater than number of days.",
-                            "detail": "Please ensure the number of nights is less than or equal to the number of days."
+                            "nights": "Jumlah malam tidak boleh lebih besar dari jumlah hari.",
+                            "detail": "Pastikan jumlah malam kurang dari atau sama dengan jumlah hari."
                         }
                     )
                 else:
                     raise ValidationError(
-                        {"detail": "Unable to create tour package. Please check your input and try again."}
+                        {"detail": "Tidak dapat membuat paket tur. Silakan periksa input Anda dan coba lagi."}
                     )
         except SupplierProfile.DoesNotExist:
             raise ValidationError(
-                {"detail": "Supplier profile not found. Please complete your profile setup."}
+                {"detail": "Profil supplier tidak ditemukan. Silakan lengkapi pengaturan profil Anda."}
             )
     
     @action(detail=True, methods=["get", "post"], url_path="dates")
@@ -217,7 +216,7 @@ class SupplierTourDateViewSet(viewsets.ModelViewSet):
         """Verify the package belongs to the supplier before creating."""
         package_id = self.request.data.get("package")
         if not package_id:
-            raise ValidationError({"package": ["This field is required."]})
+            raise ValidationError({"package": ["Field ini wajib diisi."]})
         
         try:
             supplier_profile = SupplierProfile.objects.get(user=self.request.user)
@@ -225,7 +224,7 @@ class SupplierTourDateViewSet(viewsets.ModelViewSet):
             serializer.save(package=package)
         except TourPackage.DoesNotExist:
             raise ValidationError(
-                {"package": ["Tour package not found or you don't have permission to access it."]}
+                {"package": ["Paket tur tidak ditemukan atau Anda tidak memiliki izin untuk mengaksesnya."]}
             )
 
 
@@ -262,7 +261,7 @@ class SupplierTourImageViewSet(viewsets.ModelViewSet):
         """Verify the package belongs to the supplier before creating."""
         package_id = self.request.data.get("package")
         if not package_id:
-            raise ValidationError({"package": ["This field is required."]})
+            raise ValidationError({"package": ["Field ini wajib diisi."]})
         
         try:
             supplier_profile = SupplierProfile.objects.get(user=self.request.user)
@@ -270,7 +269,7 @@ class SupplierTourImageViewSet(viewsets.ModelViewSet):
             serializer.save(package=package)
         except TourPackage.DoesNotExist:
             raise ValidationError(
-                {"package": ["Tour package not found or you don't have permission to access it."]}
+                {"package": ["Paket tur tidak ditemukan atau Anda tidak memiliki izin untuk mengaksesnya."]}
             )
 
 
@@ -291,7 +290,10 @@ class PublicTourPackageListView(APIView):
         from hashlib import md5
         
         # Create cache key from query parameters
-        cache_key = f'tours_list_{md5(request.GET.urlencode().encode()).hexdigest()}'
+        # Include user role in cache key to differentiate reseller vs public views
+        user_role = request.user.role if request.user.is_authenticated else 'anonymous'
+        cache_params = request.GET.urlencode()
+        cache_key = f'tours_list_{user_role}_{md5(cache_params.encode()).hexdigest()}'
         
         # Try to get from cache
         cached_data = cache.get(cache_key)
@@ -346,7 +348,7 @@ class PublicTourPackageListView(APIView):
             queryset = queryset.filter(
                 models.Q(name__icontains=search) |
                 models.Q(country__icontains=search) |
-                models.Q(summary__icontains=search)
+                models.Q(itinerary__icontains=search)
             )
         
         # Filter by month/year (format: YYYY-MM)
@@ -375,9 +377,12 @@ class PublicTourPackageListView(APIView):
                 pass
         
         # Ordering
-        ordering = request.query_params.get("ordering", "-is_featured,-created_at")
+        ordering = request.query_params.get("ordering", "-created_at")
         if ordering:
-            queryset = queryset.order_by(*ordering.split(","))
+            # Filter out is_featured from ordering since field doesn't exist
+            ordering_fields = [f for f in ordering.split(",") if "is_featured" not in f]
+            if ordering_fields:
+                queryset = queryset.order_by(*ordering_fields)
         
         serializer = TourPackageListSerializer(queryset, many=True, context={"request": request})
         response_data = serializer.data
@@ -415,21 +420,23 @@ class PublicTourPackageDetailView(APIView):
                 )
             ).get(pk=pk)
         except TourPackage.DoesNotExist:
-            raise Http404("Tour package not found")
+            raise Http404("Paket tur tidak ditemukan")
         
         # Check if reseller has access to this tour
         if request.user.is_authenticated and request.user.role == UserRole.RESELLER:
             try:
-                reseller_profile = ResellerProfile.objects.get(user=request.user)
+                # Prefetch reseller_profile for serializer to avoid N+1 query
+                reseller_profile = ResellerProfile.objects.select_related('user').get(user=request.user)
+                request.user.reseller_profile = reseller_profile  # Cache for serializer
                 # Check if tour is accessible to this reseller
                 # Tour is accessible if:
                 # 1. Not assigned to any group (visible to all), OR
                 # 2. Assigned to a group that includes this reseller
                 if tour.reseller_groups.exists():
                     if not tour.reseller_groups.filter(resellers=reseller_profile).exists():
-                        raise Http404("Tour package not found")
+                        raise Http404("Paket tur tidak ditemukan")
             except ResellerProfile.DoesNotExist:
-                raise Http404("Tour package not found")
+                raise Http404("Paket tur tidak ditemukan")
         
         serializer = PublicTourPackageDetailSerializer(tour, context={"request": request})
         return Response(serializer.data)
@@ -447,7 +454,10 @@ class AdminResellerGroupViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         """Allow filtering by is_active."""
-        queryset = ResellerGroup.objects.prefetch_related("resellers", "tour_packages").all()
+        queryset = ResellerGroup.objects.prefetch_related(
+            models.Prefetch("resellers", queryset=ResellerProfile.objects.select_related("user")),
+            "tour_packages"
+        ).all()
         
         is_active = self.request.query_params.get("is_active")
         if is_active is not None:
@@ -503,25 +513,22 @@ class AdminTourPackageViewSet(viewsets.ModelViewSet):
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == "true")
         
-        # Filter by is_featured
-        is_featured = self.request.query_params.get("is_featured")
-        if is_featured is not None:
-            queryset = queryset.filter(is_featured=is_featured.lower() == "true")
-        
-        # Search by name, city, country, or summary
+        # Search by name, country, or itinerary
         search = self.request.query_params.get("search")
         if search:
             queryset = queryset.filter(
                 models.Q(name__icontains=search) |
-                models.Q(city__icontains=search) |
                 models.Q(country__icontains=search) |
-                models.Q(summary__icontains=search)
+                models.Q(itinerary__icontains=search)
             )
         
         # Ordering
-        ordering = self.request.query_params.get("ordering", "-is_featured,-created_at")
+        ordering = self.request.query_params.get("ordering", "-created_at")
         if ordering:
-            queryset = queryset.order_by(*ordering.split(","))
+            # Filter out is_featured from ordering since field doesn't exist
+            ordering_fields = [f for f in ordering.split(",") if "is_featured" not in f]
+            if ordering_fields:
+                queryset = queryset.order_by(*ordering_fields)
         
         return queryset
     
@@ -539,13 +546,13 @@ class AdminTourPackageViewSet(viewsets.ModelViewSet):
         # Supplier must be provided in the request data
         supplier_id = self.request.data.get("supplier")
         if not supplier_id:
-            raise ValidationError({"supplier": ["This field is required."]})
+            raise ValidationError({"supplier": ["Field ini wajib diisi."]})
         
         try:
             supplier = SupplierProfile.objects.get(pk=supplier_id)
             serializer.save(supplier=supplier)
         except SupplierProfile.DoesNotExist:
-            raise ValidationError({"supplier": ["Supplier profile not found."]})
+            raise ValidationError({"supplier": ["Profil supplier tidak ditemukan."]})
 
 
 class AdminResellerTourCommissionViewSet(viewsets.ModelViewSet):
@@ -587,14 +594,6 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
     
     permission_classes = [IsSupplier]
     queryset = Booking.objects.all()
-    
-    def get_serializer_class(self):
-        if self.action in ['update', 'partial_update']:
-            from .serializers import BookingUpdateSerializer
-            return BookingUpdateSerializer
-        if self.action == "list":
-            return BookingListSerializer
-        return BookingSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ["status", "tour_date", "tour_date__package"]
     search_fields = [
@@ -602,7 +601,7 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
         "reseller__user__email", "tour_date__package__name",
     ]
     ordering_fields = [
-        "created_at", "status", "total_amount", "departure_date",
+        "created_at", "status", "total_amount", "tour_date__departure_date",
         "reseller__full_name", "tour_date__package__name",
     ]
     ordering = ["-created_at"]
@@ -660,6 +659,9 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
             return Booking.objects.none()
     
     def get_serializer_class(self):
+        if self.action in ['update', 'partial_update']:
+            from .serializers import BookingUpdateSerializer
+            return BookingUpdateSerializer
         if self.action == "list":
             return BookingListSerializer
         return BookingSerializer
@@ -677,7 +679,7 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
         
         if not request.user.is_authenticated:
             return Response(
-                {"detail": "Authentication required."},
+                {"detail": "Autentikasi diperlukan."},
                 status=status.HTTP_401_UNAUTHORIZED
             )
         
@@ -685,7 +687,7 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
             supplier_profile = SupplierProfile.objects.get(user=request.user)
         except SupplierProfile.DoesNotExist:
             return Response(
-                {"detail": "Supplier profile not found."},
+                {"detail": "Profil supplier tidak ditemukan."},
                 status=status.HTTP_404_NOT_FOUND
             )
         
@@ -749,7 +751,7 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
         
         if not request.user.is_authenticated:
             return Response(
-                {"detail": "Authentication required."},
+                {"detail": "Autentikasi diperlukan."},
                 status=status.HTTP_401_UNAUTHORIZED
             )
         
@@ -757,7 +759,7 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
             supplier_profile = SupplierProfile.objects.get(user=request.user)
         except SupplierProfile.DoesNotExist:
             return Response(
-                {"detail": "Supplier profile not found."},
+                {"detail": "Profil supplier tidak ditemukan."},
                 status=status.HTTP_404_NOT_FOUND
             )
         
@@ -788,7 +790,7 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
             tour_date__package__supplier=supplier_profile,
             created_at__gte=start_bound,
             created_at__lte=end_bound,
-            status="CONFIRMED",
+            status=BookingStatus.CONFIRMED,
             payment__status=PaymentStatus.APPROVED
         ).select_related("tour_date", "tour_date__package").annotate(
             seat_count=Count('seat_slots')
@@ -823,26 +825,26 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
         # Ensure supplier owns this booking's tour
         if booking.tour_date.package.supplier.user != request.user:
             return Response(
-                {"detail": "You do not have permission to update this booking."},
+                {"detail": "Anda tidak memiliki izin untuk memperbarui booking ini."},
                 status=status.HTTP_403_FORBIDDEN
             )
         
         if not hasattr(booking, 'payment') or not booking.payment:
             return Response(
-                {"detail": "Booking does not have a payment."},
+                {"detail": "Booking tidak memiliki pembayaran."},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
         new_status = request.data.get('status')
         if not new_status:
             return Response(
-                {"detail": "Status is required."},
+                {"detail": "Status wajib diisi."},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
         if new_status not in [PaymentStatus.PENDING, PaymentStatus.APPROVED, PaymentStatus.REJECTED]:
             return Response(
-                {"detail": f"Invalid status. Must be one of: {', '.join([PaymentStatus.PENDING, PaymentStatus.APPROVED, PaymentStatus.REJECTED])}"},
+                {"detail": f"Status tidak valid. Harus salah satu dari: {', '.join([PaymentStatus.PENDING, PaymentStatus.APPROVED, PaymentStatus.REJECTED])}"},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -940,7 +942,7 @@ class ResellerBookingViewSet(viewsets.ModelViewSet):
             serializer.save(reseller=reseller_profile)
         except ResellerProfile.DoesNotExist:
             raise ValidationError(
-                {"detail": "Reseller profile not found. Please complete your profile setup."}
+                {"detail": "Profil reseller tidak ditemukan. Silakan lengkapi pengaturan profil Anda."}
             )
 
 
@@ -985,7 +987,7 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
         from django.db.models import Sum, F, Count
         
         confirmed_bookings = Booking.objects.filter(
-            status="CONFIRMED",
+            status=BookingStatus.CONFIRMED,
             payment__status=PaymentStatus.APPROVED
         ).select_related("tour_date", "tour_date__package").annotate(
             seat_count=Count('seat_slots')
@@ -1032,7 +1034,7 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
         
         recent_confirmed_bookings = Booking.objects.filter(
             created_at__gte=thirty_days_ago,
-            status="CONFIRMED",
+            status=BookingStatus.CONFIRMED,
             payment__status=PaymentStatus.APPROVED
         ).select_related("tour_date", "tour_date__package").annotate(
             seat_count=Count('seat_slots')
@@ -1049,7 +1051,7 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
         previous_confirmed_bookings = Booking.objects.filter(
             created_at__gte=sixty_days_ago,
             created_at__lt=thirty_days_ago,
-            status="CONFIRMED",
+            status=BookingStatus.CONFIRMED,
             payment__status=PaymentStatus.APPROVED
         ).select_related("tour_date", "tour_date__package").annotate(
             seat_count=Count('seat_slots')
@@ -1117,7 +1119,7 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
         bookings = Booking.objects.filter(
             created_at__gte=start_bound,
             created_at__lte=end_bound,
-            status="CONFIRMED",
+            status=BookingStatus.CONFIRMED,
             payment__status=PaymentStatus.APPROVED
         ).select_related("tour_date", "tour_date__package").annotate(
             seat_count=Count('seat_slots')
@@ -1183,11 +1185,20 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
         # Search by customer name, email, or booking ID
         search = self.request.query_params.get("search")
         if search:
-            queryset = queryset.filter(
-                models.Q(customer_name__icontains=search) |
-                models.Q(customer_email__icontains=search) |
-                models.Q(id__icontains=search)
-            )
+            # Try to parse as integer for ID search
+            try:
+                booking_id = int(search)
+                queryset = queryset.filter(
+                    models.Q(customer_name__icontains=search) |
+                    models.Q(customer_email__icontains=search) |
+                    models.Q(id=booking_id)
+                )
+            except ValueError:
+                # Not a number, search by name and email only
+                queryset = queryset.filter(
+                    models.Q(customer_name__icontains=search) |
+                    models.Q(customer_email__icontains=search)
+                )
         
         # Ordering
         ordering = self.request.query_params.get("ordering", "-created_at")
@@ -1212,20 +1223,20 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
         
         if booking.status != BookingStatus.PENDING:
             return Response(
-                {"detail": f"Booking can only be confirmed when status is PENDING. Current status: {booking.status}"},
+                {"detail": f"Booking hanya dapat dikonfirmasi ketika status adalah PENDING. Status saat ini: {booking.status}"},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
         # Check if payment exists and is approved
         if not hasattr(booking, 'payment') or not booking.payment:
             return Response(
-                {"detail": "Booking cannot be confirmed without an approved payment."},
+                {"detail": "Booking tidak dapat dikonfirmasi tanpa pembayaran yang disetujui."},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
         if booking.payment.status != PaymentStatus.APPROVED:
             return Response(
-                {"detail": f"Payment must be approved before confirming booking. Current payment status: {booking.payment.status}"},
+                {"detail": f"Pembayaran harus disetujui sebelum mengonfirmasi booking. Status pembayaran saat ini: {booking.payment.status}"},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -1245,7 +1256,7 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
         
         if booking.status != BookingStatus.PENDING:
             return Response(
-                {"detail": f"Only PENDING bookings can be cancelled. Current status: {booking.status}"},
+                {"detail": f"Hanya booking dengan status PENDING yang dapat dibatalkan. Status saat ini: {booking.status}"},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -1265,7 +1276,7 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
         
         if not hasattr(booking, 'payment') or not booking.payment:
             return Response(
-                {"detail": "Booking does not have a payment."},
+                {"detail": "Booking tidak memiliki pembayaran."},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -1285,7 +1296,7 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
         
         if not hasattr(booking, 'payment') or not booking.payment:
             return Response(
-                {"detail": "Booking does not have a payment."},
+                {"detail": "Booking tidak memiliki pembayaran."},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -1305,20 +1316,20 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
         
         if not hasattr(booking, 'payment') or not booking.payment:
             return Response(
-                {"detail": "Booking does not have a payment."},
+                {"detail": "Booking tidak memiliki pembayaran."},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
         new_status = request.data.get('status')
         if not new_status:
             return Response(
-                {"detail": "Status is required."},
+                {"detail": "Status wajib diisi."},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
         if new_status not in [PaymentStatus.PENDING, PaymentStatus.APPROVED, PaymentStatus.REJECTED]:
             return Response(
-                {"detail": f"Invalid status. Must be one of: {', '.join([PaymentStatus.PENDING, PaymentStatus.APPROVED, PaymentStatus.REJECTED])}"},
+                {"detail": f"Status tidak valid. Harus salah satu dari: {', '.join([PaymentStatus.PENDING, PaymentStatus.APPROVED, PaymentStatus.REJECTED])}"},
                 status=status.HTTP_400_BAD_REQUEST
             )
         

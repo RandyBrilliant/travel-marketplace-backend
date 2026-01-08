@@ -15,41 +15,38 @@ from .models import (
 
 @admin.register(TourPackage)
 class TourPackageAdmin(admin.ModelAdmin):
-    list_display = ["name", "supplier", "country", "tour_type", "base_price", "is_active", "is_featured", "reseller_groups_count"]
+    list_display = ["name", "supplier", "country", "tour_type", "base_price", "is_active", "reseller_groups_count"]
     list_display_links = ["name"]
-    list_filter = ["tour_type", "category", "is_active", "is_featured", "created_at"]
+    list_filter = ["tour_type", "is_active", "created_at"]
     search_fields = ["name", "country", "supplier__company_name", "slug"]
     filter_horizontal = ["reseller_groups"]
-    readonly_fields = ["slug", "duration_display", "group_size_display", "created_at", "updated_at"]
+    readonly_fields = ["slug", "duration_display", "created_at", "updated_at"]
     date_hierarchy = "created_at"
     
     fieldsets = (
         ("Basic Information", {
-            "fields": ("supplier", "name", "slug", "summary", "description", "itinerary")
+            "fields": ("supplier", "name", "slug", "itinerary")
         }),
         ("Location", {
             "fields": ("country",)
         }),
         ("Duration & Group", {
-            "fields": ("days", "nights", "duration_display", "max_group_size", "group_type", "group_size_display")
+            "fields": ("days", "nights", "duration_display", "max_group_size")
         }),
         ("Tour Details", {
-            "fields": ("tour_type", "category", "highlights", "inclusions", "exclusions")
+            "fields": ("tour_type", "highlights", "inclusions", "exclusions")
         }),
         ("Pricing", {
-            "fields": ("base_price",)
-        }),
-        ("Media", {
-            "fields": ("main_image", "badge")
+            "fields": ("base_price", "visa_price", "tipping_price")
         }),
         ("Additional Information", {
-            "fields": ("meeting_point", "cancellation_policy", "important_notes", "itinerary_pdf")
+            "fields": ("cancellation_policy", "important_notes", "itinerary_pdf")
         }),
         ("Settings", {
-            "fields": ("is_active", "is_featured", "reseller_groups")
+            "fields": ("is_active", "reseller_groups")
         }),
-        ("Commission Settings (Admin Only)", {
-            "fields": ("commission", "commission_notes"),
+        ("Commission Settings", {
+            "fields": ("commission",),
             "classes": ("collapse",)
         }),
         ("Timestamps", {
@@ -80,7 +77,7 @@ class TourDateAdmin(admin.ModelAdmin):
     Note: remaining_seats is now a computed property (not a database field).
     It calculates available seats dynamically from seat_slots.
     """
-    list_display = ["package", "departure_date", "price", "total_seats", "remaining_seats", "is_high_season"]
+    list_display = ["package", "departure_date", "price", "total_seats", "airline", "remaining_seats", "is_high_season"]
     list_display_links = ["package", "departure_date"]
     list_filter = ["departure_date", "is_high_season", "package__supplier"]
     search_fields = ["package__name", "package__country"]
@@ -89,7 +86,7 @@ class TourDateAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ("Tour Information", {
-            "fields": ("package", "departure_date", "is_high_season")
+            "fields": ("package", "departure_date", "airline", "is_high_season")
         }),
         ("Pricing & Capacity", {
             "fields": ("price", "total_seats", "remaining_seats", "available_seats_count", "booked_seats_count")
@@ -141,7 +138,7 @@ class BookingAdmin(admin.ModelAdmin):
     list_display_links = ["id", "customer_name"]
     list_filter = ["status", "created_at", "tour_date__package"]
     search_fields = ["customer_name", "customer_email", "reseller__full_name", "tour_date__package__name"]
-    readonly_fields = ["seats_booked", "passenger_count", "total_amount", "subtotal", "booking_contact_is_passenger"]
+    readonly_fields = ["seats_booked", "passenger_count", "total_amount", "booking_contact_is_passenger"]
     date_hierarchy = "created_at"
     
     fieldsets = (
@@ -152,7 +149,7 @@ class BookingAdmin(admin.ModelAdmin):
             "fields": ("customer_name", "customer_email", "customer_phone")
         }),
         ("Booking Details", {
-            "fields": ("seats_booked", "passenger_count", "booking_contact_is_passenger", "platform_fee", "subtotal", "total_amount")
+            "fields": ("seats_booked", "passenger_count", "booking_contact_is_passenger", "platform_fee", "total_amount")
         }),
         ("Additional Information", {
             "fields": ("notes",)

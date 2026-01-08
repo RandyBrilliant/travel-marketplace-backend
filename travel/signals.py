@@ -38,12 +38,6 @@ def _optimize_image_field(instance, field_name):
                 _optimizing.discard(instance_id)
 
 
-@receiver(post_save, sender=TourPackage)
-def optimize_tour_package_main_image(sender, instance, created, **kwargs):
-    """Optimize main_image when TourPackage is saved."""
-    _optimize_image_field(instance, 'main_image')
-
-
 @receiver(post_save, sender=TourImage)
 def optimize_tour_image(sender, instance, created, **kwargs):
     """Optimize image when TourImage is saved."""

@@ -2,11 +2,13 @@
 Image optimization utilities for converting images to WebP format.
 """
 import os
+import logging
 from io import BytesIO
 from PIL import Image
 from django.core.files.base import ContentFile
 from django.conf import settings
-import sys
+
+logger = logging.getLogger('travel')
 
 
 def optimize_image_to_webp(image_field, max_width=1920, max_height=1920, quality=85):
@@ -99,6 +101,6 @@ def optimize_image_to_webp(image_field, max_width=1920, max_height=1920, quality
         
     except Exception as e:
         # Log the error but don't break the save process
-        print(f"Error optimizing image {image_field.name}: {str(e)}", file=sys.stderr)
+        logger.error(f"Error optimizing image {image_field.name}: {str(e)}", exc_info=True)
         return False
 
