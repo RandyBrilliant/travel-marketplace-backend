@@ -167,16 +167,39 @@ chmod +x deploy/*.sh
 
 ```
 deploy/
-├── ubuntu-setup.sh      # Initial server setup
-├── ssl-setup.sh         # SSL certificate setup
-├── deploy.sh            # Application deployment
-├── backup.sh            # Backup script
-├── reset-database.sh    # Database reset script
-├── complete-reset.sh    # Complete Docker reset (removes everything)
-├── fresh-start.sh       # Fresh deployment after reset
-├── README.md            # This file
-└── QUICK_DEPLOY.md      # Quick reference guide
+├── ubuntu-setup.sh             # Initial server setup
+├── ssl-setup.sh                # SSL certificate setup
+├── deploy.sh                   # Application deployment
+├── backup.sh                   # Backup script
+├── reset-database.sh           # Database reset script
+├── complete-reset.sh           # Complete Docker reset (removes everything)
+├── fresh-start.sh              # Fresh deployment after reset
+├── optimize-2gb.sh             # Complete 2GB RAM optimization
+├── fix-2gb-memory.sh           # Legacy memory fix script
+├── README.md                   # This file
+├── QUICK_DEPLOY.md             # Quick reference guide
+└── OPTIMIZATION_GUIDE_2GB.md   # Complete optimization guide for 2GB servers
 ```
+
+## Optimization for Low-Resource Servers
+
+### For 2GB RAM / 1 vCPU Servers (Digital Ocean, etc.)
+
+If you're running on a server with limited resources, run the optimization script:
+
+```bash
+sudo ./deploy/optimize-2gb.sh
+```
+
+This will:
+- Configure system memory settings
+- Set up swap space
+- Optimize Docker daemon
+- Configure PostgreSQL for low memory
+- Optimize Nginx settings
+- Set up log rotation
+
+For complete details, see: **[OPTIMIZATION_GUIDE_2GB.md](./OPTIMIZATION_GUIDE_2GB.md)**
 
 ## Support
 
