@@ -3,8 +3,10 @@
 set -euo pipefail
 
 # Create media directories if they don't exist (needed for volume mounts)
-# Note: If volume mount has permission issues, create these directories on the host
-# with: mkdir -p media/profile_photos/{staff,supplier,reseller} && chmod -R 777 media
+# Handle case where file exists instead of directory
+if [ -f /app/media/profile_photos ]; then
+    rm -f /app/media/profile_photos
+fi
 mkdir -p /app/media/profile_photos/staff /app/media/profile_photos/supplier /app/media/profile_photos/reseller 2>/dev/null || true
 
 # Production checks
