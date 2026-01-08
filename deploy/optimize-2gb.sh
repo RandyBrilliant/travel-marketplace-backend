@@ -233,6 +233,13 @@ http {
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-XSS-Protection "1; mode=block" always;
 
+    # Rate limiting (optimized for 2GB RAM)
+    limit_req_zone $binary_remote_addr zone=api_limit:2m rate=10r/s;
+    limit_req_zone $binary_remote_addr zone=login_limit:1m rate=5r/m;
+
+    # Hide nginx version
+    server_tokens off;
+
     # Include site configs
     include /etc/nginx/conf.d/*.conf;
 }
