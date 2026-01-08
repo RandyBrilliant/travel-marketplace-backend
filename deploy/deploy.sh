@@ -11,7 +11,7 @@ NC='\033[0m' # No Color
 # Get script directory
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-APP_DIR="${APP_DIR:-/opt/travel-marketplace-backend}"
+APP_DIR="${APP_DIR:-$PROJECT_DIR}"
 
 echo "=========================================="
 echo "Travel Marketplace Backend - Deployment"
