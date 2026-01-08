@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     build-essential \
     libpq-dev \
     curl \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 FROM base AS deps
@@ -40,7 +41,9 @@ RUN mkdir -p /app/media/profile_photos/staff \
     /app/media/profile_photos/supplier \
     /app/media/profile_photos/reseller \
     /app/logs \
+    /app/scripts \
     && chmod +x entrypoint.sh \
+    && chmod +x scripts/check_celery_beat.py 2>/dev/null || true \
     && chown -R appuser:appuser /app
 
 # Switch to non-root user

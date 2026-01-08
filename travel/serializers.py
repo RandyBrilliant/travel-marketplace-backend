@@ -398,6 +398,7 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
     itinerary_pdf_url = serializers.SerializerMethodField()
     images = TourImageSerializer(many=True, read_only=True)
     dates = serializers.SerializerMethodField()
+    reseller_commission = serializers.SerializerMethodField()
     
     class Meta:
         model = TourPackage
@@ -430,6 +431,7 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
             "images",
             "dates",
             "supplier_name",
+            "reseller_commission",
             "is_active",
             "is_featured",
             "created_at",
@@ -479,6 +481,20 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
         future_dates = sorted(future_dates, key=lambda x: x.departure_date)[:10]
         
         return TourDateSerializer(future_dates, many=True, context=self.context).data
+    
+    def get_reseller_commission(self, obj):
+        """Return reseller commission amount if user is authenticated reseller."""
+        from account.models import UserRole
+        
+        request = self.context.get("request")
+        if request and request.user.is_authenticated and request.user.role == UserRole.RESELLER:
+            try:
+                reseller_profile = ResellerProfile.objects.get(user=request.user)
+                commission = obj.get_reseller_commission(reseller_profile)
+                return commission
+            except ResellerProfile.DoesNotExist:
+                return None
+        return None
 
 
 class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):

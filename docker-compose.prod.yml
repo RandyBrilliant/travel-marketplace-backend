@@ -174,7 +174,7 @@ services:
     networks:
       - dcnetwork-network
     healthcheck:
-      test: ["CMD-SHELL", "ps aux | grep '[c]elery.*beat' || exit 1"]
+      test: ["CMD-SHELL", "python /app/scripts/check_celery_beat.py || ps aux | grep '[c]elery.*beat' || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
