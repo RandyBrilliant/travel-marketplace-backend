@@ -43,7 +43,11 @@ mkdir -p nginx/logs
 mkdir -p media
 mkdir -p staticfiles
 mkdir -p nginx/ssl
+# Ensure logs directory is writable
 chmod 755 logs nginx/logs media staticfiles nginx/ssl 2>/dev/null || true
+# Create log file if it doesn't exist (to avoid permission issues)
+touch logs/django.log 2>/dev/null || true
+chmod 666 logs/django.log 2>/dev/null || true
 echo -e "${GREEN}✓ Directories created${NC}"
 
 echo ""
@@ -84,10 +88,12 @@ echo -e "${GREEN}✓ Database ready${NC}"
 
 echo ""
 echo -e "${BLUE}[6/7] Running database migrations...${NC}"
-docker compose -f docker-compose.prod.yml exec -T api python manage.py migrate --noinput || {
+if ! docker compose -f docker-compose.prod.yml exec -T api python manage.py migrate --noinput; then
     echo -e "${RED}Error: Migrations failed${NC}"
+    echo -e "${YELLOW}Showing last 30 lines of API logs:${NC}"
+    docker compose -f docker-compose.prod.yml logs api | tail -30
     exit 1
-}
+fi
 echo -e "${GREEN}✓ Migrations completed${NC}"
 
 echo ""

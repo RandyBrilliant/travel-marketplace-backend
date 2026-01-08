@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+# Create logs directory (required for Django logging)
+mkdir -p /app/logs
+chmod 755 /app/logs
+
 # Create media directories if they don't exist (needed for volume mounts)
 # Handle case where file exists instead of directory
 if [ -f /app/media/profile_photos ]; then
