@@ -7,10 +7,10 @@ services:
       - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/api.goholiday.id.http-only.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro
-      # Uncomment lines below after SSL setup:
-      # - ./nginx/api.goholiday.id.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro
-      # - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./nginx/api.goholiday.id.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      # HTTP-only config (use when SSL certificates don't exist):
+      # - ./nginx/api.goholiday.id.http-only.conf:/etc/nginx/conf.d/api.goholiday.id.conf:ro
       - media_volume:/app/media:ro
       - ./nginx/logs:/var/log/nginx
     depends_on:
