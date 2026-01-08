@@ -53,26 +53,33 @@ if [ -d "$APP_DIR" ] && [ -f "$APP_DIR/docker-compose.prod.yml" ]; then
     fi
 fi
 
-# Copy files to deployment directory
-echo -e "${GREEN}[1/6] Copying files to deployment directory...${NC}"
-mkdir -p "$APP_DIR"
+# Copy files to deployment directory (only if different from project dir)
+echo -e "${GREEN}[1/6] Preparing deployment directory...${NC}"
 
-# Ensure correct ownership of deployment directory
-chown -R $SUDO_USER:$SUDO_USER "$APP_DIR" 2>/dev/null || chown -R root:root "$APP_DIR"
-
-rsync -av --exclude='.git' \
-    --exclude='env' \
-    --exclude='__pycache__' \
-    --exclude='*.pyc' \
-    --exclude='.env' \
-    --exclude='db.sqlite3' \
-    --exclude='celerybeat-schedule' \
-    "$PROJECT_DIR/" "$APP_DIR/"
-
-# Copy .env file
-if [ -f "$PROJECT_DIR/.env" ]; then
-    cp "$PROJECT_DIR/.env" "$APP_DIR/.env"
-    echo -e "${GREEN}Copied .env file${NC}"
+if [ "$PROJECT_DIR" != "$APP_DIR" ]; then
+    echo "Copying files from $PROJECT_DIR to $APP_DIR"
+    mkdir -p "$APP_DIR"
+    
+    # Ensure correct ownership of deployment directory
+    chown -R $SUDO_USER:$SUDO_USER "$APP_DIR" 2>/dev/null || chown -R root:root "$APP_DIR"
+    
+    rsync -av --exclude='.git' \
+        --exclude='env' \
+        --exclude='__pycache__' \
+        --exclude='*.pyc' \
+        --exclude='.env' \
+        --exclude='db.sqlite3' \
+        --exclude='celerybeat-schedule' \
+        "$PROJECT_DIR/" "$APP_DIR/"
+    
+    # Copy .env file
+    if [ -f "$PROJECT_DIR/.env" ]; then
+        cp "$PROJECT_DIR/.env" "$APP_DIR/.env"
+        echo -e "${GREEN}Copied .env file${NC}"
+    fi
+else
+    echo "Already in deployment directory: $APP_DIR"
+    echo -e "${GREEN}✓ Using current directory${NC}"
 fi
 
 cd "$APP_DIR"
