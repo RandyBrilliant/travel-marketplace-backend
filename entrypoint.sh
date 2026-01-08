@@ -7,11 +7,24 @@ mkdir -p /app/logs
 chmod 755 /app/logs
 
 # Create media directories if they don't exist (needed for volume mounts)
-# Handle case where file exists instead of directory
+# Handle case where file exists instead of directory (common Docker volume issue)
+if [ ! -d /app/media ]; then
+    mkdir -p /app/media
+fi
+
+# Fix profile_photos if it's a file instead of directory
 if [ -f /app/media/profile_photos ]; then
+    echo "Warning: /app/media/profile_photos is a file, removing it..."
     rm -f /app/media/profile_photos
 fi
-mkdir -p /app/media/profile_photos/staff /app/media/profile_photos/supplier /app/media/profile_photos/reseller 2>/dev/null || true
+
+# Create profile_photos directory structure
+mkdir -p /app/media/profile_photos/staff \
+         /app/media/profile_photos/supplier \
+         /app/media/profile_photos/reseller 2>/dev/null || true
+
+# Ensure proper permissions
+chmod -R 755 /app/media 2>/dev/null || true
 
 # Production checks
 if [ "${DEBUG:-0}" = "0" ]; then

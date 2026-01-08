@@ -133,6 +133,8 @@ fi
 # Remove media (but keep directory structure)
 if [ -d "$APP_DIR/media" ]; then
     find "$APP_DIR/media" -mindepth 1 -delete 2>/dev/null || true
+    # Remove any files that might conflict with directory creation
+    [ -f "$APP_DIR/media/profile_photos" ] && rm -f "$APP_DIR/media/profile_photos" 2>/dev/null || true
     echo "  ✓ Media files cleared"
 fi
 
