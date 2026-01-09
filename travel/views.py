@@ -533,7 +533,7 @@ class AdminResellerGroupViewSet(viewsets.ModelViewSet):
     queryset = ResellerGroup.objects.all()
     
     def get_queryset(self):
-        """Allow filtering by is_active."""
+        """Allow filtering by is_active and ordering."""
         queryset = ResellerGroup.objects.prefetch_related(
             models.Prefetch("resellers", queryset=ResellerProfile.objects.select_related("user")),
             "tour_packages"
@@ -542,6 +542,11 @@ class AdminResellerGroupViewSet(viewsets.ModelViewSet):
         is_active = self.request.query_params.get("is_active")
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == "true")
+        
+        # Ordering
+        ordering = self.request.query_params.get("ordering")
+        if ordering:
+            queryset = queryset.order_by(*ordering.split(","))
         
         return queryset
     
