@@ -417,8 +417,29 @@ class TourDate(models.Model):
     
     @property
     def remaining_seats(self):
-        """Calculate remaining seats dynamically from seat slots."""
-        return self.seat_slots.filter(status=SeatSlotStatus.AVAILABLE).count()
+        """Calculate remaining seats dynamically from seat slots.
+        
+        Excludes seats that are:
+        - Status is CANCELLED, OR
+        - Status is BOOKED AND associated booking status is CONFIRMED
+        
+        This means seats with BOOKED status but PENDING/CANCELLED booking (or no booking)
+        are still counted as available (they can be cancelled/released).
+        """
+        from django.db.models import Q
+        
+        # Exclude seats that are:
+        # 1. CANCELLED status, OR
+        # 2. BOOKED status AND booking exists AND booking status is CONFIRMED
+        # This allows BOOKED seats with PENDING/CANCELLED bookings (or no booking) to be counted
+        return self.seat_slots.exclude(
+            Q(status=SeatSlotStatus.CANCELLED) |
+            Q(
+                status=SeatSlotStatus.BOOKED,
+                booking__isnull=False,
+                booking__status=BookingStatus.CONFIRMED
+            )
+        ).count()
     
     @property
     def available_seats_count(self):
