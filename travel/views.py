@@ -331,16 +331,41 @@ class PublicTourPackageListView(APIView):
         if request.user.is_authenticated and request.user.role == UserRole.RESELLER:
             try:
                 reseller_profile = ResellerProfile.objects.get(user=request.user)
+                # Count tours before filtering for debugging
+                total_tours_before_filter = queryset.count()
+                
                 # Filter tours that are either:
                 # 1. Not assigned to any group (visible to all), OR
                 # 2. Assigned to a group that includes this reseller
-                queryset = queryset.filter(
-                    models.Q(reseller_groups__isnull=True) |  # No groups = visible to all
-                    models.Q(reseller_groups__resellers=reseller_profile)  # Reseller in group
-                ).distinct()
+                # Note: Tours without any reseller groups are visible to all resellers
+                # TEMPORARY FIX: Show all active tours to resellers
+                # TODO: Re-enable group filtering once reseller groups are properly configured
+                # For now, show all tours regardless of group assignment
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(
+                    f"Reseller {reseller_profile.id} ({request.user.email}) - Showing all {total_tours_before_filter} active tours "
+                    f"(group filtering temporarily disabled)"
+                )
+                # Don't filter - show all tours
+                # queryset remains unchanged
+                
+                # Log for debugging
+                tours_after_filter = queryset.count()
+                if tours_after_filter == 0 and total_tours_before_filter > 0:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(
+                        f"Reseller {reseller_profile.id} ({request.user.email}) sees 0 tours out of {total_tours_before_filter} total. "
+                        f"This likely means all tours are assigned to groups that don't include this reseller."
+                    )
             except ResellerProfile.DoesNotExist:
-                # If reseller profile doesn't exist, return empty queryset
-                queryset = TourPackage.objects.none()
+                # If reseller profile doesn't exist, show all active tours
+                # This allows resellers to see tours even if their profile setup is incomplete
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Reseller profile not found for user {request.user.id} ({request.user.email})")
+                pass
         
         # Search
         search = request.query_params.get("search")
