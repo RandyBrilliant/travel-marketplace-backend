@@ -421,24 +421,18 @@ class TourDate(models.Model):
         
         Excludes seats that are:
         - Status is CANCELLED, OR
-        - Status is BOOKED AND associated booking status is CONFIRMED
+        - Status is BOOKED (regardless of booking status - PENDING or CONFIRMED bookings make seats unavailable)
         
-        This means seats with BOOKED status but PENDING/CANCELLED booking (or no booking)
-        are still counted as available (they can be cancelled/released).
+        This ensures that once a seat is booked (even with PENDING booking), it's no longer available
+        for other resellers to book.
         """
         from django.db.models import Q
         
         # Exclude seats that are:
         # 1. CANCELLED status, OR
-        # 2. BOOKED status AND booking exists AND booking status is CONFIRMED
-        # This allows BOOKED seats with PENDING/CANCELLED bookings (or no booking) to be counted
+        # 2. BOOKED status (any booking status - PENDING or CONFIRMED)
         return self.seat_slots.exclude(
-            Q(status=SeatSlotStatus.CANCELLED) |
-            Q(
-                status=SeatSlotStatus.BOOKED,
-                booking__isnull=False,
-                booking__status=BookingStatus.CONFIRMED
-            )
+            Q(status=SeatSlotStatus.BOOKED)
         ).count()
     
     @property

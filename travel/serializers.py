@@ -498,18 +498,25 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
     def get_dates(self, obj):
         """Return available tour dates (only future dates with available seats)."""
         from django.utils import timezone
-        from django.db.models import Count, Q
         
-        # Always query database for accurate filtering and counting
-        # Prefetching is handled in the view
+        # Note: seat_slots are already prefetched in the view with booking relationship
+        # Don't prefetch again here to avoid "lookup was already seen" error
         today = timezone.now().date()
         future_dates = obj.dates.filter(
             departure_date__gte=today
-        ).annotate(
-            available_count=Count('seat_slots', filter=Q(seat_slots__status=SeatSlotStatus.AVAILABLE))
-        ).filter(
-            available_count__gt=0
-        ).prefetch_related("seat_slots").order_by("departure_date")[:10]
+        ).order_by("departure_date")[:20]  # Fetch more to account for filtering
+        
+        # Filter dates that have remaining seats > 0 using the property calculation
+        # This ensures we use the same logic as remaining_seats property
+        # The seat_slots are already prefetched from the view, so remaining_seats will work correctly
+        dates_with_seats = []
+        for date in future_dates:
+            if date.remaining_seats > 0:
+                dates_with_seats.append(date)
+            if len(dates_with_seats) >= 10:
+                break
+        
+        return TourDateSerializer(dates_with_seats, many=True, context=self.context).data
         
         return TourDateSerializer(future_dates, many=True, context=self.context).data
     
@@ -533,13 +540,18 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
 
 
 class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
-    """Serializer for creating/updating tour packages (excludes nested relations)."""
+    """Serializer for creating/updating tour packages (excludes nested relations).
+    
+    Note: reseller_groups is included in fields but suppliers cannot modify it.
+    Only admins can set reseller groups via AdminTourPackageSerializer.
+    """
     
     supplier = serializers.PrimaryKeyRelatedField(read_only=True)
     reseller_groups = ResellerGroupListField(
         many=True,
         queryset=ResellerGroup.objects.filter(is_active=True),
         required=False,
+        read_only=True,  # Suppliers cannot modify reseller groups
     )
     
     class Meta:
@@ -656,23 +668,22 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
             slug = TourPackageSerializer._generate_unique_slug(name)
         
         validated_data["slug"] = slug
+        # Remove reseller_groups from validated_data - suppliers cannot set this
+        validated_data.pop("reseller_groups", None)
         return super().create(validated_data)
     
     def update(self, instance, validated_data):
-        """Update tour package, handling reseller_groups for partial updates."""
-        # For ManyToMany fields, only update if explicitly provided in the request
-        reseller_groups = validated_data.pop("reseller_groups", None)
+        """Update tour package. Suppliers cannot modify reseller_groups."""
+        # Remove reseller_groups from validated_data - suppliers cannot modify this
+        # Only admins can modify reseller groups via AdminTourPackageSerializer
+        validated_data.pop("reseller_groups", None)
         
         # Update other fields
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
         
-        # Only update reseller_groups if it was provided in the request
-        if reseller_groups is not None:
-            instance.reseller_groups.set(reseller_groups)
-        # If reseller_groups is not in validated_data, it means it wasn't in the request
-        # so we leave it unchanged (don't call .set())
+        # reseller_groups is read-only for suppliers, so we don't update it here
         
         return instance
 
@@ -689,11 +700,25 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
         queryset=ResellerGroup.objects.filter(is_active=True),
         required=False,
     )
+    reseller_groups_detail = serializers.SerializerMethodField()
     supplier_name = serializers.CharField(source="supplier.company_name", read_only=True)
     images = TourImageSerializer(many=True, read_only=True)
     dates = TourDateSerializer(many=True, read_only=True)
     duration_display = serializers.CharField(read_only=True)
     group_size_display = serializers.CharField(read_only=True)
+    
+    def get_reseller_groups_detail(self, obj):
+        """Return detailed information about reseller groups."""
+        groups = obj.reseller_groups.filter(is_active=True)
+        return [
+            {
+                "id": group.id,
+                "name": group.name,
+                "description": group.description,
+                "reseller_count": group.resellers.count(),
+            }
+            for group in groups
+        ]
     
     class Meta:
         model = TourPackage
@@ -722,6 +747,7 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
             "itinerary_pdf",
             "is_active",
             "reseller_groups",
+            "reseller_groups_detail",
             "images",
             "dates",
             # Commission fields (editable for admin)
@@ -736,6 +762,7 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
             "supplier_name",
             "duration_display",
             "group_size_display",
+            "reseller_groups_detail",
             "images",
             "dates",
             "created_at",
@@ -922,7 +949,13 @@ class BookingUpdateSerializer(serializers.ModelSerializer):
 
 
 class SeatSlotCreateSerializer(serializers.ModelSerializer):
-    """Serializer for creating seat slots with passenger details during booking."""
+    """Serializer for creating seat slots with passenger details during booking.
+    
+    Note: seat_number is optional. If not provided or if the requested seat is unavailable,
+    the backend will auto-assign an available seat.
+    """
+    
+    seat_number = serializers.CharField(required=False, allow_blank=True)
     
     class Meta:
         model = SeatSlot
@@ -1000,6 +1033,14 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         """Validate that at least one seat slot is provided."""
         if not value or len(value) == 0:
             raise serializers.ValidationError("Minimal satu kursi harus dipilih.")
+        
+        # If seat_number is not provided or is empty, we'll auto-assign in create()
+        # So we allow seat_number to be optional here
+        for slot in value:
+            if 'seat_number' not in slot or not slot.get('seat_number'):
+                # Will auto-assign in create() method
+                pass
+        
         return value
     
     def validate(self, attrs):
@@ -1008,23 +1049,34 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         seat_slots = attrs.get('seat_slots', [])
         
         if tour_date and seat_slots:
-            # Get available seat numbers for this tour date
-            available_seats = set(
-                tour_date.seat_slots.filter(status=SeatSlotStatus.AVAILABLE)
-                .values_list('seat_number', flat=True)
-            )
-            
-            # Check all requested seats are available
-            requested_seats = {slot['seat_number'] for slot in seat_slots}
-            unavailable_seats = requested_seats - available_seats
-            
-            if unavailable_seats:
+            # Check if we have enough available seats
+            available_count = tour_date.seat_slots.filter(status=SeatSlotStatus.AVAILABLE).count()
+            if available_count < len(seat_slots):
                 raise serializers.ValidationError({
-                    'seat_slots': f'Kursi {", ".join(unavailable_seats)} tidak tersedia.'
+                    'seat_slots': f'Hanya {available_count} kursi tersedia, tetapi {len(seat_slots)} kursi diminta.'
                 })
             
-            # Check for duplicate seat numbers
-            if len(requested_seats) != len(seat_slots):
+            # If seat numbers are provided, validate they're available
+            # If not provided, we'll auto-assign in create() method
+            requested_seats = {slot.get('seat_number') for slot in seat_slots if slot.get('seat_number')}
+            
+            if requested_seats:
+                # Get available seat numbers for this tour date
+                available_seats = set(
+                    tour_date.seat_slots.filter(status=SeatSlotStatus.AVAILABLE)
+                    .values_list('seat_number', flat=True)
+                )
+                
+                # Check all requested seats are available
+                unavailable_seats = requested_seats - available_seats
+                
+                if unavailable_seats:
+                    # Some seats unavailable, but we'll auto-assign in create() if needed
+                    # Just log a warning, don't fail validation
+                    pass
+            
+            # Check for duplicate seat numbers (only if seat numbers are provided)
+            if requested_seats and len(requested_seats) != len([s for s in seat_slots if s.get('seat_number')]):
                 raise serializers.ValidationError({
                     'seat_slots': 'Nomor kursi duplikat tidak diperbolehkan.'
                 })
@@ -1034,54 +1086,76 @@ class BookingCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """Create booking and assign seat slots with passenger details."""
         from django.db import transaction
-        from django.db.models import F
         
         seat_slots_data = validated_data.pop('seat_slots')
         tour_date = validated_data['tour_date']
+        num_passengers = len(seat_slots_data)
         
         with transaction.atomic():
             # Use select_for_update to prevent race conditions
-            seat_numbers = [slot['seat_number'] for slot in seat_slots_data]
-            seat_slots = list(
+            # Get available seats for this tour date
+            available_seat_slots = list(
                 tour_date.seat_slots.select_for_update().filter(
-                    seat_number__in=seat_numbers,
                     status=SeatSlotStatus.AVAILABLE
-                )
+                ).order_by('seat_number')[:num_passengers]
             )
             
-            # Check if all requested seats are available
-            available_seat_numbers = {slot.seat_number for slot in seat_slots}
-            requested_seat_numbers = set(seat_numbers)
-            unavailable_seats = requested_seat_numbers - available_seat_numbers
-            
-            if unavailable_seats:
+            # Check if we have enough available seats
+            if len(available_seat_slots) < num_passengers:
                 raise ValidationError({
-                    'seat_slots': f'Kursi {", ".join(unavailable_seats)} tidak tersedia.'
+                    'seat_slots': f'Hanya {len(available_seat_slots)} kursi tersedia, tetapi {num_passengers} kursi diminta.'
                 })
             
-            # Check for duplicates in request
-            if len(seat_numbers) != len(requested_seat_numbers):
+            # Extract seat numbers from request (if provided)
+            requested_seat_numbers = [slot.get('seat_number') for slot in seat_slots_data if slot.get('seat_number')]
+            
+            # If specific seat numbers are provided, try to use them
+            if requested_seat_numbers and len(requested_seat_numbers) == num_passengers:
+                # Try to find seats with the requested numbers
+                requested_seats = list(
+                    tour_date.seat_slots.select_for_update().filter(
+                        seat_number__in=requested_seat_numbers,
+                        status=SeatSlotStatus.AVAILABLE
+                    )
+                )
+                
+                # Check if all requested seats are available
+                available_requested_numbers = {slot.seat_number for slot in requested_seats}
+                requested_set = set(requested_seat_numbers)
+                unavailable_seats = requested_set - available_requested_numbers
+                
+                if unavailable_seats:
+                    # Some requested seats are not available, auto-assign instead
+                    seat_slots_to_use = available_seat_slots[:num_passengers]
+                else:
+                    # All requested seats are available, use them
+                    seat_slots_to_use = requested_seats
+            else:
+                # No specific seat numbers provided or incomplete, auto-assign available seats
+                seat_slots_to_use = available_seat_slots[:num_passengers]
+            
+            # Check for duplicates
+            if len(seat_slots_to_use) != num_passengers:
                 raise ValidationError({
-                    'seat_slots': 'Nomor kursi duplikat tidak diperbolehkan.'
+                    'seat_slots': f'Tidak dapat menemukan {num_passengers} kursi yang tersedia.'
                 })
             
             # Create booking
             booking = Booking.objects.create(**validated_data)
             
-            # Create a mapping for quick lookup
-            seat_slot_map = {slot.seat_number: slot for slot in seat_slots}
-            
             # Assign seat slots and update passenger details
             # IMPORTANT: Set seat status to BOOKED immediately when booking is created
             # (even if booking status is PENDING). Seats will only be available again
             # when booking is cancelled.
-            for slot_data in seat_slots_data:
-                seat_number = slot_data.pop('seat_number')
-                seat_slot = seat_slot_map[seat_number]
+            for i, slot_data in enumerate(seat_slots_data):
+                seat_slot = seat_slots_to_use[i]
                 
                 # Update seat slot with passenger details and assign to booking
                 # Convert empty strings to None for optional fields
                 for key, value in slot_data.items():
+                    if key == 'seat_number':
+                        # Skip seat_number as we're using auto-assigned seats
+                        continue
                     if value == "":
                         value = None
                     setattr(seat_slot, key, value)

@@ -11,7 +11,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 
 from rest_framework.permissions import IsAdminUser, IsAuthenticatedOrReadOnly
 from account.models import UserRole, SupplierProfile, ResellerProfile
-from .models import TourPackage, TourDate, TourImage, ResellerTourCommission, ResellerGroup, Booking, BookingStatus, SeatSlotStatus, PaymentStatus
+from .models import TourPackage, TourDate, TourImage, ResellerTourCommission, ResellerGroup, Booking, BookingStatus, SeatSlotStatus, PaymentStatus, SeatSlot
 from .serializers import (
     TourPackageSerializer,
     TourPackageListSerializer,
@@ -289,11 +289,32 @@ class PublicTourPackageListView(APIView):
         from django.core.cache import cache
         from hashlib import md5
         
+        # Get reseller profile early for both cache key and filtering (optimize to fetch once)
+        reseller_profile = None
+        reseller_group_ids = []
+        if request.user.is_authenticated and request.user.role == UserRole.RESELLER:
+            try:
+                reseller_profile = ResellerProfile.objects.prefetch_related('reseller_groups').get(user=request.user)
+                reseller_groups = reseller_profile.reseller_groups.filter(is_active=True)
+                reseller_group_ids = sorted(list(reseller_groups.values_list('id', flat=True)))
+            except ResellerProfile.DoesNotExist:
+                pass
+        
         # Create cache key from query parameters
-        # Include user role in cache key to differentiate reseller vs public views
-        user_role = request.user.role if request.user.is_authenticated else 'anonymous'
+        # Include user role and reseller groups in cache key to differentiate reseller vs public views
+        # Different resellers see different tours based on their groups
+        user_identifier = 'anonymous'
+        if request.user.is_authenticated:
+            if request.user.role == UserRole.RESELLER:
+                if reseller_profile:
+                    user_identifier = f'reseller_{reseller_profile.id}_groups_{"_".join(map(str, reseller_group_ids))}'
+                else:
+                    user_identifier = f'reseller_{request.user.id}_no_profile'
+            else:
+                user_identifier = request.user.role
+        
         cache_params = request.GET.urlencode()
-        cache_key = f'tours_list_{user_role}_{md5(cache_params.encode()).hexdigest()}'
+        cache_key = f'tours_list_{user_identifier}_{md5(cache_params.encode()).hexdigest()}'
         
         # Try to get from cache
         cached_data = cache.get(cache_key)
@@ -328,44 +349,26 @@ class PublicTourPackageListView(APIView):
             queryset = queryset.filter(category=category)
         
         # Filter by reseller groups - only show tours visible to the authenticated reseller
-        if request.user.is_authenticated and request.user.role == UserRole.RESELLER:
-            try:
-                reseller_profile = ResellerProfile.objects.get(user=request.user)
-                # Count tours before filtering for debugging
-                total_tours_before_filter = queryset.count()
-                
-                # Filter tours that are either:
-                # 1. Not assigned to any group (visible to all), OR
-                # 2. Assigned to a group that includes this reseller
-                # Note: Tours without any reseller groups are visible to all resellers
-                # TEMPORARY FIX: Show all active tours to resellers
-                # TODO: Re-enable group filtering once reseller groups are properly configured
-                # For now, show all tours regardless of group assignment
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.info(
-                    f"Reseller {reseller_profile.id} ({request.user.email}) - Showing all {total_tours_before_filter} active tours "
-                    f"(group filtering temporarily disabled)"
-                )
-                # Don't filter - show all tours
-                # queryset remains unchanged
-                
-                # Log for debugging
-                tours_after_filter = queryset.count()
-                if tours_after_filter == 0 and total_tours_before_filter > 0:
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.warning(
-                        f"Reseller {reseller_profile.id} ({request.user.email}) sees 0 tours out of {total_tours_before_filter} total. "
-                        f"This likely means all tours are assigned to groups that don't include this reseller."
-                    )
-            except ResellerProfile.DoesNotExist:
-                # If reseller profile doesn't exist, show all active tours
-                # This allows resellers to see tours even if their profile setup is incomplete
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning(f"Reseller profile not found for user {request.user.id} ({request.user.email})")
-                pass
+        if reseller_profile is not None:
+            # Filter tours that are either:
+            # 1. Not assigned to any group (visible to all), OR
+            # 2. Assigned to a group that includes this reseller
+            # Note: Tours without any reseller groups are visible to all resellers
+            if reseller_group_ids:
+                # Reseller belongs to some groups
+                # Show tours with no groups OR tours with groups that include this reseller
+                queryset = queryset.filter(
+                    models.Q(reseller_groups__isnull=True) |  # Tours with no groups
+                    models.Q(reseller_groups__id__in=reseller_group_ids)  # Tours in reseller's groups
+                ).distinct()
+            else:
+                # Reseller doesn't belong to any groups
+                # Only show tours with no group assignment (visible to all)
+                queryset = queryset.filter(reseller_groups__isnull=True)
+        elif request.user.is_authenticated and request.user.role == UserRole.RESELLER:
+            # Reseller profile doesn't exist, only show tours with no group assignment
+            # This prevents unauthorized access to group-restricted tours
+            queryset = queryset.filter(reseller_groups__isnull=True)
         
         # Search
         search = request.query_params.get("search")
@@ -441,27 +444,60 @@ class PublicTourPackageDetailView(APIView):
                 "images",
                 models.Prefetch(
                     "dates",
-                    queryset=TourDate.objects.prefetch_related("seat_slots").order_by("departure_date")
+                    queryset=TourDate.objects.prefetch_related(
+                        models.Prefetch(
+                            "seat_slots",
+                            queryset=SeatSlot.objects.select_related("booking")
+                        )
+                    ).order_by("departure_date")
                 )
             ).get(pk=pk)
         except TourPackage.DoesNotExist:
             raise Http404("Paket tur tidak ditemukan")
         
-        # Check if reseller has access to this tour
+        # Check if reseller has access to this tour based on reseller groups
         if request.user.is_authenticated and request.user.role == UserRole.RESELLER:
             try:
                 # Prefetch reseller_profile for serializer to avoid N+1 query
-                reseller_profile = ResellerProfile.objects.select_related('user').get(user=request.user)
+                reseller_profile = ResellerProfile.objects.prefetch_related('reseller_groups').select_related('user').get(user=request.user)
                 request.user.reseller_profile = reseller_profile  # Cache for serializer
-                # Check if tour is accessible to this reseller
-                # Tour is accessible if:
-                # 1. Not assigned to any group (visible to all), OR
-                # 2. Assigned to a group that includes this reseller
-                if tour.reseller_groups.exists():
-                    if not tour.reseller_groups.filter(resellers=reseller_profile).exists():
-                        raise Http404("Paket tur tidak ditemukan")
+                
+                # Get tour's reseller groups
+                tour_groups = tour.reseller_groups.filter(is_active=True)
+                
+                # Check access:
+                # 1. If tour has no groups assigned, it's visible to all resellers
+                # 2. If tour has groups, reseller must be in at least one of them
+                if tour_groups.exists():
+                    # Tour has group restrictions
+                    reseller_groups = reseller_profile.reseller_groups.filter(is_active=True)
+                    reseller_group_ids = set(reseller_groups.values_list('id', flat=True))
+                    tour_group_ids = set(tour_groups.values_list('id', flat=True))
+                    
+                    # Check if reseller belongs to any of the tour's groups
+                    if not (reseller_group_ids & tour_group_ids):
+                        # Reseller doesn't belong to any of the tour's groups
+                        return Response(
+                            {
+                                "detail": "Anda tidak memiliki akses ke paket tur ini. "
+                                         "Paket ini hanya tersedia untuk grup reseller tertentu."
+                            },
+                            status=status.HTTP_403_FORBIDDEN
+                        )
+                # If tour has no groups or reseller is in a group, allow access
             except ResellerProfile.DoesNotExist:
-                raise Http404("Paket tur tidak ditemukan")
+                # If reseller profile doesn't exist, check if tour has group restrictions
+                tour_groups = tour.reseller_groups.filter(is_active=True)
+                if tour_groups.exists():
+                    # Tour has group restrictions but reseller has no profile
+                    return Response(
+                        {
+                            "detail": "Anda tidak memiliki akses ke paket tur ini. "
+                                     "Silakan lengkapi profil reseller Anda terlebih dahulu."
+                        },
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+                # If tour has no groups, allow access even without profile
         
         serializer = PublicTourPackageDetailSerializer(tour, context={"request": request})
         return Response(serializer.data)
@@ -513,7 +549,10 @@ class AdminTourPackageViewSet(viewsets.ModelViewSet):
             "supplier",
             "supplier__user",
         ).prefetch_related(
-            "reseller_groups",
+            models.Prefetch(
+                "reseller_groups",
+                queryset=ResellerGroup.objects.filter(is_active=True).prefetch_related("resellers")
+            ),
             "images",
             "dates__seat_slots",
         ).all()
