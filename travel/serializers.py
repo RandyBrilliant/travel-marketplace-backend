@@ -1104,6 +1104,8 @@ class BookingSerializer(serializers.ModelSerializer):
     tour_package_slug = serializers.SlugField(source="tour_date.package.slug", read_only=True)
     departure_date = serializers.DateField(source="tour_date.departure_date", read_only=True)
     tour_price = serializers.IntegerField(source="tour_date.price", read_only=True)
+    visa_price = serializers.IntegerField(source="tour_date.package.visa_price", read_only=True)
+    tipping_price = serializers.IntegerField(source="tour_date.package.tipping_price", read_only=True)
     seats_booked = serializers.IntegerField(read_only=True)
     total_amount = serializers.IntegerField(read_only=True)
     subtotal = serializers.IntegerField(read_only=True)
@@ -1125,6 +1127,8 @@ class BookingSerializer(serializers.ModelSerializer):
             "tour_package_slug",
             "departure_date",
             "tour_price",
+            "visa_price",
+            "tipping_price",
             "status",
             "seats_booked",
             "platform_fee",
