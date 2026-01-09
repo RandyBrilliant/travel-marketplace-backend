@@ -23,6 +23,73 @@ from account.models import ResellerProfile, SupplierProfile
 logger = logging.getLogger('travel')
 
 
+class ResellerGroupListField(serializers.PrimaryKeyRelatedField):
+    """
+    Custom field that handles reseller groups with support for:
+    - JSON string arrays from FormData (e.g., "[]", "[1,2,3]")
+    - Regular arrays
+    - String-to-int conversion for individual IDs
+    """
+    
+    def get_value(self, dictionary):
+        """
+        Override to handle JSON string arrays from FormData.
+        This is called before to_internal_value.
+        """
+        # Get the raw value from the request data
+        value = dictionary.get(self.field_name, serializers.empty)
+        
+        # If it's a string, try to parse as JSON (for FormData)
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return serializers.empty
+            try:
+                parsed = json.loads(value)
+                # If it's an array, return it
+                if isinstance(parsed, list):
+                    return parsed
+                # If it's a single value, wrap in list
+                return [parsed]
+            except (json.JSONDecodeError, TypeError):
+                # Not JSON, treat as a single value
+                return [value]
+        
+        return value
+    
+    def to_internal_value(self, data):
+        """Convert string IDs to integers before processing."""
+        # Handle None or empty values
+        if data is None:
+            return None
+        
+        # If it's already a ResellerGroup instance, return it
+        if isinstance(data, ResellerGroup):
+            return data
+        
+        # If it's already an integer, pass it to parent
+        if isinstance(data, int):
+            return super().to_internal_value(data)
+        
+        # If it's a string, convert to int
+        if isinstance(data, str):
+            data = data.strip()
+            if not data:  # Skip empty strings
+                return None
+            try:
+                data = int(data)
+            except (ValueError, TypeError):
+                raise serializers.ValidationError(
+                    f"ID grup reseller tidak valid: '{data}'. Harus berupa angka."
+                )
+            return super().to_internal_value(data)
+        
+        # For any other type, raise an error
+        raise serializers.ValidationError(
+            f"Format grup reseller tidak valid: {data}. Harus berupa ID (angka)."
+        )
+
+
 def build_absolute_image_url(relative_url, request=None):
     """
     Build absolute URL from relative path for embedding in JWT token.
@@ -126,10 +193,11 @@ class TourImageCreateUpdateSerializer(serializers.ModelSerializer):
 
 
 class SeatSlotSerializer(serializers.ModelSerializer):
-    """Serializer for seat slots within a tour date with comprehensive passenger details."""
+    """Serializer for seat slots within a tour date with passenger details."""
     
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     booking_id = serializers.IntegerField(source="booking.id", read_only=True, allow_null=True)
+    passport_url = serializers.SerializerMethodField()
     
     class Meta:
         model = SeatSlot
@@ -140,25 +208,21 @@ class SeatSlotSerializer(serializers.ModelSerializer):
             "status_display",
             "booking_id",
             "passenger_name",
-            "passenger_email",
-            "passenger_phone",
-            "passenger_date_of_birth",
-            "passenger_gender",
-            "passenger_nationality",
-            "passport_number",
-            "passport_issue_date",
-            "passport_expiry_date",
-            "passport_issue_country",
+            "passport",
+            "passport_url",
             "visa_required",
-            "visa_number",
-            "visa_issue_date",
-            "visa_expiry_date",
-            "visa_type",
             "special_requests",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "status_display", "booking_id", "created_at", "updated_at"]
+        read_only_fields = ["id", "status_display", "booking_id", "passport_url", "created_at", "updated_at"]
+    
+    def get_passport_url(self, obj):
+        """Return absolute URL for passport image if exists."""
+        if obj.passport:
+            request = self.context.get("request")
+            return build_absolute_image_url(obj.passport.url, request)
+        return None
 
 
 class TourDateSerializer(serializers.ModelSerializer):
@@ -222,6 +286,15 @@ class TourDateSerializer(serializers.ModelSerializer):
             slots = obj._prefetched_objects_cache['seat_slots']
         else:
             slots = obj.seat_slots.all()
+        
+        # Show all seats with their status for all authenticated users
+        # This allows resellers to see which seats are available vs booked
+        # Unauthenticated users only see available seats
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            # Unauthenticated users: only show available seats
+            slots = [slot for slot in slots if slot.status == SeatSlotStatus.AVAILABLE]
+        
         slots = sorted(slots, key=lambda x: (len(x.seat_number), x.seat_number))
         return SeatSlotSerializer(slots, many=True, context=self.context).data
 
@@ -463,7 +536,7 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
     """Serializer for creating/updating tour packages (excludes nested relations)."""
     
     supplier = serializers.PrimaryKeyRelatedField(read_only=True)
-    reseller_groups = serializers.PrimaryKeyRelatedField(
+    reseller_groups = ResellerGroupListField(
         many=True,
         queryset=ResellerGroup.objects.filter(is_active=True),
         required=False,
@@ -496,6 +569,22 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
             "commission",
         ]
         read_only_fields = ["id", "supplier", "slug"]
+    
+    def validate_reseller_groups(self, value):
+        """Additional validation for reseller groups (conversion handled by ResellerGroupField)."""
+        # The custom field handles string-to-int conversion, so by this point
+        # value should be a list of ResellerGroup instances or integers
+        
+        # Filter out None values (from empty strings)
+        if value is None:
+            return []
+        
+        if isinstance(value, list):
+            filtered = [item for item in value if item is not None]
+            # If all items were filtered out, return empty list
+            return filtered
+        
+        return value
     
     def validate_highlights(self, value):
         """Convert list to JSON if needed."""
@@ -568,6 +657,24 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
         
         validated_data["slug"] = slug
         return super().create(validated_data)
+    
+    def update(self, instance, validated_data):
+        """Update tour package, handling reseller_groups for partial updates."""
+        # For ManyToMany fields, only update if explicitly provided in the request
+        reseller_groups = validated_data.pop("reseller_groups", None)
+        
+        # Update other fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        # Only update reseller_groups if it was provided in the request
+        if reseller_groups is not None:
+            instance.reseller_groups.set(reseller_groups)
+        # If reseller_groups is not in validated_data, it means it wasn't in the request
+        # so we leave it unchanged (don't call .set())
+        
+        return instance
 
 
 class AdminTourPackageSerializer(serializers.ModelSerializer):
@@ -577,7 +684,7 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
         queryset=SupplierProfile.objects.all(),
         required=True
     )
-    reseller_groups = serializers.PrimaryKeyRelatedField(
+    reseller_groups = ResellerGroupListField(
         many=True,
         queryset=ResellerGroup.objects.filter(is_active=True),
         required=False,
@@ -658,6 +765,24 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
         if not value and self.initial_data.get("name"):
             value = TourPackageSerializer._generate_unique_slug(self.initial_data["name"], self.instance)
         return value
+    
+    def update(self, instance, validated_data):
+        """Update tour package, handling reseller_groups for partial updates."""
+        # For ManyToMany fields, only update if explicitly provided in the request
+        reseller_groups = validated_data.pop("reseller_groups", None)
+        
+        # Update other fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        # Only update reseller_groups if it was provided in the request
+        if reseller_groups is not None:
+            instance.reseller_groups.set(reseller_groups)
+        # If reseller_groups is not in validated_data, it means it wasn't in the request
+        # so we leave it unchanged (don't call .set())
+        
+        return instance
 
 
 class ResellerTourCommissionSerializer(serializers.ModelSerializer):
@@ -776,9 +901,6 @@ class BookingListSerializer(serializers.ModelSerializer):
             "tour_date",
             "tour_package_name",
             "departure_date",
-            "customer_name",
-            "customer_email",
-            "customer_phone",
             "status",
             "seats_booked",
             "platform_fee",
@@ -807,20 +929,8 @@ class SeatSlotCreateSerializer(serializers.ModelSerializer):
         fields = [
             "seat_number",
             "passenger_name",
-            "passenger_email",
-            "passenger_phone",
-            "passenger_date_of_birth",
-            "passenger_gender",
-            "passenger_nationality",
-            "passport_number",
-            "passport_issue_date",
-            "passport_expiry_date",
-            "passport_issue_country",
+            "passport",
             "visa_required",
-            "visa_number",
-            "visa_issue_date",
-            "visa_expiry_date",
-            "visa_type",
             "special_requests",
         ]
 
@@ -834,14 +944,57 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         model = Booking
         fields = [
             "tour_date",
-            "customer_name",
-            "customer_email",
-            "customer_phone",
             "platform_fee",
             "total_amount",
             "notes",
             "seat_slots",
         ]
+    
+    def to_internal_value(self, data):
+        """
+        Override to handle multipart/form-data with nested files.
+        If seat_slots comes as JSON string (for FormData with files),
+        parse it and attach passport files from separate fields.
+        """
+        import json
+        from django.http import QueryDict
+        
+        # Check if seat_slots is a string (from FormData)
+        seat_slots_data = data.get('seat_slots')
+        if isinstance(seat_slots_data, str):
+            try:
+                # Parse JSON string
+                parsed_slots = json.loads(seat_slots_data)
+                
+                # Attach passport files from separate form fields
+                # Frontend sends: passport_0, passport_1, etc.
+                for i, slot in enumerate(parsed_slots):
+                    passport_key = f'passport_{i}'
+                    if passport_key in data:
+                        slot['passport'] = data[passport_key]
+                
+                # Create new dict with parsed seat_slots
+                # Don't use data.copy() as it can't pickle file objects
+                if isinstance(data, QueryDict):
+                    # Convert QueryDict to regular dict, excluding passport_X fields
+                    new_data = {}
+                    for key in data.keys():
+                        if not key.startswith('passport_'):
+                            new_data[key] = data[key]
+                    new_data['seat_slots'] = parsed_slots
+                    data = new_data
+                else:
+                    # Regular dict
+                    new_data = {k: v for k, v in data.items() if not k.startswith('passport_')}
+                    new_data['seat_slots'] = parsed_slots
+                    data = new_data
+                    
+            except (json.JSONDecodeError, TypeError) as e:
+                raise serializers.ValidationError({
+                    'seat_slots': f'Format seat_slots tidak valid: {str(e)}'
+                })
+        
+        return super().to_internal_value(data)
     
     def validate_seat_slots(self, value):
         """Validate that at least one seat slot is provided."""
@@ -919,6 +1072,9 @@ class BookingCreateSerializer(serializers.ModelSerializer):
             seat_slot_map = {slot.seat_number: slot for slot in seat_slots}
             
             # Assign seat slots and update passenger details
+            # IMPORTANT: Set seat status to BOOKED immediately when booking is created
+            # (even if booking status is PENDING). Seats will only be available again
+            # when booking is cancelled.
             for slot_data in seat_slots_data:
                 seat_number = slot_data.pop('seat_number')
                 seat_slot = seat_slot_map[seat_number]
@@ -929,6 +1085,9 @@ class BookingCreateSerializer(serializers.ModelSerializer):
                     if value == "":
                         value = None
                     setattr(seat_slot, key, value)
+                
+                # Set seat slot to BOOKED and assign to booking
+                # This makes the seat unavailable immediately, regardless of booking status
                 seat_slot.booking = booking
                 seat_slot.status = SeatSlotStatus.BOOKED
                 seat_slot.save()
@@ -966,9 +1125,6 @@ class BookingSerializer(serializers.ModelSerializer):
             "tour_package_slug",
             "departure_date",
             "tour_price",
-            "customer_name",
-            "customer_email",
-            "customer_phone",
             "status",
             "seats_booked",
             "platform_fee",
@@ -1001,8 +1157,8 @@ class PaymentSerializer(serializers.ModelSerializer):
     """Serializer for payment records with validation."""
     
     booking_id = serializers.IntegerField(source="booking.id", read_only=True)
-    booking_customer_name = serializers.CharField(source="booking.customer_name", read_only=True)
     booking_total_amount = serializers.IntegerField(source="booking.total_amount", read_only=True)
+    reseller_name = serializers.CharField(source="booking.reseller.full_name", read_only=True)
     
     class Meta:
         model = Payment
@@ -1010,13 +1166,10 @@ class PaymentSerializer(serializers.ModelSerializer):
             "id",
             "booking",
             "booking_id",
-            "booking_customer_name",
+            "reseller_name",
             "booking_total_amount",
             "amount",
             "transfer_date",
-            "sender_account_name",
-            "sender_bank_name",
-            "sender_account_number",
             "proof_image",
             "status",
             "reviewed_by",
@@ -1027,7 +1180,7 @@ class PaymentSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "booking_id",
-            "booking_customer_name",
+            "reseller_name",
             "booking_total_amount",
             "status",
             "reviewed_by",

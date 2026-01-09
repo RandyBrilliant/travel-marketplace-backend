@@ -134,22 +134,19 @@ class BookingAdmin(admin.ModelAdmin):
     Note: seats_booked is now a computed property (not a database field).
     It calculates the count of seat_slots dynamically.
     """
-    list_display = ["id", "reseller", "tour_date", "customer_name", "seats_booked", "status", "total_amount", "platform_fee", "created_at"]
-    list_display_links = ["id", "customer_name"]
+    list_display = ["id", "reseller", "tour_date", "seats_booked", "status", "total_amount", "platform_fee", "created_at"]
+    list_display_links = ["id", "reseller", "tour_date"]
     list_filter = ["status", "created_at", "tour_date__package"]
-    search_fields = ["customer_name", "customer_email", "reseller__full_name", "tour_date__package__name"]
-    readonly_fields = ["seats_booked", "passenger_count", "total_amount", "booking_contact_is_passenger"]
+    search_fields = ["reseller__full_name", "tour_date__package__name"]
+    readonly_fields = ["seats_booked", "passenger_count", "total_amount"]
     date_hierarchy = "created_at"
     
     fieldsets = (
         ("Booking Information", {
             "fields": ("reseller", "tour_date", "status")
         }),
-        ("Customer Contact", {
-            "fields": ("customer_name", "customer_email", "customer_phone")
-        }),
         ("Booking Details", {
-            "fields": ("seats_booked", "passenger_count", "booking_contact_is_passenger", "platform_fee", "total_amount")
+            "fields": ("seats_booked", "passenger_count", "platform_fee", "total_amount")
         }),
         ("Additional Information", {
             "fields": ("notes",)
@@ -172,7 +169,7 @@ class PaymentAdmin(admin.ModelAdmin):
     list_display = ["booking", "amount_display", "status", "transfer_date", "reviewed_by", "reviewed_at", "created_at"]
     list_display_links = ["booking"]
     list_filter = ["status", "created_at", "reviewed_at"]
-    search_fields = ["booking__customer_name", "booking__customer_email", "sender_account_name", "sender_bank_name"]
+    search_fields = ["booking__reseller", "booking__reseller__user__email"]
     readonly_fields = ["created_at", "updated_at"]
     date_hierarchy = "created_at"
     
@@ -184,7 +181,7 @@ class PaymentAdmin(admin.ModelAdmin):
             "fields": ("amount", "transfer_date")
         }),
         ("Transfer Information", {
-            "fields": ("sender_account_name", "sender_bank_name", "sender_account_number", "proof_image")
+            "fields": ("proof_image",)
         }),
         ("Review", {
             "fields": ("status", "reviewed_by", "reviewed_at")
@@ -252,7 +249,7 @@ class SeatSlotAdmin(admin.ModelAdmin):
     list_display = ["booking", "tour_date", "passenger_name", "seat_number", "status", "created_at"]
     list_display_links = ["booking", "passenger_name"]
     list_filter = ["status", "tour_date__package", "created_at"]
-    search_fields = ["booking__customer_name", "passenger_name", "booking__customer_email"]
+    search_fields = ["booking__reseller", "passenger_name", "booking__reseller__user__email"]
     readonly_fields = ["created_at", "updated_at"]
     date_hierarchy = "created_at"
     
@@ -280,7 +277,7 @@ class ResellerCommissionAdmin(admin.ModelAdmin):
     list_display = ["reseller", "booking", "level", "amount_display", "created_at"]
     list_display_links = ["reseller", "booking"]
     list_filter = ["level", "created_at"]
-    search_fields = ["reseller__full_name", "reseller__user__email", "booking__customer_name"]
+    search_fields = ["reseller__full_name", "reseller__user__email"]
     readonly_fields = ["amount_display", "created_at", "updated_at"]
     raw_id_fields = ["reseller", "booking"]
     date_hierarchy = "created_at"

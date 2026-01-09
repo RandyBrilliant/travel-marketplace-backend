@@ -1166,10 +1166,6 @@ class Command(BaseCommand):
             if available_slots.count() < scenario['num_passengers']:
                 continue  # Skip if not enough seats
             
-            # Create booking
-            customer_name = passenger_names[idx][0] if idx < len(passenger_names) else 'Customer'
-            customer_email = f'customer{idx+1}@example.com'
-            
             # Calculate total amount: (tour_date.price * num_passengers) + platform_fee
             platform_fee = 50000
             total_amount = (tour_date.price * scenario['num_passengers']) + platform_fee
@@ -1177,9 +1173,6 @@ class Command(BaseCommand):
             booking = Booking.objects.create(
                 reseller=reseller,
                 tour_date=tour_date,
-                customer_name=customer_name,
-                customer_email=customer_email,
-                customer_phone=f'+62-812-{random.randint(1000, 9999)}-{random.randint(1000, 9999)}',
                 status=scenario['status'],
                 platform_fee=platform_fee,
                 total_amount=total_amount,
@@ -1192,23 +1185,9 @@ class Command(BaseCommand):
             for slot_idx, slot in enumerate(available_slots):
                 passenger_name = passengers[slot_idx] if slot_idx < len(passengers) else f'Passenger {slot_idx+1}'
                 
-                # Generate passport details
-                passport_number = f'P{random.randint(100000, 999999)}'
-                passport_issue_date = timezone.now().date() - timedelta(days=random.randint(365, 1825))
-                passport_expiry_date = passport_issue_date + timedelta(days=3650)
-                
                 slot.booking = booking
                 slot.status = SeatSlotStatus.BOOKED
                 slot.passenger_name = passenger_name
-                slot.passenger_email = customer_email if slot_idx == 0 else f'{slugify(passenger_name)}@example.com'
-                slot.passenger_phone = f'+62-812-{random.randint(1000, 9999)}-{random.randint(1000, 9999)}'
-                slot.passenger_date_of_birth = timezone.now().date() - timedelta(days=random.randint(7300, 18250))
-                slot.passenger_gender = random.choice(['MALE', 'FEMALE'])
-                slot.passenger_nationality = 'IDN'
-                slot.passport_number = passport_number
-                slot.passport_issue_date = passport_issue_date
-                slot.passport_expiry_date = passport_expiry_date
-                slot.passport_issue_country = 'Indonesia'
                 # All tours are in Indonesia, so no visa required for Indonesian nationals
                 slot.visa_required = False
                 slot.special_requests = random.choice(['', 'Makanan vegetarian', 'Kursi dekat jendela', 'Tidak ada permintaan khusus', 'Makanan halal'])
@@ -1219,9 +1198,6 @@ class Command(BaseCommand):
                 booking=booking,
                 amount=booking.total_amount,
                 transfer_date=timezone.now().date() - timedelta(days=random.randint(1, 7)),
-                sender_account_name=customer_name,
-                sender_bank_name=random.choice(['Bank Mandiri', 'BCA', 'Bank BNI', 'Bank BRI']),
-                sender_account_number=f'{random.randint(1000000000, 9999999999)}',
                 status=scenario['payment_status'],
             )
             

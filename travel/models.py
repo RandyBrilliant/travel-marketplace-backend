@@ -225,7 +225,7 @@ class TourPackage(models.Model):
                 name='nights_not_greater_than_days'
             ),
             models.CheckConstraint(
-                check=models.Q(commission__isnull=True) | (models.Q(commission__gte=0)),
+                check=models.Q(commission__gte=0),
                 name='commission_valid'
             ),
         ]
@@ -564,74 +564,19 @@ class SeatSlot(models.Model):
         blank=True,
         help_text=_("Full name of the passenger."),
     )
-    passenger_email = models.EmailField(blank=True)
-    passenger_phone = models.CharField(max_length=50, blank=True)
-    passenger_date_of_birth = models.DateField(
-        null=True,
-        blank=True,
-        help_text=_("Passenger date of birth."),
-    )
-    passenger_gender = models.CharField(
-        max_length=10,
-        choices=[
-            ("MALE", _("Male")),
-            ("FEMALE", _("Female")),
-            ("OTHER", _("Other")),
-        ],
-        blank=True,
-    )
-    passenger_nationality = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text=_("Passenger nationality (country code or name)."),
-    )
     
     # Passport information
-    passport_number = models.CharField(
-        max_length=50,
+    passport = models.ImageField(
+        upload_to="passports/",
         blank=True,
-        help_text=_("Passport number."),
-    )
-    passport_issue_date = models.DateField(
         null=True,
-        blank=True,
-        help_text=_("Passport issue date."),
-    )
-    passport_expiry_date = models.DateField(
-        null=True,
-        blank=True,
-        help_text=_("Passport expiry date."),
-    )
-    passport_issue_country = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text=_("Country that issued the passport."),
+        help_text=_("Passport image."),
     )
     
     # Visa information
     visa_required = models.BooleanField(
         default=False,
         help_text=_("Whether visa is required for this passenger."),
-    )
-    visa_number = models.CharField(
-        max_length=50,
-        blank=True,
-        help_text=_("Visa number if applicable."),
-    )
-    visa_issue_date = models.DateField(
-        null=True,
-        blank=True,
-        help_text=_("Visa issue date."),
-    )
-    visa_expiry_date = models.DateField(
-        null=True,
-        blank=True,
-        help_text=_("Visa expiry date."),
-    )
-    visa_type = models.CharField(
-        max_length=50,
-        blank=True,
-        help_text=_("Type of visa (e.g., 'Tourist', 'Business', 'Transit')."),
     )
     
     # Additional information
@@ -653,8 +598,6 @@ class SeatSlot(models.Model):
             models.Index(fields=["booking"]),
             models.Index(fields=["booking", "status"]),
             models.Index(fields=["status"]),
-            models.Index(fields=["passenger_email"]),
-            models.Index(fields=["passport_number"]),
             models.Index(fields=["tour_date", "booking"]),  # For booking-related queries
         ]
         constraints = [
@@ -701,46 +644,12 @@ class SeatSlot(models.Model):
                 raise ValidationError({
                     'passenger_name': 'Nama penumpang wajib diisi ketika kursi dipesan.'
                 })
-            if not self.passenger_email:
-                raise ValidationError({
-                    'passenger_email': 'Email penumpang wajib diisi ketika kursi dipesan.'
-                })
-            if not self.passport_number:
-                raise ValidationError({
-                    'passport_number': 'Nomor paspor wajib diisi untuk kursi yang dipesan.'
-                })
         
         # Validate booking tour_date matches seat tour_date
         if self.booking and self.booking.tour_date != self.tour_date:
             raise ValidationError({
                 'booking': 'Tanggal tur booking harus sesuai dengan tanggal tur kursi.'
             })
-        
-        # Validate passport dates
-        if self.passport_issue_date and self.passport_expiry_date:
-            if self.passport_expiry_date <= self.passport_issue_date:
-                raise ValidationError({
-                    'passport_expiry_date': 'Tanggal kedaluwarsa paspor harus setelah tanggal penerbitan.'
-                })
-            
-            # Check if expired
-            if self.passport_expiry_date < timezone.now().date():
-                raise ValidationError({
-                    'passport_expiry_date': 'Paspor sudah kedaluwarsa.'
-                })
-        
-        # Validate visa dates
-        if self.visa_required:
-            if not self.visa_number:
-                raise ValidationError({
-                    'visa_number': 'Nomor visa wajib diisi ketika visa diperlukan.'
-                })
-        
-        if self.visa_issue_date and self.visa_expiry_date:
-            if self.visa_expiry_date <= self.visa_issue_date:
-                raise ValidationError({
-                    'visa_expiry_date': 'Tanggal kedaluwarsa visa harus setelah tanggal penerbitan.'
-                })
     
     def save(self, *args, **kwargs):
         """Validate before saving."""
@@ -756,24 +665,19 @@ class Booking(models.Model):
     """
     A reseller booking a specific tour date on behalf of their customer.
     
-    IMPORTANT: Understanding customer vs passengers:
-    - customer_name/email/phone: The BOOKING CONTACT (person making the booking)
-      This is typically the reseller's client, group organizer, or travel agent contact.
-      This person may or may not be one of the actual passengers.
-    
+    IMPORTANT: Understanding passengers:
     - seat_slots: Multiple SeatSlot objects, each representing ONE PASSENGER
-      Each SeatSlot has its own passenger details (name, passport, visa, etc.)
+      Each SeatSlot has its own passenger details (name, passport image, visa requirement, etc.)
       One booking can have multiple seat slots (multiple passengers).
     
     Example:
     - Reseller "ABC Travel" creates a booking
-    - customer_name: "John Smith" (the booking contact/organizer)
     - seat_slots: 5 seats
-      - Seat 1: passenger_name "John Smith" (also a passenger)
-      - Seat 2: passenger_name "Jane Smith" (John's wife)
-      - Seat 3: passenger_name "Bob Johnson" (friend)
-      - Seat 4: passenger_name "Alice Johnson" (Bob's wife)
-      - Seat 5: passenger_name "Charlie Brown" (another friend)
+      - Seat 1: passenger_name "John Smith"
+      - Seat 2: passenger_name "Jane Smith"
+      - Seat 3: passenger_name "Bob Johnson"
+      - Seat 4: passenger_name "Alice Johnson"
+      - Seat 5: passenger_name "Charlie Brown"
     
     Admin staff will review & confirm after payment proof is uploaded.
     """
@@ -787,23 +691,6 @@ class Booking(models.Model):
         TourDate,
         on_delete=models.PROTECT,
         related_name="bookings",
-    )
-
-    customer_name = models.CharField(
-        max_length=255,
-        help_text=_(
-            "Primary booking contact name (person making the booking). "
-            "This may or may not be the same as the passengers. "
-            "For group bookings, this is typically the group organizer or travel agent contact."
-        ),
-    )
-    customer_email = models.EmailField(
-        help_text=_("Email of the booking contact (for booking confirmations and communication).")
-    )
-    customer_phone = models.CharField(
-        max_length=50,
-        blank=True,
-        help_text=_("Phone number of the booking contact.")
     )
 
     status = models.CharField(
@@ -859,13 +746,6 @@ class Booking(models.Model):
         """Return number of passengers."""
         return self.seats_booked
     
-    @property
-    def booking_contact_is_passenger(self):
-        """Check if booking contact is also a passenger."""
-        return self.seat_slots.filter(
-            passenger_email=self.customer_email
-        ).exists()
-    
     def get_passenger_by_seat(self, seat_number):
         """Get passenger details for a specific seat."""
         return self.seat_slots.filter(seat_number=seat_number).first()
@@ -879,11 +759,11 @@ class Booking(models.Model):
         if self.status != BookingStatus.PENDING:
             return False
         # Check if payment exists and is approved
-        # OneToOneField raises RelatedObjectDoesNotExist (subclass of AttributeError) if missing
+        # Use a query to safely check if payment exists (avoids RelatedObjectDoesNotExist)
         try:
-            return self.payment.status == PaymentStatus.APPROVED
-        except AttributeError:
-            # Payment doesn't exist (OneToOneField raises RelatedObjectDoesNotExist)
+            payment = Payment.objects.get(booking=self)
+            return payment.status == PaymentStatus.APPROVED
+        except Payment.DoesNotExist:
             return False
     
     def clean(self):
@@ -919,9 +799,6 @@ class Payment(models.Model):
     transfer_date = models.DateField(
         help_text=_("Date when the transfer was made. Cannot be in the future.")
     )
-    sender_account_name = models.CharField(max_length=255)
-    sender_bank_name = models.CharField(max_length=255)
-    sender_account_number = models.CharField(max_length=64)
 
     proof_image = models.ImageField(
         upload_to="payments/proof/",

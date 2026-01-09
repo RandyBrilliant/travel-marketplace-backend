@@ -3,7 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.throttling import AnonRateThrottle
-from django.db import transaction
+from django.db import transaction, IntegrityError
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.encoding import force_str
 from django.utils.http import urlsafe_base64_decode
@@ -172,18 +172,30 @@ class BaseAdminProfileViewSet(viewsets.ModelViewSet):
         user = validated_data.get("user")
         
         if not user and email and password:
-            with transaction.atomic():
-                user_role = self.get_user_role()
-                # Staff users need is_staff=True to access admin endpoints
-                is_staff = user_role == UserRole.STAFF
-                user = CustomUser.objects.create_user(
-                    email=email,
-                    password=password,
-                    role=user_role,
-                    is_active=True,
-                    is_staff=is_staff,
+            try:
+                with transaction.atomic():
+                    user_role = self.get_user_role()
+                    # Staff users need is_staff=True to access admin endpoints
+                    is_staff = user_role == UserRole.STAFF
+                    user = CustomUser.objects.create_user(
+                        email=email,
+                        password=password,
+                        role=user_role,
+                        is_active=True,
+                        is_staff=is_staff,
+                    )
+                    validated_data["user"] = user
+            except IntegrityError as e:
+                # Check if it's an email uniqueness constraint violation
+                error_message = str(e)
+                if "email" in error_message.lower() or "account_customuser_email_key" in error_message:
+                    raise serializers.ValidationError(
+                        {"email": [f"Email {email} sudah terdaftar. Silakan gunakan email lain."]}
+                    )
+                # For other integrity errors, re-raise with a generic message
+                raise serializers.ValidationError(
+                    {"non_field_errors": ["Terjadi kesalahan saat membuat pengguna. Data mungkin sudah ada."]}
                 )
-                validated_data["user"] = user
         elif user:
             # Validate that existing user has the correct role
             expected_role = self.get_user_role()
@@ -203,10 +215,20 @@ class BaseAdminProfileViewSet(viewsets.ModelViewSet):
             if email != instance.user.email:
                 if CustomUser.objects.filter(email=email).exclude(pk=instance.user.pk).exists():
                     raise serializers.ValidationError(
-                        {"email": ["A user with this email already exists."]}
+                        {"email": [f"Email {email} sudah terdaftar. Silakan gunakan email lain."]}
                     )
-                instance.user.email = email
-                instance.user.save()
+                try:
+                    instance.user.email = email
+                    instance.user.save()
+                except IntegrityError as e:
+                    error_message = str(e)
+                    if "email" in error_message.lower() or "account_customuser_email_key" in error_message:
+                        raise serializers.ValidationError(
+                            {"email": [f"Email {email} sudah terdaftar. Silakan gunakan email lain."]}
+                        )
+                    raise serializers.ValidationError(
+                        {"email": ["Terjadi kesalahan saat memperbarui email. Silakan coba lagi."]}
+                    )
 
     def create(self, request, *args, **kwargs):
         """Create profile. If user doesn't exist and email/password provided, auto-create user."""

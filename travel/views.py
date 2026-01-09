@@ -597,7 +597,7 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ["status", "tour_date", "tour_date__package"]
     search_fields = [
-        "customer_name", "customer_email", "reseller__full_name",
+        "reseller__full_name",
         "reseller__user__email", "tour_date__package__name",
     ]
     ordering_fields = [
@@ -642,8 +642,6 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
             search = self.request.query_params.get("search")
             if search:
                 queryset = queryset.filter(
-                    models.Q(customer_name__icontains=search) |
-                    models.Q(customer_email__icontains=search) |
                     models.Q(reseller__full_name__icontains=search) |
                     models.Q(reseller__user__email__icontains=search) |
                     models.Q(tour_date__package__name__icontains=search)
@@ -869,7 +867,7 @@ class ResellerBookingViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ["status", "tour_date", "tour_date__package"]
     search_fields = [
-        "customer_name", "customer_email", "tour_date__package__name",
+        "tour_date__package__name",
     ]
     ordering_fields = [
         "created_at", "status", "total_amount", "departure_date",
@@ -913,8 +911,6 @@ class ResellerBookingViewSet(viewsets.ModelViewSet):
             search = self.request.query_params.get("search")
             if search:
                 queryset = queryset.filter(
-                    models.Q(customer_name__icontains=search) |
-                    models.Q(customer_email__icontains=search) |
                     models.Q(tour_date__package__name__icontains=search)
                 )
             
@@ -1182,22 +1178,22 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
         if tour_package_id:
             queryset = queryset.filter(tour_date__package_id=tour_package_id)
         
-        # Search by customer name, email, or booking ID
+        # Search by booking ID or reseller name
         search = self.request.query_params.get("search")
         if search:
             # Try to parse as integer for ID search
             try:
                 booking_id = int(search)
                 queryset = queryset.filter(
-                    models.Q(customer_name__icontains=search) |
-                    models.Q(customer_email__icontains=search) |
-                    models.Q(id=booking_id)
+                    models.Q(id=booking_id) |
+                    models.Q(reseller__full_name__icontains=search) |
+                    models.Q(reseller__user__email__icontains=search)
                 )
             except ValueError:
-                # Not a number, search by name and email only
+                # Not a number, search by reseller name and email
                 queryset = queryset.filter(
-                    models.Q(customer_name__icontains=search) |
-                    models.Q(customer_email__icontains=search)
+                    models.Q(reseller__full_name__icontains=search) |
+                    models.Q(reseller__user__email__icontains=search)
                 )
         
         # Ordering
@@ -1263,7 +1259,8 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
         booking.status = BookingStatus.CANCELLED
         booking.save()
         
-        # Release seat slots
+        # Release seat slots - make them available again
+        # Only when booking is cancelled, seats become available again
         booking.seat_slots.update(status=SeatSlotStatus.AVAILABLE, booking=None)
         
         serializer = self.get_serializer(booking)
