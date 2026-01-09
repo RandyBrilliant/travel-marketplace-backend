@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Sum
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import MinValueValidator
 from django.utils.translation import gettext_lazy as _
@@ -62,15 +63,24 @@ class CustomUser(AbstractUser):
     objects = CustomUserManager()
 
     def __str__(self):
-        return f"{self.email} | ({self.role})"
+        roles_display = self.get_roles_display()
+        return f"{self.email} | ({roles_display})"
 
     @property
     def is_supplier(self) -> bool:
-        return self.role == UserRole.SUPPLIER
+        """
+        Check if user has supplier profile (supports dual roles).
+        Users can now have both supplier and reseller profiles.
+        """
+        return hasattr(self, 'supplier_profile')
 
     @property
     def is_reseller(self) -> bool:
-        return self.role == UserRole.RESELLER
+        """
+        Check if user has reseller profile (supports dual roles).
+        Users can now have both supplier and reseller profiles.
+        """
+        return hasattr(self, 'reseller_profile')
 
     @property
     def is_admin_staff(self) -> bool:
@@ -79,6 +89,34 @@ class CustomUser(AbstractUser):
         Note: Django's `is_staff` is still used for admin-site access.
         """
         return self.role == UserRole.STAFF
+    
+    @property
+    def has_supplier_role(self) -> bool:
+        """
+        Check if user's primary role is SUPPLIER (for backward compatibility).
+        """
+        return self.role == UserRole.SUPPLIER
+    
+    @property
+    def has_reseller_role(self) -> bool:
+        """
+        Check if user's primary role is RESELLER (for backward compatibility).
+        """
+        return self.role == UserRole.RESELLER
+    
+    def get_roles_display(self) -> str:
+        """
+        Get a human-readable string of all roles this user has.
+        Example: "Supplier, Reseller" or "Supplier" or "Reseller"
+        """
+        roles = []
+        if self.is_supplier:
+            roles.append("Supplier")
+        if self.is_reseller:
+            roles.append("Reseller")
+        if self.is_admin_staff:
+            roles.append("Admin Staff")
+        return ", ".join(roles) if roles else "No roles"
     
 
     class Meta:
@@ -93,6 +131,13 @@ class CustomUser(AbstractUser):
         ]
 
 
+class SupplierApprovalStatus(models.TextChoices):
+    """Approval status for supplier accounts."""
+    PENDING = "PENDING", _("Pending Approval")
+    APPROVED = "APPROVED", _("Approved")
+    REJECTED = "REJECTED", _("Rejected")
+
+
 class SupplierProfile(models.Model):
     """
     Additional business data for supplier accounts.
@@ -105,7 +150,7 @@ class SupplierProfile(models.Model):
         "CustomUser",
         on_delete=models.CASCADE,
         related_name="supplier_profile",
-        limit_choices_to={"role": UserRole.SUPPLIER},
+        # Removed limit_choices_to to allow users to have both supplier and reseller profiles
     )
     company_name = models.CharField(
         max_length=255,
@@ -130,6 +175,29 @@ class SupplierProfile(models.Model):
         verbose_name="Profile Photo",
         help_text=_("Supplier profile photo."),
     )
+    approval_status = models.CharField(
+        max_length=20,
+        choices=SupplierApprovalStatus.choices,
+        default=SupplierApprovalStatus.PENDING,
+        help_text=_("Approval status for supplier account. Suppliers need admin approval to access dashboard."),
+    )
+    approved_by = models.ForeignKey(
+        "CustomUser",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="approved_suppliers",
+        help_text=_("Admin user who approved this supplier."),
+    )
+    approved_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=_("When the supplier was approved."),
+    )
+    rejection_reason = models.TextField(
+        blank=True,
+        help_text=_("Reason for rejection (if rejected)."),
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -142,10 +210,27 @@ class SupplierProfile(models.Model):
             models.Index(fields=["user"]),
             models.Index(fields=["created_at"]),
             models.Index(fields=["user", "created_at"]),
+            models.Index(fields=["approval_status"]),
+            models.Index(fields=["approval_status", "created_at"]),
         ]
 
     def __str__(self) -> str:
         return f"{self.company_name} ({self.user.email})"
+    
+    @property
+    def is_approved(self) -> bool:
+        """Check if supplier is approved."""
+        return self.approval_status == SupplierApprovalStatus.APPROVED
+    
+    @property
+    def is_pending(self) -> bool:
+        """Check if supplier is pending approval."""
+        return self.approval_status == SupplierApprovalStatus.PENDING
+    
+    @property
+    def is_rejected(self) -> bool:
+        """Check if supplier is rejected."""
+        return self.approval_status == SupplierApprovalStatus.REJECTED
 
 
 class ResellerProfile(models.Model):
@@ -158,7 +243,7 @@ class ResellerProfile(models.Model):
         "CustomUser",
         on_delete=models.CASCADE,
         related_name="reseller_profile",
-        limit_choices_to={"role": UserRole.RESELLER},
+        # Removed limit_choices_to to allow users to have both supplier and reseller profiles
     )
     full_name = models.CharField(
         max_length=255,
@@ -299,6 +384,103 @@ class ResellerProfile(models.Model):
         This uses group_root as a simple way to query all members under the same tree.
         """
         return type(self).objects.filter(group_root=self).exclude(pk=self.pk)
+    
+    def get_total_commission_earned(self):
+        """
+        Calculate total commission earned from all confirmed bookings.
+        Only counts commissions from bookings with CONFIRMED status.
+        """
+        from travel.models import ResellerCommission, BookingStatus
+        
+        return ResellerCommission.objects.filter(
+            reseller=self,
+            booking__status=BookingStatus.CONFIRMED
+        ).aggregate(
+            total=Sum('amount')
+        )['total'] or 0
+    
+    def get_commission_breakdown(self):
+        """
+        Get commission breakdown by source:
+        - from_booking: Commission from own bookings (level 0)
+        - from_downline: Commission from downline bookings (level 1+)
+        - pending_commission: Commission from bookings that are not yet confirmed
+        """
+        from travel.models import ResellerCommission, BookingStatus
+        
+        # Commission from own bookings (level 0) - confirmed
+        from_booking = ResellerCommission.objects.filter(
+            reseller=self,
+            level=0,
+            booking__status=BookingStatus.CONFIRMED
+        ).aggregate(
+            total=Sum('amount')
+        )['total'] or 0
+        
+        # Commission from downline bookings (level 1+) - confirmed
+        from_downline = ResellerCommission.objects.filter(
+            reseller=self,
+            level__gte=1,
+            booking__status=BookingStatus.CONFIRMED
+        ).aggregate(
+            total=Sum('amount')
+        )['total'] or 0
+        
+        # Pending commission (from bookings that are not yet confirmed)
+        pending_commission = ResellerCommission.objects.filter(
+            reseller=self,
+            booking__status=BookingStatus.PENDING
+        ).aggregate(
+            total=Sum('amount')
+        )['total'] or 0
+        
+        return {
+            'from_booking': from_booking,
+            'from_downline': from_downline,
+            'pending_commission': pending_commission,
+        }
+    
+    def get_total_withdrawn(self):
+        """
+        Calculate total amount already withdrawn (approved or completed withdrawals).
+        """
+        from travel.models import WithdrawalRequest, WithdrawalRequestStatus
+        
+        return WithdrawalRequest.objects.filter(
+            reseller=self,
+            status__in=[WithdrawalRequestStatus.APPROVED, WithdrawalRequestStatus.COMPLETED]
+        ).aggregate(
+            total=Sum('amount')
+        )['total'] or 0
+    
+    def get_pending_withdrawal_amount(self):
+        """
+        Calculate total amount in pending withdrawal requests.
+        """
+        from travel.models import WithdrawalRequest, WithdrawalRequestStatus
+        
+        return WithdrawalRequest.objects.filter(
+            reseller=self,
+            status=WithdrawalRequestStatus.PENDING
+        ).aggregate(
+            total=Sum('amount')
+        )['total'] or 0
+    
+    def get_available_commission_balance(self):
+        """
+        Calculate available commission balance that can be withdrawn.
+        
+        Formula:
+        Available Balance = Total Earned - Total Withdrawn - Pending Withdrawals
+        
+        Only commissions from CONFIRMED bookings are considered.
+        """
+        total_earned = self.get_total_commission_earned()
+        total_withdrawn = self.get_total_withdrawn()
+        pending_withdrawals = self.get_pending_withdrawal_amount()
+        
+        available = total_earned - total_withdrawn - pending_withdrawals
+        return max(0, available)  # Ensure non-negative
 
 
 class StaffProfile(models.Model):

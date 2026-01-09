@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Akun Supplier Anda Telah Disetujui</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #2c3e50;
+            background-color: #f8f9fa;
+            padding: 20px;
+        }
+        .email-wrapper {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+        }
+        .header {
+            padding: 40px 40px 30px;
+            text-align: center;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .logo {
+            font-size: 28px;
+            font-weight: 700;
+            color: #0d6efd;
+            letter-spacing: -0.5px;
+            margin-bottom: 8px;
+        }
+        .tagline {
+            font-size: 13px;
+            color: #6c757d;
+            font-weight: 400;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .content {
+            padding: 40px;
+        }
+        .greeting {
+            font-size: 16px;
+            color: #2c3e50;
+            margin-bottom: 24px;
+        }
+        .message {
+            font-size: 15px;
+            color: #495057;
+            margin-bottom: 24px;
+            line-height: 1.7;
+        }
+        .approval-badge {
+            margin: 32px 0;
+            padding: 24px;
+            background: linear-gradient(135deg, #198754 0%, #157347 100%);
+            color: #ffffff;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .approval-badge-title {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .approval-badge-text {
+            font-size: 14px;
+            opacity: 0.95;
+        }
+        .button-container {
+            text-align: center;
+            margin: 32px 0;
+        }
+        .button {
+            display: inline-block;
+            padding: 14px 32px;
+            background-color: #0d6efd;
+            color: #ffffff !important;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 15px;
+            transition: background-color 0.2s;
+        }
+        .button:hover {
+            background-color: #0b5ed7;
+        }
+        .footer {
+            padding: 30px 40px;
+            background-color: #f8f9fa;
+            border-top: 1px solid #e9ecef;
+            text-align: center;
+        }
+        .footer-text {
+            font-size: 12px;
+            color: #6c757d;
+            margin-bottom: 8px;
+        }
+        .footer-brand {
+            font-size: 11px;
+            color: #adb5bd;
+        }
+        @media only screen and (max-width: 600px) {
+            .header, .content, .footer {
+                padding: 24px;
+            }
+            .logo {
+                font-size: 24px;
+            }
+            .button {
+                padding: 12px 24px;
+                font-size: 14px;
+            }
+            .approval-badge {
+                padding: 20px;
+            }
+            .approval-badge-title {
+                font-size: 18px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="email-wrapper">
+        <div class="header">
+            <div class="logo">DCNetwork</div>
+            <div class="tagline">Travel Marketplace</div>
+        </div>
+        
+        <div class="content">
+            <div class="greeting">
+                Halo {{ company_name }},
+            </div>
+            
+            <div class="message">
+                Kami senang memberitahu Anda bahwa akun supplier Anda telah <strong>disetujui</strong> oleh tim admin kami. Anda sekarang dapat mengakses dashboard supplier dan mulai membuat serta mengelola paket tur Anda.
+            </div>
+            
+            <div class="approval-badge">
+                <div class="approval-badge-title">✓ Akun Anda Telah Disetujui!</div>
+                <div class="approval-badge-text">Selamat! Anda sekarang dapat menggunakan semua fitur supplier.</div>
+            </div>
+            
+            <div class="message">
+                Dengan akun supplier yang telah disetujui, Anda dapat:
+            </div>
+            
+            <ul style="margin: 24px 0; padding-left: 24px; color: #495057; line-height: 1.8;">
+                <li>Membuat dan mengelola paket tur</li>
+                <li>Menetapkan harga dan ketersediaan</li>
+                <li>Melacak pemesanan dari reseller</li>
+                <li>Mengunggah foto dan itinerari terperinci</li>
+                <li>Mengelola tanggal keberangkatan</li>
+            </ul>
+            
+            <div class="button-container">
+                <a href="{{ FRONTEND_URL }}/supplier" class="button">Akses Dashboard Supplier</a>
+            </div>
+            
+            <div class="message" style="margin-top: 32px;">
+                Jika Anda memiliki pertanyaan atau membutuhkan bantuan, tim dukungan kami siap membantu. Kami berharap dapat bekerja sama dengan Anda!
+            </div>
+        </div>
+        
+        <div class="footer">
+            <div class="footer-text">Terima kasih telah bergabung dengan DCNetwork!</div>
+            <div class="footer-brand">&copy; {% now "Y" %} DCNetwork. Semua hak dilindungi.</div>
+        </div>
+    </div>
+</body>
+</html>
+

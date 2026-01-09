@@ -27,6 +27,7 @@ from account.views import (
     ResetPasswordView,
     ResetPasswordConfirmView,
     ActivateDeactivateAccountView,
+    ApproveRejectSupplierView,
     RegisterResellerView,
     RegisterSupplierView,
 )
@@ -42,6 +43,8 @@ from travel.views import (
     AdminTourPackageViewSet,
     PublicTourPackageListView,
     PublicTourPackageDetailView,
+    ResellerWithdrawalViewSet,
+    AdminWithdrawalViewSet,
 )
 
 router = DefaultRouter()
@@ -57,6 +60,8 @@ router.register(r"suppliers/me/bookings", SupplierBookingViewSet, basename="supp
 
 # Reseller booking endpoints
 router.register(r"resellers/me/bookings", ResellerBookingViewSet, basename="reseller-booking")
+# Reseller withdrawal endpoints
+router.register(r"resellers/me/withdrawals", ResellerWithdrawalViewSet, basename="reseller-withdrawal")
 
 # Admin-only endpoints for managing all profiles
 router.register(
@@ -92,6 +97,12 @@ router.register(
     AdminTourPackageViewSet,
     basename="admin-tour-package",
 )
+# Admin-only endpoints for managing withdrawal requests
+router.register(
+    r"admin/withdrawals",
+    AdminWithdrawalViewSet,
+    basename="admin-withdrawal",
+)
 
 # API Documentation endpoints
 api_docs_patterns = [
@@ -121,6 +132,8 @@ api_v1_patterns = [
     path("reset-password/<str:uidb64>/<str:token>/", ResetPasswordConfirmView.as_view(), name="reset-password-confirm"),
     # Activate/Deactivate account endpoint
     path("admin/<str:profile_type>/<int:profile_id>/activate-deactivate/", ActivateDeactivateAccountView.as_view(), name="activate-deactivate-account"),
+    # Approve/Reject supplier endpoint
+    path("admin/suppliers/<int:supplier_id>/approve-reject/", ApproveRejectSupplierView.as_view(), name="approve-reject-supplier"),
     # Public tour endpoints
     path("tours/", PublicTourPackageListView.as_view(), name="public-tour-list"),
     path("tours/<int:pk>/", PublicTourPackageDetailView.as_view(), name="public-tour-detail"),

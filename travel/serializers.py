@@ -16,6 +16,8 @@ from .models import (
     SeatSlotStatus,
     Payment,
     ResellerCommission,
+    WithdrawalRequest,
+    WithdrawalRequestStatus,
 )
 from .utils import optimize_image_to_webp
 from account.models import ResellerProfile, SupplierProfile
@@ -496,7 +498,7 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
         return None
     
     def get_dates(self, obj):
-        """Return available tour dates (only future dates with available seats)."""
+        """Return available tour dates (only future dates with available seats or configured seats)."""
         from django.utils import timezone
         
         # Note: seat_slots are already prefetched in the view with booking relationship
@@ -506,19 +508,16 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
             departure_date__gte=today
         ).order_by("departure_date")[:20]  # Fetch more to account for filtering
         
-        # Filter dates that have remaining seats > 0 using the property calculation
-        # This ensures we use the same logic as remaining_seats property
-        # The seat_slots are already prefetched from the view, so remaining_seats will work correctly
-        dates_with_seats = []
+        # Show ALL dates (including fully booked) so the UI can display them with appropriate styling
+        dates_to_show = []
         for date in future_dates:
-            if date.remaining_seats > 0:
-                dates_with_seats.append(date)
-            if len(dates_with_seats) >= 10:
+            # Show all dates with total_seats > 0 (regardless of availability)
+            if date.total_seats > 0:
+                dates_to_show.append(date)
+            if len(dates_to_show) >= 10:
                 break
         
-        return TourDateSerializer(dates_with_seats, many=True, context=self.context).data
-        
-        return TourDateSerializer(future_dates, many=True, context=self.context).data
+        return TourDateSerializer(dates_to_show, many=True, context=self.context).data
     
     def get_reseller_commission(self, obj):
         """Return reseller commission amount if user is authenticated reseller."""
@@ -549,7 +548,6 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
     supplier = serializers.PrimaryKeyRelatedField(read_only=True)
     reseller_groups = ResellerGroupListField(
         many=True,
-        queryset=ResellerGroup.objects.filter(is_active=True),
         required=False,
         read_only=True,  # Suppliers cannot modify reseller groups
     )
@@ -1166,7 +1164,81 @@ class BookingCreateSerializer(serializers.ModelSerializer):
                 seat_slot.status = SeatSlotStatus.BOOKED
                 seat_slot.save()
             
+            # Create commissions for reseller and upline
+            self._create_commissions(booking)
+            
             return booking
+    
+    def _create_commissions(self, booking):
+        """
+        Create commission records for the booking reseller and their upline.
+        
+        Commission calculation logic:
+        1. Level 0 (Booking Reseller):
+           - First check ResellerTourCommission for this reseller + tour package (reseller-specific override)
+           - If not found, use TourPackage.commission (general tour commission)
+           - Only create if commission amount > 0
+        
+        2. Level 1 (Direct Upline/Sponsor):
+           - Get booking reseller's sponsor
+           - Use sponsor.upline_commission_amount
+           - Only create if sponsor exists and amount > 0
+        """
+        from .models import ResellerCommission, ResellerTourCommission
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        
+        booking_reseller = booking.reseller
+        tour_package = booking.tour_date.package
+        
+        # Level 0: Commission for the reseller who made the booking
+        # Commission comes from: ResellerTourCommission (if exists) OR TourPackage.commission (fallback)
+        tour_commission = tour_package.get_reseller_commission(booking_reseller)
+        
+        if tour_commission is not None and tour_commission > 0:
+            commission = ResellerCommission.objects.create(
+                booking=booking,
+                reseller=booking_reseller,
+                level=0,
+                amount=tour_commission
+            )
+            # Check if it came from ResellerTourCommission or TourPackage.commission
+            has_specific = ResellerTourCommission.objects.filter(
+                reseller=booking_reseller,
+                tour_package=tour_package,
+                is_active=True
+            ).exists()
+            commission_source = "ResellerTourCommission" if has_specific else "TourPackage.commission"
+            logger.info(
+                f"Created commission {commission.id} for reseller {booking_reseller.id}: "
+                f"{tour_commission} IDR from {commission_source} (tour {tour_package.id}, booking {booking.id})"
+            )
+        else:
+            logger.warning(
+                f"No commission created for reseller {booking_reseller.id} on booking {booking.id} "
+                f"because tour package {tour_package.id} has no commission set "
+                f"(neither ResellerTourCommission nor TourPackage.commission)."
+            )
+        
+        # Level 1: Commission for the direct upline (sponsor)
+        if booking_reseller.sponsor:
+            upline = booking_reseller.sponsor
+            upline_commission = upline.upline_commission_amount
+            
+            # Create commission record for upline (level 1) if amount > 0
+            if upline_commission and upline_commission > 0:
+                upline_commission_obj = ResellerCommission.objects.create(
+                    booking=booking,
+                    reseller=upline,
+                    level=1,
+                    amount=upline_commission
+                )
+                logger.info(f"Created upline commission {upline_commission_obj.id} for upline {upline.id}: {upline_commission} IDR (booking {booking.id})")
+            else:
+                logger.info(f"No upline commission created: upline_commission_amount={upline_commission}")
+        else:
+            logger.info(f"No sponsor for reseller {booking_reseller.id}, skipping upline commission")
 
 
 class BookingSerializer(serializers.ModelSerializer):
@@ -1176,6 +1248,7 @@ class BookingSerializer(serializers.ModelSerializer):
     reseller_email = serializers.EmailField(source="reseller.user.email", read_only=True)
     tour_package_name = serializers.CharField(source="tour_date.package.name", read_only=True)
     tour_package_slug = serializers.SlugField(source="tour_date.package.slug", read_only=True)
+    tour_package_id = serializers.IntegerField(source="tour_date.package.id", read_only=True)
     departure_date = serializers.DateField(source="tour_date.departure_date", read_only=True)
     tour_price = serializers.IntegerField(source="tour_date.price", read_only=True)
     visa_price = serializers.IntegerField(source="tour_date.package.visa_price", read_only=True)
@@ -1186,8 +1259,23 @@ class BookingSerializer(serializers.ModelSerializer):
     seat_slots = SeatSlotSerializer(many=True, read_only=True)
     payment_status = serializers.CharField(source="payment.status", read_only=True, allow_null=True)
     payment_amount = serializers.IntegerField(source="payment.amount", read_only=True, allow_null=True)
+    payment_transfer_date = serializers.DateField(source="payment.transfer_date", read_only=True, allow_null=True)
     payment_proof_image = serializers.ImageField(source="payment.proof_image", read_only=True, allow_null=True)
     payment_id = serializers.IntegerField(source="payment.id", read_only=True, allow_null=True)
+    reseller_commission = serializers.SerializerMethodField()
+    
+    def get_reseller_commission(self, obj):
+        """Get commission amount for the reseller who made this booking."""
+        # Get commission for level 0 (the reseller who made the booking)
+        commission = ResellerCommission.objects.filter(
+            booking=obj,
+            reseller=obj.reseller,
+            level=0
+        ).first()
+        
+        if commission:
+            return commission.amount
+        return None
     
     class Meta:
         model = Booking
@@ -1199,6 +1287,7 @@ class BookingSerializer(serializers.ModelSerializer):
             "tour_date",
             "tour_package_name",
             "tour_package_slug",
+            "tour_package_id",
             "departure_date",
             "tour_price",
             "visa_price",
@@ -1212,8 +1301,10 @@ class BookingSerializer(serializers.ModelSerializer):
             "seat_slots",
             "payment_status",
             "payment_amount",
+            "payment_transfer_date",
             "payment_proof_image",
             "payment_id",
+            "reseller_commission",
             "created_at",
             "updated_at",
         ]
@@ -1268,6 +1359,27 @@ class PaymentSerializer(serializers.ModelSerializer):
         ]
 
 
+class PaymentUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for suppliers to update payment details (amount, transfer_date, proof_image, status)."""
+    
+    class Meta:
+        model = Payment
+        fields = [
+            "amount",
+            "transfer_date",
+            "proof_image",
+            "status",
+        ]
+        read_only_fields = [
+            "id",
+            "booking",
+            "reviewed_by",
+            "reviewed_at",
+            "created_at",
+            "updated_at",
+        ]
+
+
 class PaymentApprovalSerializer(serializers.ModelSerializer):
     """Serializer for approving/rejecting payments (admin use)."""
     
@@ -1285,6 +1397,115 @@ class PaymentApprovalSerializer(serializers.ModelSerializer):
 
 
 # ==================== COMMISSION SERIALIZERS ====================
+
+class WithdrawalRequestSerializer(serializers.ModelSerializer):
+    """Serializer for withdrawal requests (reseller view)."""
+    
+    reseller_name = serializers.CharField(source="reseller.full_name", read_only=True)
+    reseller_email = serializers.EmailField(source="reseller.user.email", read_only=True)
+    approved_by_name = serializers.CharField(source="approved_by.email", read_only=True, allow_null=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    
+    class Meta:
+        model = WithdrawalRequest
+        fields = [
+            "id",
+            "reseller",
+            "reseller_name",
+            "reseller_email",
+            "amount",
+            "status",
+            "status_display",
+            "notes",
+            "admin_notes",
+            "approved_by",
+            "approved_by_name",
+            "approved_at",
+            "completed_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "reseller",
+            "status",
+            "admin_notes",
+            "approved_by",
+            "approved_by_name",
+            "approved_at",
+            "completed_at",
+            "created_at",
+            "updated_at",
+        ]
+    
+    def validate_amount(self, value):
+        """Validate withdrawal amount."""
+        if value < 1:
+            raise serializers.ValidationError("Jumlah penarikan harus minimal 1 IDR.")
+        return value
+
+
+class WithdrawalRequestCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating withdrawal requests."""
+    
+    class Meta:
+        model = WithdrawalRequest
+        fields = [
+            "amount",
+            "notes",
+        ]
+    
+    def validate_amount(self, value):
+        """Validate withdrawal amount doesn't exceed available balance."""
+        if value < 1:
+            raise serializers.ValidationError("Jumlah penarikan harus minimal 1 IDR.")
+        
+        # Get reseller from context (set in view)
+        request = self.context.get("request")
+        if request and request.user.is_authenticated:
+            try:
+                from account.models import ResellerProfile
+                reseller_profile = ResellerProfile.objects.get(user=request.user)
+                available_balance = reseller_profile.get_available_commission_balance()
+                
+                if value > available_balance:
+                    raise serializers.ValidationError(
+                        f"Jumlah penarikan ({value:,} IDR) melebihi saldo komisi yang tersedia ({available_balance:,} IDR)."
+                    )
+            except ResellerProfile.DoesNotExist:
+                pass
+        
+        return value
+
+
+class WithdrawalRequestUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for admin to update withdrawal request status."""
+    
+    class Meta:
+        model = WithdrawalRequest
+        fields = [
+            "status",
+            "admin_notes",
+        ]
+    
+    def validate_status(self, value):
+        """Validate status transitions."""
+        instance = self.instance
+        if instance:
+            # Can only approve/reject pending requests
+            if instance.status != WithdrawalRequestStatus.PENDING:
+                if value in [WithdrawalRequestStatus.APPROVED, WithdrawalRequestStatus.REJECTED]:
+                    raise serializers.ValidationError(
+                        f"Hanya permintaan dengan status PENDING yang dapat diubah. Status saat ini: {instance.status}."
+                    )
+            # Can only complete approved requests
+            if value == WithdrawalRequestStatus.COMPLETED:
+                if instance.status != WithdrawalRequestStatus.APPROVED:
+                    raise serializers.ValidationError(
+                        f"Hanya permintaan dengan status APPROVED yang dapat diselesaikan. Status saat ini: {instance.status}."
+                    )
+        return value
+
 
 class ResellerCommissionSerializer(serializers.ModelSerializer):
     """Serializer for reseller commissions per booking."""

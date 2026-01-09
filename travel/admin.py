@@ -9,6 +9,7 @@ from .models import (
     ResellerCommission,
     ResellerTourCommission,
     ResellerGroup,
+    WithdrawalRequest,
 )
 
 # Register your models here.
@@ -304,3 +305,40 @@ class ResellerCommissionAdmin(admin.ModelAdmin):
         """Optimize queryset with select_related."""
         qs = super().get_queryset(request)
         return qs.select_related("reseller", "reseller__user", "booking", "booking__tour_date")
+
+
+@admin.register(WithdrawalRequest)
+class WithdrawalRequestAdmin(admin.ModelAdmin):
+    list_display = ["reseller", "amount_display", "status", "created_at", "approved_by", "approved_at"]
+    list_display_links = ["reseller"]
+    list_filter = ["status", "created_at", "approved_at"]
+    search_fields = ["reseller__full_name", "reseller__user__email"]
+    readonly_fields = ["amount_display", "created_at", "updated_at"]
+    raw_id_fields = ["reseller", "approved_by"]
+    date_hierarchy = "created_at"
+    
+    fieldsets = (
+        ("Withdrawal Information", {
+            "fields": ("reseller", "amount", "amount_display", "status")
+        }),
+        ("Notes", {
+            "fields": ("notes", "admin_notes")
+        }),
+        ("Approval Information", {
+            "fields": ("approved_by", "approved_at", "completed_at")
+        }),
+        ("Timestamps", {
+            "fields": ("created_at", "updated_at"),
+            "classes": ("collapse",)
+        }),
+    )
+    
+    def amount_display(self, obj):
+        """Display amount with currency formatting."""
+        return f"Rp. {obj.amount:,}"
+    amount_display.short_description = "Amount"
+    
+    def get_queryset(self, request):
+        """Optimize queryset with select_related."""
+        qs = super().get_queryset(request)
+        return qs.select_related("reseller", "reseller__user", "approved_by")

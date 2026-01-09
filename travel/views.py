@@ -11,7 +11,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 
 from rest_framework.permissions import IsAdminUser, IsAuthenticatedOrReadOnly
 from account.models import UserRole, SupplierProfile, ResellerProfile
-from .models import TourPackage, TourDate, TourImage, ResellerTourCommission, ResellerGroup, Booking, BookingStatus, SeatSlotStatus, PaymentStatus, SeatSlot
+from .models import TourPackage, TourDate, TourImage, ResellerTourCommission, ResellerGroup, Booking, BookingStatus, SeatSlotStatus, PaymentStatus, SeatSlot, WithdrawalRequest, WithdrawalRequestStatus
 from .serializers import (
     TourPackageSerializer,
     TourPackageListSerializer,
@@ -25,28 +25,42 @@ from .serializers import (
     BookingSerializer,
     BookingListSerializer,
     PublicTourPackageDetailSerializer,
+    WithdrawalRequestSerializer,
+    WithdrawalRequestCreateSerializer,
+    WithdrawalRequestUpdateSerializer,
 )
 
 
 class IsSupplier(permissions.BasePermission):
-    """Permission check for supplier role."""
+    """
+    Permission check for supplier role.
+    Now supports dual roles - checks if user has supplier profile and is approved.
+    """
     
     def has_permission(self, request, view):
-        return (
-            request.user
-            and request.user.is_authenticated
-            and request.user.role == UserRole.SUPPLIER
-        )
+        if not (request.user and request.user.is_authenticated and request.user.is_supplier):
+            return False
+        
+        # Check if supplier is approved
+        try:
+            supplier_profile = request.user.supplier_profile
+            from account.models import SupplierApprovalStatus
+            return supplier_profile.approval_status == SupplierApprovalStatus.APPROVED
+        except AttributeError:
+            return False
 
 
 class IsReseller(permissions.BasePermission):
-    """Permission check for reseller role."""
+    """
+    Permission check for reseller role.
+    Now supports dual roles - checks if user has reseller profile.
+    """
     
     def has_permission(self, request, view):
         return (
             request.user
             and request.user.is_authenticated
-            and request.user.role == UserRole.RESELLER
+            and request.user.is_reseller
         )
 
 
@@ -500,7 +514,12 @@ class PublicTourPackageDetailView(APIView):
                 # If tour has no groups, allow access even without profile
         
         serializer = PublicTourPackageDetailSerializer(tour, context={"request": request})
-        return Response(serializer.data)
+        response = Response(serializer.data)
+        # Add cache-busting headers to ensure fresh seat availability data
+        response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response['Pragma'] = 'no-cache'
+        response['Expires'] = '0'
+        return response
 
 
 class AdminResellerGroupViewSet(viewsets.ModelViewSet):
@@ -918,6 +937,108 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
         
         serializer = self.get_serializer(booking)
         return Response(serializer.data)
+    
+    @action(detail=True, methods=["patch"], url_path="payment")
+    def update_payment(self, request, pk=None):
+        """Update or create payment details (amount, transfer_date, proof_image) for a booking."""
+        from .serializers import PaymentUpdateSerializer
+        from .models import Payment
+        
+        booking = self.get_object()
+        
+        # Ensure supplier owns this booking's tour
+        if booking.tour_date.package.supplier.user != request.user:
+            return Response(
+                {"detail": "Anda tidak memiliki izin untuk memperbarui booking ini."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Create payment if it doesn't exist
+        if not hasattr(booking, 'payment') or not booking.payment:
+            # Validate required fields for creating a new payment
+            amount = request.data.get('amount')
+            transfer_date = request.data.get('transfer_date')
+            
+            if not amount or not transfer_date:
+                return Response(
+                    {"detail": "Jumlah pembayaran dan tanggal transfer wajib diisi untuk membuat pembayaran baru."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Prepare data for serializer (only include proof_image if it exists)
+            serializer_data = {
+                'amount': amount,
+                'transfer_date': transfer_date,
+            }
+            # Only include proof_image if it's in the request
+            if 'proof_image' in request.data and request.data['proof_image']:
+                serializer_data['proof_image'] = request.data['proof_image']
+            # Include status if provided, otherwise default to PENDING
+            if 'status' in request.data and request.data['status']:
+                status_value = request.data['status']
+                if status_value in [PaymentStatus.PENDING, PaymentStatus.APPROVED, PaymentStatus.REJECTED]:
+                    serializer_data['status'] = status_value
+                else:
+                    serializer_data['status'] = PaymentStatus.PENDING
+            else:
+                serializer_data['status'] = PaymentStatus.PENDING
+            
+            # Use serializer to create payment (handles file uploads properly)
+            serializer = PaymentUpdateSerializer(data=serializer_data)
+            
+            if serializer.is_valid():
+                payment = serializer.save(booking=booking)
+                # Set reviewed_by and reviewed_at if status is not PENDING
+                if serializer_data['status'] != PaymentStatus.PENDING:
+                    payment.reviewed_by = request.user
+                    payment.reviewed_at = timezone.now()
+                    payment.save(update_fields=['reviewed_by', 'reviewed_at'])
+                # Return updated booking
+                booking_serializer = self.get_serializer(booking)
+                return Response(booking_serializer.data)
+            
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            payment = booking.payment
+            # Prepare data for serializer (only include fields that are provided)
+            serializer_data = {}
+            if 'amount' in request.data:
+                serializer_data['amount'] = request.data['amount']
+            if 'transfer_date' in request.data:
+                serializer_data['transfer_date'] = request.data['transfer_date']
+            # Only include proof_image if it's in the request and not empty
+            if 'proof_image' in request.data and request.data['proof_image']:
+                serializer_data['proof_image'] = request.data['proof_image']
+            # Include status if provided
+            if 'status' in request.data and request.data['status']:
+                status_value = request.data['status']
+                if status_value in [PaymentStatus.PENDING, PaymentStatus.APPROVED, PaymentStatus.REJECTED]:
+                    serializer_data['status'] = status_value
+            
+            serializer = PaymentUpdateSerializer(payment, data=serializer_data, partial=True)
+            
+            if serializer.is_valid():
+                # Track old status before saving
+                old_status = payment.status
+                serializer.save()
+                
+                # Update reviewed_by and reviewed_at if status is being changed
+                if 'status' in serializer_data:
+                    new_status = serializer_data['status']
+                    if old_status != new_status:
+                        if new_status != PaymentStatus.PENDING:
+                            payment.reviewed_by = request.user
+                            payment.reviewed_at = timezone.now()
+                        else:
+                            payment.reviewed_by = None
+                            payment.reviewed_at = None
+                        payment.save(update_fields=['reviewed_by', 'reviewed_at'])
+                
+                # Return updated booking
+                booking_serializer = self.get_serializer(booking)
+                return Response(booking_serializer.data)
+            
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class ResellerBookingViewSet(viewsets.ModelViewSet):
@@ -1323,6 +1444,10 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
         booking.status = BookingStatus.CANCELLED
         booking.save()
         
+        # Delete commissions associated with this booking
+        # Resellers should not receive commission for cancelled bookings
+        booking.commissions.all().delete()
+        
         # Release seat slots - make them available again
         # Only when booking is cancelled, seats become available again
         booking.seat_slots.update(status=SeatSlotStatus.AVAILABLE, booking=None)
@@ -1402,3 +1527,7 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
         
         serializer = self.get_serializer(booking)
         return Response(serializer.data)
+
+
+# Import withdrawal views from separate file to keep views.py manageable
+from .withdrawal_views import ResellerWithdrawalViewSet, AdminWithdrawalViewSet

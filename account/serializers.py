@@ -74,6 +74,10 @@ class SupplierProfileSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(read_only=True)
     email = serializers.EmailField(source="user.email", read_only=True)
     email_verified = serializers.BooleanField(source="user.email_verified", read_only=True)
+    approval_status = serializers.CharField(read_only=True)
+    approval_status_display = serializers.CharField(source="get_approval_status_display", read_only=True)
+    approved_at = serializers.DateTimeField(read_only=True)
+    rejection_reason = serializers.CharField(read_only=True)
 
     class Meta:
         model = SupplierProfile
@@ -87,10 +91,18 @@ class SupplierProfileSerializer(serializers.ModelSerializer):
             "photo",
             "email",
             "email_verified",
+            "approval_status",
+            "approval_status_display",
+            "approved_at",
+            "rejection_reason",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "user", "email", "email_verified", "created_at", "updated_at"]
+        read_only_fields = [
+            "id", "user", "email", "email_verified", "approval_status",
+            "approval_status_display", "approved_at", "rejection_reason",
+            "created_at", "updated_at"
+        ]
 
 
 class ResellerProfileSerializer(serializers.ModelSerializer):
@@ -109,6 +121,7 @@ class ResellerProfileSerializer(serializers.ModelSerializer):
         help_text="Referral code of the sponsor (if joining under someone).",
     )
     group_root_name = serializers.CharField(source="group_root.full_name", read_only=True, allow_null=True)
+    direct_downline_count = serializers.SerializerMethodField()
 
     class Meta:
         model = ResellerProfile
@@ -162,6 +175,10 @@ class ResellerProfileSerializer(serializers.ModelSerializer):
                 "Upline commission amount must be greater than or equal to 0."
             )
         return value
+
+    def get_direct_downline_count(self, obj):
+        """Get the count of direct downlines for this reseller."""
+        return obj.direct_downlines.count()
 
     def validate_sponsor_referral_code(self, value):
         """Validate that sponsor referral code exists if provided."""
@@ -317,10 +334,17 @@ class AdminSupplierProfileSerializer(BaseAdminProfileSerializer, SupplierProfile
         required=False,
         allow_null=True,
     )
+    # Allow admin to view approval fields (but approval should be done via dedicated endpoint)
+    approved_by_name = serializers.CharField(source="approved_by.email", read_only=True)
 
     class Meta(SupplierProfileSerializer.Meta):
-        fields = SupplierProfileSerializer.Meta.fields + ["user_data", "email", "password"]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        fields = SupplierProfileSerializer.Meta.fields + [
+            "user_data", "email", "password", "approved_by_name"
+        ]
+        read_only_fields = [
+            "id", "created_at", "updated_at", "approval_status", 
+            "approval_status_display", "approved_at", "approved_by", "approved_by_name"
+        ]
 
 
 class AdminResellerProfileSerializer(BaseAdminProfileSerializer, ResellerProfileSerializer):

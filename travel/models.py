@@ -242,7 +242,10 @@ class TourPackage(models.Model):
     def get_reseller_commission(self, reseller):
         """
         Get the fixed commission amount for a specific reseller for this tour package.
-        Returns the commission amount from ResellerTourCommission if exists, otherwise None.
+        Returns:
+        - ResellerTourCommission.commission_amount if exists (reseller-specific override)
+        - TourPackage.commission if ResellerTourCommission doesn't exist (general tour commission)
+        - None if both are 0 or not set
         """
         try:
             commission = ResellerTourCommission.objects.get(
@@ -252,7 +255,8 @@ class TourPackage(models.Model):
             )
             return commission.commission_amount
         except ResellerTourCommission.DoesNotExist:
-            return None
+            # Fall back to tour package's general commission
+            return self.commission if self.commission and self.commission > 0 else None
     
     @classmethod
     def get_active_tours(cls):
@@ -425,13 +429,18 @@ class TourDate(models.Model):
         
         This ensures that once a seat is booked (even with PENDING booking), it's no longer available
         for other resellers to book.
+        
+        Note: Uses a fresh query (not prefetched cache) to ensure accuracy after bookings are created.
         """
         from django.db.models import Q
         
-        # Exclude seats that are:
-        # 1. CANCELLED status, OR
-        # 2. BOOKED status (any booking status - PENDING or CONFIRMED)
-        return self.seat_slots.exclude(
+        # Use a fresh query instead of prefetched cache to ensure we get the latest seat status
+        # This is important because seat slots can be updated after the prefetch
+        # Use the model from the related manager to avoid circular import
+        SeatSlotModel = self.seat_slots.model
+        return SeatSlotModel.objects.filter(
+            tour_date=self
+        ).exclude(
             Q(status=SeatSlotStatus.BOOKED)
         ).count()
     
@@ -442,8 +451,17 @@ class TourDate(models.Model):
     
     @property
     def booked_seats_count(self):
-        """Return count of booked seat slots."""
-        return self.seat_slots.filter(status=SeatSlotStatus.BOOKED).count()
+        """Return count of booked seat slots.
+        
+        Note: Uses a fresh query (not prefetched cache) to ensure accuracy after bookings are created.
+        """
+        # Use a fresh query instead of prefetched cache to ensure we get the latest seat status
+        # Use the model from the related manager to avoid circular import
+        SeatSlotModel = self.seat_slots.model
+        return SeatSlotModel.objects.filter(
+            tour_date=self,
+            status=SeatSlotStatus.BOOKED
+        ).count()
 
     @property
     def duration_display(self):
@@ -973,3 +991,96 @@ class ResellerCommission(models.Model):
 
     def __str__(self) -> str:
         return f"Commission {self.amount} for {self.reseller} (booking #{self.booking_id}, level {self.level})"
+
+
+class WithdrawalRequestStatus(models.TextChoices):
+    """Status choices for withdrawal requests."""
+    PENDING = "PENDING", _("Pending")
+    APPROVED = "APPROVED", _("Approved")
+    REJECTED = "REJECTED", _("Rejected")
+    COMPLETED = "COMPLETED", _("Completed")
+
+
+class WithdrawalRequest(models.Model):
+    """
+    Withdrawal request from reseller to withdraw their commission balance.
+    
+    Workflow:
+    1. Reseller creates withdrawal request (PENDING)
+    2. Admin reviews and approves/rejects (APPROVED/REJECTED)
+    3. Admin marks as completed after payment is sent (COMPLETED)
+    """
+    
+    reseller = models.ForeignKey(
+        "account.ResellerProfile",
+        on_delete=models.CASCADE,
+        related_name="withdrawal_requests",
+        help_text=_("Reseller requesting the withdrawal."),
+    )
+    amount = models.PositiveIntegerField(
+        validators=[MinValueValidator(1)],
+        help_text=_("Withdrawal amount in IDR (Indonesian Rupiah). Must be at least 1 IDR."),
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=WithdrawalRequestStatus.choices,
+        default=WithdrawalRequestStatus.PENDING,
+        help_text=_("Current status of the withdrawal request."),
+    )
+    notes = models.TextField(
+        blank=True,
+        help_text=_("Optional notes from reseller or admin."),
+    )
+    admin_notes = models.TextField(
+        blank=True,
+        help_text=_("Admin notes (e.g., reason for rejection, payment confirmation)."),
+    )
+    approved_by = models.ForeignKey(
+        "account.CustomUser",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="approved_withdrawals",
+        help_text=_("Admin user who approved/rejected this withdrawal."),
+    )
+    approved_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=_("When the withdrawal was approved/rejected."),
+    )
+    completed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=_("When the withdrawal payment was completed."),
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Withdrawal Request"
+        verbose_name_plural = "Withdrawal Requests"
+        indexes = [
+            models.Index(fields=["reseller", "status"]),
+            models.Index(fields=["status", "created_at"]),
+            models.Index(fields=["created_at"]),
+        ]
+    
+    def __str__(self) -> str:
+        return f"Withdrawal {self.amount} IDR - {self.reseller} ({self.status})"
+    
+    def clean(self):
+        """Validate withdrawal amount doesn't exceed available balance."""
+        super().clean()
+        if self.pk is None:  # Only validate on creation
+            available_balance = self.reseller.get_available_commission_balance()
+            if self.amount > available_balance:
+                raise ValidationError({
+                    'amount': f'Jumlah penarikan ({self.amount:,} IDR) melebihi saldo komisi yang tersedia ({available_balance:,} IDR).'
+                })
+    
+    def save(self, *args, **kwargs):
+        """Validate before saving."""
+        self.full_clean()
+        super().save(*args, **kwargs)

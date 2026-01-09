@@ -223,6 +223,126 @@ def send_welcome_email(self, user_id):
 
 
 @shared_task(bind=True, max_retries=3)
+def send_supplier_approval_email(self, user_id):
+    """
+    Send approval email to supplier when their account is approved.
+    
+    Args:
+        user_id: ID of the supplier user
+    """
+    logger.info(f"Starting supplier approval email task for user_id={user_id}")
+    
+    try:
+        if not settings.DEFAULT_FROM_EMAIL:
+            error_msg = "DEFAULT_FROM_EMAIL is not configured."
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
+        user = CustomUser.objects.get(pk=user_id)
+        logger.info(f"Found user: {user.email}")
+        
+        if not hasattr(user, 'supplier_profile'):
+            error_msg = f"User {user_id} does not have a supplier profile"
+            logger.error(error_msg)
+            return error_msg
+        
+        supplier_profile = user.supplier_profile
+        company_name = supplier_profile.company_name
+        
+        subject = "Akun Supplier Anda Telah Disetujui!"
+        html_message = render_to_string('account/supplier_approval_email.html', {
+            'user': user,
+            'company_name': company_name,
+            'FRONTEND_URL': settings.FRONTEND_URL,
+        })
+        plain_message = strip_tags(html_message)
+        
+        return send_email_with_backend_detection(
+            subject=subject,
+            plain_message=plain_message,
+            html_message=html_message,
+            recipient_list=[user.email],
+            email_type="supplier approval email"
+        )
+        
+    except CustomUser.DoesNotExist:
+        error_msg = f"User with ID {user_id} does not exist"
+        logger.error(error_msg)
+        return error_msg
+    except Exception as exc:
+        error_msg = f"Error sending supplier approval email to user_id={user_id}: {str(exc)}"
+        logger.error(error_msg, exc_info=True)
+        
+        if self.request.retries < self.max_retries:
+            logger.warning(f"Retrying supplier approval email task (attempt {self.request.retries + 1}/{self.max_retries})")
+            raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+        else:
+            logger.error(f"Max retries reached for supplier approval email task. Giving up.")
+            raise
+
+
+@shared_task(bind=True, max_retries=3)
+def send_supplier_rejection_email(self, user_id, rejection_reason):
+    """
+    Send rejection email to supplier when their account is rejected.
+    
+    Args:
+        user_id: ID of the supplier user
+        rejection_reason: Reason for rejection
+    """
+    logger.info(f"Starting supplier rejection email task for user_id={user_id}")
+    
+    try:
+        if not settings.DEFAULT_FROM_EMAIL:
+            error_msg = "DEFAULT_FROM_EMAIL is not configured."
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
+        user = CustomUser.objects.get(pk=user_id)
+        logger.info(f"Found user: {user.email}")
+        
+        if not hasattr(user, 'supplier_profile'):
+            error_msg = f"User {user_id} does not have a supplier profile"
+            logger.error(error_msg)
+            return error_msg
+        
+        supplier_profile = user.supplier_profile
+        company_name = supplier_profile.company_name
+        
+        subject = "Status Pendaftaran Supplier Anda"
+        html_message = render_to_string('account/supplier_rejection_email.html', {
+            'user': user,
+            'company_name': company_name,
+            'rejection_reason': rejection_reason,
+            'FRONTEND_URL': settings.FRONTEND_URL,
+        })
+        plain_message = strip_tags(html_message)
+        
+        return send_email_with_backend_detection(
+            subject=subject,
+            plain_message=plain_message,
+            html_message=html_message,
+            recipient_list=[user.email],
+            email_type="supplier rejection email"
+        )
+        
+    except CustomUser.DoesNotExist:
+        error_msg = f"User with ID {user_id} does not exist"
+        logger.error(error_msg)
+        return error_msg
+    except Exception as exc:
+        error_msg = f"Error sending supplier rejection email to user_id={user_id}: {str(exc)}"
+        logger.error(error_msg, exc_info=True)
+        
+        if self.request.retries < self.max_retries:
+            logger.warning(f"Retrying supplier rejection email task (attempt {self.request.retries + 1}/{self.max_retries})")
+            raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+        else:
+            logger.error(f"Max retries reached for supplier rejection email task. Giving up.")
+            raise
+
+
+@shared_task(bind=True, max_retries=3)
 def send_password_reset_email(self, user_id, reset_token):
     """
     Send password reset email.

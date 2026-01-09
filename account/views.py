@@ -110,27 +110,123 @@ class BaseOwnProfileViewSet(viewsets.ModelViewSet):
 class SupplierProfileViewSet(BaseOwnProfileViewSet):
     """
     CRUD for the authenticated supplier's own profile.
+    Now supports dual roles - users can have both supplier and reseller profiles.
     """
 
     serializer_class = SupplierProfileSerializer
 
     def get_profile_queryset_for_user(self, user):
-        if not user.is_authenticated or user.role != UserRole.SUPPLIER:
+        if not user.is_authenticated:
+            return SupplierProfile.objects.none()
+        # Check if user has supplier profile (supports dual roles)
+        if not user.is_supplier:
             return SupplierProfile.objects.none()
         return SupplierProfile.objects.select_related('user').filter(user=user)
+    
+    def perform_create(self, serializer):
+        """
+        Create supplier profile for current user.
+        Allows users with any role to add a supplier profile (dual role support).
+        Sets approval status to PENDING (requires admin approval).
+        """
+        # Check if user already has a supplier profile
+        if hasattr(self.request.user, 'supplier_profile'):
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError(
+                {"detail": "You already have a supplier profile."}
+            )
+        from account.models import SupplierApprovalStatus
+        serializer.save(user=self.request.user, approval_status=SupplierApprovalStatus.PENDING)
 
 
 class ResellerProfileViewSet(BaseOwnProfileViewSet):
     """
     CRUD for the authenticated reseller's own profile.
+    Now supports dual roles - users can have both supplier and reseller profiles.
     """
 
     serializer_class = ResellerProfileSerializer
 
     def get_profile_queryset_for_user(self, user):
-        if not user.is_authenticated or user.role != UserRole.RESELLER:
+        if not user.is_authenticated:
+            return ResellerProfile.objects.none()
+        # Check if user has reseller profile (supports dual roles)
+        if not user.is_reseller:
             return ResellerProfile.objects.none()
         return ResellerProfile.objects.select_related('user', 'sponsor', 'group_root').filter(user=user)
+    
+    def perform_create(self, serializer):
+        """
+        Create reseller profile for current user.
+        Allows users with any role to add a reseller profile (dual role support).
+        """
+        # Check if user already has a reseller profile
+        if hasattr(self.request.user, 'reseller_profile'):
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError(
+                {"detail": "You already have a reseller profile."}
+            )
+        serializer.save(user=self.request.user)
+
+    @action(detail=False, methods=['get'], url_path='downlines')
+    def get_my_downlines(self, request):
+        """
+        Get direct downlines for the current reseller with commission information.
+        Returns list of direct downlines with their commission stats.
+        """
+        try:
+            profile = self.get_queryset().first()
+            if not profile:
+                return Response(
+                    {"detail": "Reseller profile not found."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Get direct downlines (only direct, not all)
+            direct_downlines = profile.direct_downlines.select_related('user').order_by('-created_at')
+            
+            # Get commission data for each downline
+            from travel.models import ResellerCommission, BookingStatus
+            from django.db.models import Sum, Count
+            
+            downlines_data = []
+            for downline in direct_downlines:
+                # Get commission earned from this downline's sales (level 1 = direct downline)
+                commissions_from_downline = ResellerCommission.objects.filter(
+                    reseller=profile,
+                    booking__reseller=downline,
+                    booking__status=BookingStatus.CONFIRMED,
+                    level=1  # Level 1 means commission from direct downline
+                ).aggregate(
+                    total_commission=Sum('amount'),
+                    total_bookings=Count('booking', distinct=True)
+                )
+                
+                # Get downline's own commission earned
+                downline_own_commission = downline.get_total_commission_earned()
+                
+                downlines_data.append({
+                    'id': downline.id,
+                    'full_name': downline.full_name,
+                    'email': downline.user.email,
+                    'referral_code': downline.referral_code,
+                    'contact_phone': downline.contact_phone,
+                    'created_at': downline.created_at,
+                    'total_commission_from_downline': commissions_from_downline['total_commission'] or 0,
+                    'total_bookings_from_downline': commissions_from_downline['total_bookings'] or 0,
+                    'downline_own_commission_earned': downline_own_commission,
+                    'direct_downline_count': downline.direct_downline_count,
+                })
+            
+            return Response({
+                'count': len(downlines_data),
+                'results': downlines_data
+            })
+        except Exception as e:
+            return Response(
+                {"detail": f"Error fetching downlines: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class StaffProfileViewSet(BaseOwnProfileViewSet):
@@ -367,36 +463,56 @@ class CurrentUserView(APIView):
         user = request.user
         from account.models import UserRole
         
-        # Get profile info based on role
+        # Get profile info - now supports dual roles
         full_name = user.email
         photo_url = None
         
-        try:
-            if user.role == UserRole.SUPPLIER and hasattr(user, "supplier_profile"):
-                profile = user.supplier_profile
-                full_name = profile.company_name
-                if profile.photo:
-                    photo_url = request.build_absolute_uri(profile.photo.url) if request else profile.photo.url
-            elif user.role == UserRole.RESELLER and hasattr(user, "reseller_profile"):
-                profile = user.reseller_profile
-                full_name = profile.full_name
-                if profile.photo:
-                    photo_url = request.build_absolute_uri(profile.photo.url) if request else profile.photo.url
-            elif user.role == UserRole.STAFF and hasattr(user, "staff_profile"):
+        # Check for supplier profile
+        supplier_profile = None
+        if hasattr(user, "supplier_profile"):
+            try:
+                supplier_profile = user.supplier_profile
+                if not full_name or full_name == user.email:
+                    full_name = supplier_profile.company_name
+                if not photo_url and supplier_profile.photo:
+                    photo_url = request.build_absolute_uri(supplier_profile.photo.url) if request else supplier_profile.photo.url
+            except Exception:
+                pass
+        
+        # Check for reseller profile
+        reseller_profile = None
+        if hasattr(user, "reseller_profile"):
+            try:
+                reseller_profile = user.reseller_profile
+                if not full_name or full_name == user.email:
+                    full_name = reseller_profile.full_name
+                if not photo_url and reseller_profile.photo:
+                    photo_url = request.build_absolute_uri(reseller_profile.photo.url) if request else reseller_profile.photo.url
+            except Exception:
+                pass
+        
+        # Check for staff profile
+        if user.role == UserRole.STAFF and hasattr(user, "staff_profile"):
+            try:
                 profile = user.staff_profile
-                full_name = profile.full_name
-                if profile.photo:
+                if not full_name or full_name == user.email:
+                    full_name = profile.full_name
+                if not photo_url and profile.photo:
                     photo_url = request.build_absolute_uri(profile.photo.url) if request else profile.photo.url
-        except Exception:
-            pass
+            except Exception:
+                pass
         
         return Response({
             'id': user.id,
             'email': user.email,
-            'role': user.role,
+            'role': user.role,  # Primary role for backward compatibility
             'full_name': full_name,
             'profile_picture_url': photo_url,
             'email_verified': user.email_verified,
+            # New fields to support dual roles
+            'has_supplier_profile': user.is_supplier,
+            'has_reseller_profile': user.is_reseller,
+            'roles_display': user.get_roles_display(),
         })
 
 
@@ -768,6 +884,107 @@ class VerifyEmailView(APIView):
 
 # ==================== ACTIVATE/DEACTIVATE ACCOUNT ENDPOINT ====================
 
+class ApproveRejectSupplierView(APIView):
+    """
+    API endpoint for admin to approve or reject supplier accounts.
+    Sends email notification when approved.
+    """
+    from account.authentication import CookieJWTAuthentication
+    
+    # Only use JWT auth (cookie-based), skip SessionAuth to avoid CSRF requirement
+    authentication_classes = [CookieJWTAuthentication]
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, supplier_id):
+        """
+        Approve or reject a supplier account.
+        
+        Request body:
+        {
+            "action": "approve" or "reject",
+            "rejection_reason": "Optional reason for rejection" (required if action is "reject")
+        }
+        """
+        action = request.data.get('action')
+        rejection_reason = request.data.get('rejection_reason', '')
+        
+        if action not in ['approve', 'reject']:
+            return Response(
+                {'action': ['Action must be either "approve" or "reject".']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if action == 'reject' and not rejection_reason:
+            return Response(
+                {'rejection_reason': ['Rejection reason is required when rejecting a supplier.']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            supplier_profile = SupplierProfile.objects.select_related('user').get(pk=supplier_id)
+        except SupplierProfile.DoesNotExist:
+            return Response(
+                {'detail': 'Supplier profile not found.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        from account.models import SupplierApprovalStatus
+        from django.utils import timezone
+        
+        if action == 'approve':
+            supplier_profile.approval_status = SupplierApprovalStatus.APPROVED
+            supplier_profile.approved_by = request.user
+            supplier_profile.approved_at = timezone.now()
+            supplier_profile.rejection_reason = ''  # Clear rejection reason if any
+            supplier_profile.save()
+            
+            # Send approval email
+            try:
+                from account.tasks import send_supplier_approval_email
+                send_supplier_approval_email.delay(supplier_profile.user.id)
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to send approval email: {str(e)}")
+                # Don't fail the approval if email fails
+            
+            return Response(
+                {
+                    'detail': 'Supplier has been approved successfully.',
+                    'supplier_id': supplier_profile.id,
+                    'company_name': supplier_profile.company_name,
+                    'approval_status': supplier_profile.approval_status,
+                },
+                status=status.HTTP_200_OK
+            )
+        else:  # reject
+            supplier_profile.approval_status = SupplierApprovalStatus.REJECTED
+            supplier_profile.rejection_reason = rejection_reason
+            supplier_profile.approved_by = None
+            supplier_profile.approved_at = None
+            supplier_profile.save()
+            
+            # Send rejection email
+            try:
+                from account.tasks import send_supplier_rejection_email
+                send_supplier_rejection_email.delay(supplier_profile.user.id, rejection_reason)
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to send rejection email: {str(e)}")
+                # Don't fail the rejection if email fails
+            
+            return Response(
+                {
+                    'detail': 'Supplier has been rejected.',
+                    'supplier_id': supplier_profile.id,
+                    'company_name': supplier_profile.company_name,
+                    'approval_status': supplier_profile.approval_status,
+                },
+                status=status.HTTP_200_OK
+            )
+
+
 class ActivateDeactivateAccountView(APIView):
     """
     API endpoint for admin to activate or deactivate a user account.
@@ -960,6 +1177,12 @@ class RegisterResellerView(APIView):
                             status=status.HTTP_400_BAD_REQUEST
                         )
 
+                # Create reseller profile using serializer to ensure referral code is generated
+                from account.serializers import generate_unique_referral_code
+                
+                # Generate referral code
+                referral_code = generate_unique_referral_code()
+                
                 # Create reseller profile directly (bypass serializer since user is read-only)
                 profile = ResellerProfile.objects.create(
                     user=user,
@@ -967,6 +1190,7 @@ class RegisterResellerView(APIView):
                     contact_phone=contact_phone,
                     address=address,
                     sponsor=sponsor,
+                    referral_code=referral_code,
                 )
                 
                 # Send welcome email
@@ -1152,13 +1376,15 @@ class RegisterSupplierView(APIView):
                     is_active=True,
                 )
 
-                # Create supplier profile
+                # Create supplier profile with PENDING approval status
+                from account.models import SupplierApprovalStatus
                 SupplierProfile.objects.create(
                     user=user,
                     company_name=company_name,
                     contact_person=contact_person,
                     contact_phone=contact_phone,
                     address=address,
+                    approval_status=SupplierApprovalStatus.PENDING,
                 )
 
                 # Send welcome email (best-effort)
