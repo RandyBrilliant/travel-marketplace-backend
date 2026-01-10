@@ -1199,23 +1199,27 @@ class BookingCreateSerializer(serializers.ModelSerializer):
     
     def _create_commissions(self, booking):
         """
-        Create commission records for the booking reseller and their upline.
-        
-        Commission is calculated PER SEAT (per passenger), not per booking.
-        The final commission amount = commission_per_seat * number_of_seats_in_booking.
+        Create commission records for the booking reseller and their upline hierarchy.
         
         Commission calculation logic:
         1. Level 0 (Booking Reseller):
            - First check ResellerTourCommission for this reseller + tour package (reseller-specific override)
            - If not found, use TourPackage.commission (general tour commission)
-           - Commission amount = commission_per_seat * booking.seats_booked
+           - Commission amount = commission_per_seat * booking.seats_booked (per seat calculation)
            - Only create if commission amount > 0
         
-        2. Level 1 (Direct Upline/Sponsor):
-           - Get booking reseller's sponsor
-           - Use sponsor.upline_commission_amount (also per seat)
-           - Commission amount = upline_commission_per_seat * booking.seats_booked
-           - Only create if sponsor exists and amount > 0
+        2. Upline Commission Structure (Fixed amounts per booking):
+           - Level 1 (Direct Upline/Sponsor): 50,000 IDR (fixed per booking)
+           - Level 2 (Sponsor's Sponsor): 25,000 IDR (fixed per booking)
+           - Level 3 (Level 2's Sponsor): 25,000 IDR (fixed per booking)
+           - Level 4 and above: No commission (0 IDR)
+           
+        Example hierarchy:
+        - A makes booking (Level 0) → gets commission from tour package
+        - A was recruited by B (Level 1) → B gets 50,000 IDR
+        - B was recruited by C (Level 2) → C gets 25,000 IDR
+        - C was recruited by D (Level 3) → D gets 25,000 IDR
+        - D was recruited by E (Level 4) → E gets nothing (0 IDR)
         """
         from .models import ResellerCommission, ResellerTourCommission
         import logging
@@ -1226,8 +1230,16 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         tour_package = booking.tour_date.package
         seats_count = booking.seats_booked  # Number of passengers/seats in this booking
         
+        # Fixed upline commission amounts (per booking, not per seat)
+        UPLINE_COMMISSION_AMOUNTS = {
+            1: 50000,  # Level 1: 50,000 IDR
+            2: 25000,  # Level 2: 25,000 IDR
+            3: 25000,  # Level 3: 25,000 IDR
+        }
+        
         # Level 0: Commission for the reseller who made the booking
         # Commission comes from: ResellerTourCommission (if exists) OR TourPackage.commission (fallback)
+        # This is still calculated per seat
         tour_commission_per_seat = tour_package.get_reseller_commission(booking_reseller)
         
         if tour_commission_per_seat is not None and tour_commission_per_seat > 0:
@@ -1248,7 +1260,7 @@ class BookingCreateSerializer(serializers.ModelSerializer):
             ).exists()
             commission_source = "ResellerTourCommission" if has_specific else "TourPackage.commission"
             logger.info(
-                f"Created commission {commission.id} for reseller {booking_reseller.id}: "
+                f"Created commission {commission.id} for reseller {booking_reseller.id} (Level 0): "
                 f"{total_commission} IDR ({tour_commission_per_seat} IDR/seat × {seats_count} seats) "
                 f"from {commission_source} (tour {tour_package.id}, booking {booking.id})"
             )
@@ -1259,30 +1271,36 @@ class BookingCreateSerializer(serializers.ModelSerializer):
                 f"(neither ResellerTourCommission nor TourPackage.commission)."
             )
         
-        # Level 1: Commission for the direct upline (sponsor)
-        if booking_reseller.sponsor:
-            upline = booking_reseller.sponsor
-            upline_commission_per_seat = upline.upline_commission_amount
+        # Upline Commission Structure: Traverse up to 3 levels with fixed amounts
+        current_upline = booking_reseller.sponsor
+        level = 1
+        
+        while current_upline and level <= 3:
+            # Get fixed commission amount for this level
+            commission_amount = UPLINE_COMMISSION_AMOUNTS.get(level, 0)
             
-            # Create commission record for upline (level 1) if amount > 0
-            # Multiply commission per seat by number of seats
-            if upline_commission_per_seat and upline_commission_per_seat > 0:
-                total_upline_commission = upline_commission_per_seat * seats_count
-                
+            if commission_amount > 0:
                 upline_commission_obj = ResellerCommission.objects.create(
                     booking=booking,
-                    reseller=upline,
-                    level=1,
-                    amount=total_upline_commission
+                    reseller=current_upline,
+                    level=level,
+                    amount=commission_amount
                 )
                 logger.info(
-                    f"Created upline commission {upline_commission_obj.id} for upline {upline.id}: "
-                    f"{total_upline_commission} IDR ({upline_commission_per_seat} IDR/seat × {seats_count} seats) "
-                    f"(booking {booking.id})"
+                    f"Created upline commission {upline_commission_obj.id} for upline {current_upline.id} (Level {level}): "
+                    f"{commission_amount} IDR (fixed per booking) (booking {booking.id})"
                 )
             else:
-                logger.info(f"No upline commission created: upline_commission_amount={upline_commission_per_seat}")
-        else:
+                logger.info(
+                    f"Skipping commission for upline {current_upline.id} at level {level}: "
+                    f"no commission for this level"
+                )
+            
+            # Move to next upline level
+            current_upline = current_upline.sponsor
+            level += 1
+        
+        if level == 1:
             logger.info(f"No sponsor for reseller {booking_reseller.id}, skipping upline commission")
 
 

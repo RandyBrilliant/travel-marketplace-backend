@@ -112,7 +112,7 @@ class ResellerProfileAdmin(admin.ModelAdmin):
             'fields': ('referral_code', 'sponsor', 'group_root', 'direct_downline_count')
         }),
         ('Commission Settings', {
-            'fields': ('base_commission', 'upline_commission_amount')
+            'fields': ('base_commission',)
         }),
         ('Banking Information', {
             'fields': ('bank_name', 'bank_account_name', 'bank_account_number'),

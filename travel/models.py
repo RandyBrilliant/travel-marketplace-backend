@@ -992,12 +992,21 @@ class ResellerCommission(models.Model):
     """
     Commission entries per reseller per booking.
 
-    IMPORTANT: Commission is calculated PER SEAT (per passenger), not per booking.
-    The amount stored here is the total commission = commission_per_seat × number_of_seats_in_booking.
+    IMPORTANT: 
+    - Level 0 (booking reseller): Commission is calculated PER SEAT (per passenger).
+      The amount = commission_per_seat × number_of_seats_in_booking.
+    - Level 1-3 (upline commissions): Fixed amounts per booking:
+      - Level 1: 50,000 IDR (fixed per booking)
+      - Level 2: 25,000 IDR (fixed per booking)
+      - Level 3: 25,000 IDR (fixed per booking)
+    - Level 4 and above: No commission (0 IDR)
 
-    This supports:
-    - the reseller who made the booking (level 0), and
-    - their uplines (level 1, 2, ...) for override commissions.
+    Example hierarchy when A makes a booking:
+    - A (Level 0): Gets commission from tour package (per seat)
+    - B (Level 1): Gets 50,000 IDR (A's sponsor)
+    - C (Level 2): Gets 25,000 IDR (B's sponsor)
+    - D (Level 3): Gets 25,000 IDR (C's sponsor)
+    - E (Level 4): Gets nothing (D's sponsor)
     """
 
     booking = models.ForeignKey(
@@ -1016,7 +1025,12 @@ class ResellerCommission(models.Model):
     )
     amount = models.PositiveIntegerField(
         validators=[MinValueValidator(1)],
-        help_text=_("Total commission amount in IDR (commission_per_seat × number_of_seats). Must be at least 1 IDR.")
+        help_text=_(
+            "Total commission amount in IDR. "
+            "For Level 0: commission_per_seat × number_of_seats. "
+            "For Levels 1-3: fixed amount per booking (Level 1: 50k, Level 2-3: 25k). "
+            "Must be at least 1 IDR."
+        )
     )
 
     created_at = models.DateTimeField(auto_now_add=True)

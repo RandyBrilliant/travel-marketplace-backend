@@ -139,7 +139,6 @@ class ResellerProfileSerializer(serializers.ModelSerializer):
             "group_root",
             "group_root_name",
             "base_commission",
-            "upline_commission_amount",
             "bank_name",
             "bank_account_name",
             "bank_account_number",
@@ -165,14 +164,6 @@ class ResellerProfileSerializer(serializers.ModelSerializer):
         if value < 0:
             raise serializers.ValidationError(
                 "Base commission must be greater than or equal to 0."
-            )
-        return value
-
-    def validate_upline_commission_amount(self, value):
-        """Validate upline commission amount is non-negative."""
-        if value < 0:
-            raise serializers.ValidationError(
-                "Upline commission amount must be greater than or equal to 0."
             )
         return value
 

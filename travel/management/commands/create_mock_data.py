@@ -632,7 +632,6 @@ class Command(BaseCommand):
                 referral_code=referral_code,
                 sponsor=sponsor,
                 base_commission=random.randint(50000, 200000),  # Fixed amount in IDR
-                upline_commission_amount=random.randint(25000, 100000),  # Fixed amount in IDR
                 bank_name=data['bank_name'],
                 bank_account_name=data['bank_account_name'],
                 bank_account_number=data['bank_account_number'],

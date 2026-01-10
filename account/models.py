@@ -285,21 +285,13 @@ class ResellerProfile(models.Model):
         help_text=_("Top-most leader in this reseller's tree. Set automatically."),
     )
 
-    # Commission settings for this reseller (their own sales and downline override).
+    # Commission settings for this reseller (their own sales).
     base_commission = models.PositiveIntegerField(
         default=0,
         validators=[MinValueValidator(0)],
         help_text=_(
             "Base commission amount per seat (per passenger) for each sale made directly "
             "by this reseller. The actual commission will be multiplied by the number of seats in the booking."
-        ),
-    )
-    upline_commission_amount = models.PositiveIntegerField(
-        default=0,
-        validators=[MinValueValidator(0)],
-        help_text=_(
-            "Fixed commission amount per seat (per passenger) this reseller earns for each sale made "
-            "by their direct downlines. The actual commission will be multiplied by the number of seats in the booking."
         ),
     )
     
