@@ -173,7 +173,7 @@ class SupplierResellerGroupViewSet(viewsets.ModelViewSet):
         ).prefetch_related(
             models.Prefetch("resellers", queryset=ResellerProfile.objects.select_related("user")),
             "tour_packages"
-        ).all()
+        )
         
         is_active = self.request.query_params.get("is_active")
         if is_active is not None:
@@ -189,6 +189,29 @@ class SupplierResellerGroupViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         """Set created_by to current user."""
         serializer.save(created_by=self.request.user)
+    
+    @action(detail=False, methods=["get"], url_path="available-resellers")
+    def available_resellers(self, request):
+        """
+        Get all active resellers that can be assigned to groups.
+        Suppliers need this to see available resellers when creating/editing groups.
+        """
+        from account.serializers import ResellerProfileSerializer
+        from account.models import ResellerProfile
+        
+        # Get all active reseller profiles
+        queryset = ResellerProfile.objects.filter(
+            user__is_active=True
+        ).select_related("user").order_by("user__email")
+        
+        # Support pagination if requested
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = ResellerProfileSerializer(page, many=True, context={"request": request})
+            return self.get_paginated_response(serializer.data)
+        
+        serializer = ResellerProfileSerializer(queryset, many=True, context={"request": request})
+        return Response(serializer.data)
     
     @action(detail=True, methods=["get", "post"], url_path="dates")
     def manage_dates(self, request, pk=None):
@@ -1008,9 +1031,56 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        # Suppliers can create new payments or update the latest payment
+        # Suppliers can create new payments or update a specific payment or the latest payment
         # Get the latest payment if it exists
         latest_payment = booking.payments.order_by('-created_at').first()
+        
+        # Check if we're updating a specific payment by ID
+        payment_id = request.data.get('payment_id')
+        
+        if payment_id:
+            # Update specific payment by ID
+            try:
+                payment = booking.payments.get(id=payment_id)
+            except Payment.DoesNotExist:
+                return Response(
+                    {"detail": "Pembayaran tidak ditemukan."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            serializer_data = {}
+            if 'amount' in request.data:
+                serializer_data['amount'] = request.data['amount']
+            if 'transfer_date' in request.data:
+                serializer_data['transfer_date'] = request.data['transfer_date']
+            if 'proof_image' in request.data and request.data['proof_image']:
+                serializer_data['proof_image'] = request.data['proof_image']
+            if 'status' in request.data and request.data['status']:
+                status_value = request.data['status']
+                if status_value in [PaymentStatus.PENDING, PaymentStatus.APPROVED, PaymentStatus.REJECTED]:
+                    serializer_data['status'] = status_value
+            
+            serializer = PaymentUpdateSerializer(payment, data=serializer_data, partial=True)
+            
+            if serializer.is_valid():
+                old_status = payment.status
+                serializer.save()
+                
+                if 'status' in serializer_data:
+                    new_status = serializer_data['status']
+                    if old_status != new_status:
+                        if new_status != PaymentStatus.PENDING:
+                            payment.reviewed_by = request.user
+                            payment.reviewed_at = timezone.now()
+                        else:
+                            payment.reviewed_by = None
+                            payment.reviewed_at = None
+                        payment.save(update_fields=['reviewed_by', 'reviewed_at'])
+                
+                booking_serializer = self.get_serializer(booking)
+                return Response(booking_serializer.data)
+            
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
         # Check if we're updating existing payment or creating new one
         update_existing = request.data.get('update_existing', 'false').lower() == 'true' and latest_payment
@@ -1710,6 +1780,145 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
         
         serializer = self.get_serializer(booking)
         return Response(serializer.data)
+    
+    @action(detail=True, methods=["patch"], url_path="payment")
+    def update_payment(self, request, pk=None):
+        """Update or create payment details (amount, transfer_date, proof_image) for a booking."""
+        from .serializers import PaymentUpdateSerializer
+        from .models import Payment
+        
+        booking = self.get_object()
+        
+        # Admin can create new payments or update the latest payment
+        # Get the latest payment if it exists
+        latest_payment = booking.payments.order_by('-created_at').first()
+        
+        # Check if we're updating existing payment or creating new one
+        # If payment_id is provided, update that specific payment, otherwise update latest or create new
+        payment_id = request.data.get('payment_id')
+        
+        if payment_id:
+            # Update specific payment by ID
+            try:
+                payment = booking.payments.get(id=payment_id)
+            except Payment.DoesNotExist:
+                return Response(
+                    {"detail": "Pembayaran tidak ditemukan."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            serializer_data = {}
+            if 'amount' in request.data:
+                serializer_data['amount'] = request.data['amount']
+            if 'transfer_date' in request.data:
+                serializer_data['transfer_date'] = request.data['transfer_date']
+            if 'proof_image' in request.data and request.data['proof_image']:
+                serializer_data['proof_image'] = request.data['proof_image']
+            if 'status' in request.data and request.data['status']:
+                status_value = request.data['status']
+                if status_value in [PaymentStatus.PENDING, PaymentStatus.APPROVED, PaymentStatus.REJECTED]:
+                    serializer_data['status'] = status_value
+            
+            serializer = PaymentUpdateSerializer(payment, data=serializer_data, partial=True)
+            
+            if serializer.is_valid():
+                old_status = payment.status
+                serializer.save()
+                
+                if 'status' in serializer_data:
+                    new_status = serializer_data['status']
+                    if old_status != new_status:
+                        if new_status != PaymentStatus.PENDING:
+                            payment.reviewed_by = request.user
+                            payment.reviewed_at = timezone.now()
+                        else:
+                            payment.reviewed_by = None
+                            payment.reviewed_at = None
+                        payment.save(update_fields=['reviewed_by', 'reviewed_at'])
+                
+                booking_serializer = self.get_serializer(booking)
+                return Response(booking_serializer.data)
+            
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Update latest payment or create new one
+        update_existing = request.data.get('update_existing', 'false').lower() == 'true' and latest_payment
+        
+        if update_existing and latest_payment:
+            # Update existing payment
+            payment = latest_payment
+            serializer_data = {}
+            if 'amount' in request.data:
+                serializer_data['amount'] = request.data['amount']
+            if 'transfer_date' in request.data:
+                serializer_data['transfer_date'] = request.data['transfer_date']
+            if 'proof_image' in request.data and request.data['proof_image']:
+                serializer_data['proof_image'] = request.data['proof_image']
+            if 'status' in request.data and request.data['status']:
+                status_value = request.data['status']
+                if status_value in [PaymentStatus.PENDING, PaymentStatus.APPROVED, PaymentStatus.REJECTED]:
+                    serializer_data['status'] = status_value
+            
+            serializer = PaymentUpdateSerializer(payment, data=serializer_data, partial=True)
+            
+            if serializer.is_valid():
+                old_status = payment.status
+                serializer.save()
+                
+                if 'status' in serializer_data:
+                    new_status = serializer_data['status']
+                    if old_status != new_status:
+                        if new_status != PaymentStatus.PENDING:
+                            payment.reviewed_by = request.user
+                            payment.reviewed_at = timezone.now()
+                        else:
+                            payment.reviewed_by = None
+                            payment.reviewed_at = None
+                        payment.save(update_fields=['reviewed_by', 'reviewed_at'])
+                
+                booking_serializer = self.get_serializer(booking)
+                return Response(booking_serializer.data)
+            
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            # Create new payment
+            amount = request.data.get('amount')
+            transfer_date = request.data.get('transfer_date')
+            
+            if not amount or not transfer_date:
+                return Response(
+                    {"detail": "Jumlah pembayaran dan tanggal transfer wajib diisi untuk membuat pembayaran baru."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            serializer_data = {
+                'amount': amount,
+                'transfer_date': transfer_date,
+            }
+            if 'proof_image' in request.data and request.data['proof_image']:
+                serializer_data['proof_image'] = request.data['proof_image']
+            if 'status' in request.data and request.data['status']:
+                status_value = request.data['status']
+                if status_value in [PaymentStatus.PENDING, PaymentStatus.APPROVED, PaymentStatus.REJECTED]:
+                    serializer_data['status'] = status_value
+                else:
+                    serializer_data['status'] = PaymentStatus.PENDING
+            else:
+                serializer_data['status'] = PaymentStatus.PENDING
+            
+            serializer = PaymentUpdateSerializer(data=serializer_data)
+            
+            if serializer.is_valid():
+                payment = serializer.save(booking=booking)
+                if serializer_data['status'] != PaymentStatus.PENDING:
+                    payment.reviewed_by = request.user
+                    payment.reviewed_at = timezone.now()
+                    payment.save(update_fields=['reviewed_by', 'reviewed_at'])
+                
+                booking_serializer = self.get_serializer(booking)
+                return Response(booking_serializer.data)
+            
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 # Import withdrawal views from separate file to keep views.py manageable

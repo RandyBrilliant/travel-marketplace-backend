@@ -317,6 +317,10 @@ class TourPackageSerializer(serializers.ModelSerializer):
     duration_display = serializers.CharField(read_only=True)
     group_size_display = serializers.CharField(read_only=True)
     itinerary_pdf_url = serializers.SerializerMethodField()
+    reseller_groups = serializers.PrimaryKeyRelatedField(
+        many=True,
+        read_only=True
+    )
     
     class Meta:
         model = TourPackage
