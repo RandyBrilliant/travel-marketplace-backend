@@ -11,7 +11,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 
 from rest_framework.permissions import IsAdminUser, IsAuthenticatedOrReadOnly
 from account.models import UserRole, SupplierProfile, ResellerProfile
-from .models import TourPackage, TourDate, TourImage, ResellerTourCommission, ResellerGroup, Booking, BookingStatus, SeatSlotStatus, PaymentStatus, SeatSlot, WithdrawalRequest, WithdrawalRequestStatus
+from .models import TourPackage, TourDate, TourImage, ResellerTourCommission, ResellerGroup, Booking, BookingStatus, SeatSlotStatus, PaymentStatus, SeatSlot, WithdrawalRequest, WithdrawalRequestStatus, ResellerCommission
 from .serializers import (
     TourPackageSerializer,
     TourPackageListSerializer,
@@ -25,9 +25,7 @@ from .serializers import (
     BookingSerializer,
     BookingListSerializer,
     PublicTourPackageDetailSerializer,
-    WithdrawalRequestSerializer,
-    WithdrawalRequestCreateSerializer,
-    WithdrawalRequestUpdateSerializer,
+    ResellerCommissionSerializer,
 )
 
 
@@ -141,6 +139,56 @@ class SupplierTourPackageViewSet(viewsets.ModelViewSet):
             raise ValidationError(
                 {"detail": "Profil supplier tidak ditemukan. Silakan lengkapi pengaturan profil Anda."}
             )
+    
+    @action(detail=False, methods=["get"], url_path="reseller-groups")
+    def reseller_groups(self, request):
+        """Get list of active reseller groups for suppliers to assign to tour packages."""
+        from .serializers import ResellerGroupSerializer
+        
+        queryset = ResellerGroup.objects.filter(is_active=True).prefetch_related(
+            models.Prefetch("resellers", queryset=ResellerProfile.objects.select_related("user"))
+        ).order_by("name")
+        
+        serializer = ResellerGroupSerializer(queryset, many=True, context={"request": request})
+        return Response(serializer.data)
+
+
+class SupplierResellerGroupViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for suppliers to manage reseller groups.
+    Suppliers can create groups and assign resellers to them.
+    Only shows groups created by the current supplier.
+    """
+    
+    permission_classes = [IsSupplier]
+    serializer_class = ResellerGroupSerializer
+    
+    def get_queryset(self):
+        """Return only reseller groups created by the current supplier."""
+        if not self.request.user.is_authenticated:
+            return ResellerGroup.objects.none()
+        
+        queryset = ResellerGroup.objects.filter(
+            created_by=self.request.user
+        ).prefetch_related(
+            models.Prefetch("resellers", queryset=ResellerProfile.objects.select_related("user")),
+            "tour_packages"
+        ).all()
+        
+        is_active = self.request.query_params.get("is_active")
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active.lower() == "true")
+        
+        # Ordering
+        ordering = self.request.query_params.get("ordering")
+        if ordering:
+            queryset = queryset.order_by(*ordering.split(","))
+        
+        return queryset
+    
+    def perform_create(self, serializer):
+        """Set created_by to current user."""
+        serializer.save(created_by=self.request.user)
     
     @action(detail=True, methods=["get", "post"], url_path="dates")
     def manage_dates(self, request, pk=None):
@@ -363,6 +411,7 @@ class PublicTourPackageListView(APIView):
             queryset = queryset.filter(category=category)
         
         # Filter by reseller groups - only show tours visible to the authenticated reseller
+        # For anonymous/public users or non-reseller users, exclude tours with reseller groups
         if reseller_profile is not None:
             # Filter tours that are either:
             # 1. Not assigned to any group (visible to all), OR
@@ -382,6 +431,11 @@ class PublicTourPackageListView(APIView):
         elif request.user.is_authenticated and request.user.role == UserRole.RESELLER:
             # Reseller profile doesn't exist, only show tours with no group assignment
             # This prevents unauthorized access to group-restricted tours
+            queryset = queryset.filter(reseller_groups__isnull=True)
+        else:
+            # For anonymous users or non-reseller authenticated users (staff, supplier, etc.),
+            # exclude tours that have any reseller groups assigned
+            # These tours should only be visible to resellers with appropriate group access
             queryset = queryset.filter(reseller_groups__isnull=True)
         
         # Search
@@ -469,21 +523,20 @@ class PublicTourPackageDetailView(APIView):
         except TourPackage.DoesNotExist:
             raise Http404("Paket tur tidak ditemukan")
         
-        # Check if reseller has access to this tour based on reseller groups
-        if request.user.is_authenticated and request.user.role == UserRole.RESELLER:
-            try:
-                # Prefetch reseller_profile for serializer to avoid N+1 query
-                reseller_profile = ResellerProfile.objects.prefetch_related('reseller_groups').select_related('user').get(user=request.user)
-                request.user.reseller_profile = reseller_profile  # Cache for serializer
-                
-                # Get tour's reseller groups
-                tour_groups = tour.reseller_groups.filter(is_active=True)
-                
-                # Check access:
-                # 1. If tour has no groups assigned, it's visible to all resellers
-                # 2. If tour has groups, reseller must be in at least one of them
-                if tour_groups.exists():
-                    # Tour has group restrictions
+        # Get tour's reseller groups to check access
+        tour_groups = tour.reseller_groups.filter(is_active=True)
+        
+        # Check if tour has reseller group restrictions
+        if tour_groups.exists():
+            # Tour has group restrictions - only resellers with appropriate group access can view
+            if request.user.is_authenticated and request.user.role == UserRole.RESELLER:
+                try:
+                    # Prefetch reseller_profile for serializer to avoid N+1 query
+                    reseller_profile = ResellerProfile.objects.prefetch_related('reseller_groups').select_related('user').get(user=request.user)
+                    request.user.reseller_profile = reseller_profile  # Cache for serializer
+                    
+                    # Check access:
+                    # Reseller must be in at least one of the tour's groups
                     reseller_groups = reseller_profile.reseller_groups.filter(is_active=True)
                     reseller_group_ids = set(reseller_groups.values_list('id', flat=True))
                     tour_group_ids = set(tour_groups.values_list('id', flat=True))
@@ -491,27 +544,23 @@ class PublicTourPackageDetailView(APIView):
                     # Check if reseller belongs to any of the tour's groups
                     if not (reseller_group_ids & tour_group_ids):
                         # Reseller doesn't belong to any of the tour's groups
-                        return Response(
-                            {
-                                "detail": "Anda tidak memiliki akses ke paket tur ini. "
-                                         "Paket ini hanya tersedia untuk grup reseller tertentu."
-                            },
-                            status=status.HTTP_403_FORBIDDEN
-                        )
-                # If tour has no groups or reseller is in a group, allow access
-            except ResellerProfile.DoesNotExist:
-                # If reseller profile doesn't exist, check if tour has group restrictions
-                tour_groups = tour.reseller_groups.filter(is_active=True)
-                if tour_groups.exists():
-                    # Tour has group restrictions but reseller has no profile
-                    return Response(
-                        {
-                            "detail": "Anda tidak memiliki akses ke paket tur ini. "
-                                     "Silakan lengkapi profil reseller Anda terlebih dahulu."
-                        },
-                        status=status.HTTP_403_FORBIDDEN
-                    )
-                # If tour has no groups, allow access even without profile
+                        raise Http404("Paket tur tidak ditemukan")
+                    # Reseller is in a group, allow access
+                except ResellerProfile.DoesNotExist:
+                    # Reseller profile doesn't exist, deny access
+                    raise Http404("Paket tur tidak ditemukan")
+            else:
+                # Anonymous user or non-reseller user - deny access to group-restricted tours
+                raise Http404("Paket tur tidak ditemukan")
+        else:
+            # Tour has no group restrictions - visible to everyone
+            # Cache reseller_profile for serializer if user is a reseller
+            if request.user.is_authenticated and request.user.role == UserRole.RESELLER:
+                try:
+                    reseller_profile = ResellerProfile.objects.prefetch_related('reseller_groups').select_related('user').get(user=request.user)
+                    request.user.reseller_profile = reseller_profile  # Cache for serializer
+                except ResellerProfile.DoesNotExist:
+                    pass  # Allow access even without profile if tour has no groups
         
         serializer = PublicTourPackageDetailSerializer(tour, context={"request": request})
         response = Response(serializer.data)
@@ -708,9 +757,9 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
             queryset = Booking.objects.filter(
                 tour_date__package__supplier=supplier_profile
             ).select_related(
-                "reseller", "reseller__user", "tour_date", "tour_date__package", "payment"
+                "reseller", "reseller__user", "tour_date", "tour_date__package"
             ).prefetch_related(
-                "seat_slots", "seat_slots__tour_date"
+                "seat_slots", "seat_slots__tour_date", "payments"
             ).all()
             
             # Apply additional filters
@@ -780,7 +829,7 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
         # Get bookings for tours owned by this supplier
         bookings_queryset = Booking.objects.filter(
             tour_date__package__supplier=supplier_profile
-        ).select_related("tour_date", "tour_date__package", "payment").prefetch_related("seat_slots")
+        ).select_related("tour_date", "tour_date__package").prefetch_related("seat_slots", "payments")
         
         # Total Bookings
         total_bookings = bookings_queryset.count()
@@ -796,8 +845,8 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
         
         confirmed_with_approved_payment = bookings_queryset.filter(
             status=BookingStatus.CONFIRMED,
-            payment__status=PaymentStatus.APPROVED
-        ).annotate(
+            payments__status=PaymentStatus.APPROVED
+        ).distinct().annotate(
             seat_count=Count('seat_slots')
         ).annotate(
             booking_total=F('tour_date__price') * F('seat_count') + F('platform_fee')
@@ -877,8 +926,8 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
             created_at__gte=start_bound,
             created_at__lte=end_bound,
             status=BookingStatus.CONFIRMED,
-            payment__status=PaymentStatus.APPROVED
-        ).select_related("tour_date", "tour_date__package").annotate(
+            payments__status=PaymentStatus.APPROVED
+        ).distinct().select_related("tour_date", "tour_date__package").annotate(
             seat_count=Count('seat_slots')
         ).annotate(
             booking_total=F('tour_date__price') * F('seat_count') + F('platform_fee')
@@ -915,7 +964,8 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        if not hasattr(booking, 'payment') or not booking.payment:
+        latest_payment = booking.payments.order_by('-created_at').first()
+        if not latest_payment:
             return Response(
                 {"detail": "Booking tidak memiliki pembayaran."},
                 status=status.HTTP_400_BAD_REQUEST
@@ -934,7 +984,7 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        payment = booking.payment
+        payment = latest_payment
         payment.status = new_status
         payment.reviewed_by = request.user
         payment.reviewed_at = timezone.now()
@@ -958,54 +1008,16 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        # Create payment if it doesn't exist
-        if not hasattr(booking, 'payment') or not booking.payment:
-            # Validate required fields for creating a new payment
-            amount = request.data.get('amount')
-            transfer_date = request.data.get('transfer_date')
-            
-            if not amount or not transfer_date:
-                return Response(
-                    {"detail": "Jumlah pembayaran dan tanggal transfer wajib diisi untuk membuat pembayaran baru."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Prepare data for serializer (only include proof_image if it exists)
-            serializer_data = {
-                'amount': amount,
-                'transfer_date': transfer_date,
-            }
-            # Only include proof_image if it's in the request
-            if 'proof_image' in request.data and request.data['proof_image']:
-                serializer_data['proof_image'] = request.data['proof_image']
-            # Include status if provided, otherwise default to PENDING
-            if 'status' in request.data and request.data['status']:
-                status_value = request.data['status']
-                if status_value in [PaymentStatus.PENDING, PaymentStatus.APPROVED, PaymentStatus.REJECTED]:
-                    serializer_data['status'] = status_value
-                else:
-                    serializer_data['status'] = PaymentStatus.PENDING
-            else:
-                serializer_data['status'] = PaymentStatus.PENDING
-            
-            # Use serializer to create payment (handles file uploads properly)
-            serializer = PaymentUpdateSerializer(data=serializer_data)
-            
-            if serializer.is_valid():
-                payment = serializer.save(booking=booking)
-                # Set reviewed_by and reviewed_at if status is not PENDING
-                if serializer_data['status'] != PaymentStatus.PENDING:
-                    payment.reviewed_by = request.user
-                    payment.reviewed_at = timezone.now()
-                    payment.save(update_fields=['reviewed_by', 'reviewed_at'])
-                # Return updated booking
-                booking_serializer = self.get_serializer(booking)
-                return Response(booking_serializer.data)
-            
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        else:
-            payment = booking.payment
-            # Prepare data for serializer (only include fields that are provided)
+        # Suppliers can create new payments or update the latest payment
+        # Get the latest payment if it exists
+        latest_payment = booking.payments.order_by('-created_at').first()
+        
+        # Check if we're updating existing payment or creating new one
+        update_existing = request.data.get('update_existing', 'false').lower() == 'true' and latest_payment
+        
+        if update_existing and latest_payment:
+            # Update existing payment
+            payment = latest_payment
             serializer_data = {}
             if 'amount' in request.data:
                 serializer_data['amount'] = request.data['amount']
@@ -1039,6 +1051,50 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
                             payment.reviewed_at = None
                         payment.save(update_fields=['reviewed_by', 'reviewed_at'])
                 
+                # Return updated booking
+                booking_serializer = self.get_serializer(booking)
+                return Response(booking_serializer.data)
+            
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            # Create new payment
+            amount = request.data.get('amount')
+            transfer_date = request.data.get('transfer_date')
+            
+            if not amount or not transfer_date:
+                return Response(
+                    {"detail": "Jumlah pembayaran dan tanggal transfer wajib diisi untuk membuat pembayaran baru."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Prepare data for serializer
+            serializer_data = {
+                'amount': amount,
+                'transfer_date': transfer_date,
+            }
+            # Only include proof_image if it's in the request
+            if 'proof_image' in request.data and request.data['proof_image']:
+                serializer_data['proof_image'] = request.data['proof_image']
+            # Include status if provided, otherwise default to PENDING
+            if 'status' in request.data and request.data['status']:
+                status_value = request.data['status']
+                if status_value in [PaymentStatus.PENDING, PaymentStatus.APPROVED, PaymentStatus.REJECTED]:
+                    serializer_data['status'] = status_value
+                else:
+                    serializer_data['status'] = PaymentStatus.PENDING
+            else:
+                serializer_data['status'] = PaymentStatus.PENDING
+            
+            # Use serializer to create payment (handles file uploads properly)
+            serializer = PaymentUpdateSerializer(data=serializer_data)
+            
+            if serializer.is_valid():
+                payment = serializer.save(booking=booking)
+                # Set reviewed_by and reviewed_at if status is not PENDING
+                if serializer_data['status'] != PaymentStatus.PENDING:
+                    payment.reviewed_by = request.user
+                    payment.reviewed_at = timezone.now()
+                    payment.save(update_fields=['reviewed_by', 'reviewed_at'])
                 # Return updated booking
                 booking_serializer = self.get_serializer(booking)
                 return Response(booking_serializer.data)
@@ -1079,9 +1135,9 @@ class ResellerBookingViewSet(viewsets.ModelViewSet):
             queryset = Booking.objects.filter(
                 reseller=reseller_profile
             ).select_related(
-                "reseller", "reseller__user", "tour_date", "tour_date__package", "payment"
+                "reseller", "reseller__user", "tour_date", "tour_date__package"
             ).prefetch_related(
-                "seat_slots", "seat_slots__tour_date"
+                "seat_slots", "seat_slots__tour_date", "payments"
             ).all()
             
             # Apply additional filters
@@ -1130,6 +1186,124 @@ class ResellerBookingViewSet(viewsets.ModelViewSet):
             raise ValidationError(
                 {"detail": "Profil reseller tidak ditemukan. Silakan lengkapi pengaturan profil Anda."}
             )
+    
+    @action(detail=True, methods=["patch"], url_path="payment")
+    def update_payment(self, request, pk=None):
+        """Upload or update payment details (amount, transfer_date, proof_image) for a booking.
+        
+        Resellers can upload payment proof and details, but cannot change payment status.
+        Status must be set by suppliers or admins.
+        """
+        from .serializers import ResellerPaymentUpdateSerializer
+        from .models import Payment, PaymentStatus
+        from django.utils import timezone
+        
+        booking = self.get_object()
+        
+        # Ensure reseller owns this booking
+        if not request.user.is_authenticated:
+            return Response(
+                {"detail": "Authentication required."},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        try:
+            reseller_profile = ResellerProfile.objects.get(user=request.user)
+            if booking.reseller != reseller_profile:
+                return Response(
+                    {"detail": "Anda tidak memiliki izin untuk memperbarui booking ini."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        except ResellerProfile.DoesNotExist:
+            return Response(
+                {"detail": "Profil reseller tidak ditemukan."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Always create a new payment record (payment history)
+        # Validate required fields for creating a new payment
+        amount = request.data.get('amount')
+        transfer_date = request.data.get('transfer_date')
+        
+        if not amount or not transfer_date:
+            return Response(
+                {"detail": "Jumlah pembayaran dan tanggal transfer wajib diisi untuk membuat pembayaran baru."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Prepare data for serializer (only include proof_image if it exists)
+        serializer_data = {
+            'amount': amount,
+            'transfer_date': transfer_date,
+        }
+        # Only include proof_image if it's in the request
+        if 'proof_image' in request.data and request.data['proof_image']:
+            serializer_data['proof_image'] = request.data['proof_image']
+        # Status always defaults to PENDING for reseller uploads
+        serializer_data['status'] = PaymentStatus.PENDING
+        
+        # Use serializer to create payment (handles file uploads properly)
+        serializer = ResellerPaymentUpdateSerializer(data=serializer_data)
+        
+        if serializer.is_valid():
+            payment = serializer.save(booking=booking, status=PaymentStatus.PENDING)
+            # Return updated booking
+            booking_serializer = self.get_serializer(booking)
+            return Response(booking_serializer.data)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=False, methods=["get"], url_path="commissions")
+    def commissions(self, request):
+        """Get commission history for the authenticated reseller."""
+        if not request.user.is_authenticated:
+            return Response(
+                {"detail": "Authentication required."},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        try:
+            reseller_profile = ResellerProfile.objects.get(user=request.user)
+        except ResellerProfile.DoesNotExist:
+            return Response(
+                {"detail": "Profil reseller tidak ditemukan."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Get all commissions for this reseller with proper joins for serialization
+        queryset = ResellerCommission.objects.filter(
+            reseller=reseller_profile
+        ).select_related(
+            "booking", 
+            "booking__tour_date", 
+            "booking__tour_date__package", 
+            "booking__reseller"
+        ).prefetch_related(
+            "booking__seat_slots"
+        ).order_by("-created_at")
+        
+        # Filter by booking status if provided
+        booking_status = request.query_params.get("booking_status")
+        if booking_status:
+            queryset = queryset.filter(booking__status=booking_status)
+        
+        # Filter by level if provided
+        level = request.query_params.get("level")
+        if level is not None:
+            try:
+                level_int = int(level)
+                queryset = queryset.filter(level=level_int)
+            except ValueError:
+                pass
+        
+        # Pagination
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = ResellerCommissionSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        
+        serializer = ResellerCommissionSerializer(queryset, many=True)
+        return Response(serializer.data)
 
 
 class AdminBookingViewSet(viewsets.ModelViewSet):
@@ -1153,8 +1327,8 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         """Optimize queryset by prefetching related objects."""
         return Booking.objects.select_related(
-            "reseller", "reseller__user", "tour_date", "tour_date__package", "payment"
-        ).prefetch_related("seat_slots")
+            "reseller", "reseller__user", "tour_date", "tour_date__package"
+        ).prefetch_related("seat_slots", "payments")
     
     @action(detail=False, methods=["get"], url_path="dashboard-stats")
     def dashboard_stats(self, request):
@@ -1174,8 +1348,8 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
         
         confirmed_bookings = Booking.objects.filter(
             status=BookingStatus.CONFIRMED,
-            payment__status=PaymentStatus.APPROVED
-        ).select_related("tour_date", "tour_date__package").annotate(
+            payments__status=PaymentStatus.APPROVED
+        ).distinct().select_related("tour_date", "tour_date__package").annotate(
             seat_count=Count('seat_slots')
         ).annotate(
             booking_total=F('tour_date__price') * F('seat_count') + F('platform_fee')
@@ -1221,8 +1395,8 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
         recent_confirmed_bookings = Booking.objects.filter(
             created_at__gte=thirty_days_ago,
             status=BookingStatus.CONFIRMED,
-            payment__status=PaymentStatus.APPROVED
-        ).select_related("tour_date", "tour_date__package").annotate(
+            payments__status=PaymentStatus.APPROVED
+        ).distinct().select_related("tour_date", "tour_date__package").annotate(
             seat_count=Count('seat_slots')
         ).annotate(
             booking_total=F('tour_date__price') * F('seat_count') + F('platform_fee')
@@ -1238,8 +1412,8 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
             created_at__gte=sixty_days_ago,
             created_at__lt=thirty_days_ago,
             status=BookingStatus.CONFIRMED,
-            payment__status=PaymentStatus.APPROVED
-        ).select_related("tour_date", "tour_date__package").annotate(
+            payments__status=PaymentStatus.APPROVED
+        ).distinct().select_related("tour_date", "tour_date__package").annotate(
             seat_count=Count('seat_slots')
         ).annotate(
             booking_total=F('tour_date__price') * F('seat_count') + F('platform_fee')
@@ -1306,8 +1480,8 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
             created_at__gte=start_bound,
             created_at__lte=end_bound,
             status=BookingStatus.CONFIRMED,
-            payment__status=PaymentStatus.APPROVED
-        ).select_related("tour_date", "tour_date__package").annotate(
+            payments__status=PaymentStatus.APPROVED
+        ).distinct().select_related("tour_date", "tour_date__package").annotate(
             seat_count=Count('seat_slots')
         ).annotate(
             booking_total=F('tour_date__price') * F('seat_count') + F('platform_fee')
@@ -1345,7 +1519,7 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
             "tour_date__package__supplier",
         ).prefetch_related(
             "seat_slots",
-            "payment",
+            "payments",
         ).all()
         
         # Filter by status
@@ -1413,16 +1587,17 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Check if payment exists and is approved
-        if not hasattr(booking, 'payment') or not booking.payment:
+        # Check if any payment exists and is approved
+        approved_payment = booking.payments.filter(status=PaymentStatus.APPROVED).first()
+        if not approved_payment:
+            latest_payment = booking.payments.order_by('-created_at').first()
+            if not latest_payment:
+                return Response(
+                    {"detail": "Booking tidak dapat dikonfirmasi tanpa pembayaran yang disetujui."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
             return Response(
-                {"detail": "Booking tidak dapat dikonfirmasi tanpa pembayaran yang disetujui."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        if booking.payment.status != PaymentStatus.APPROVED:
-            return Response(
-                {"detail": f"Pembayaran harus disetujui sebelum mengonfirmasi booking. Status pembayaran saat ini: {booking.payment.status}"},
+                {"detail": f"Pembayaran harus disetujui sebelum mengonfirmasi booking. Status pembayaran saat ini: {latest_payment.status}"},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -1462,16 +1637,17 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=["post"], url_path="payment/approve")
     def approve_payment(self, request, pk=None):
-        """Approve a payment for a booking."""
+        """Approve the latest payment for a booking."""
         booking = self.get_object()
         
-        if not hasattr(booking, 'payment') or not booking.payment:
+        latest_payment = booking.payments.order_by('-created_at').first()
+        if not latest_payment:
             return Response(
                 {"detail": "Booking tidak memiliki pembayaran."},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        payment = booking.payment
+        payment = latest_payment
         payment.status = PaymentStatus.APPROVED
         payment.reviewed_by = request.user
         payment.reviewed_at = timezone.now()
@@ -1482,16 +1658,17 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=["post"], url_path="payment/reject")
     def reject_payment(self, request, pk=None):
-        """Reject a payment for a booking."""
+        """Reject the latest payment for a booking."""
         booking = self.get_object()
         
-        if not hasattr(booking, 'payment') or not booking.payment:
+        latest_payment = booking.payments.order_by('-created_at').first()
+        if not latest_payment:
             return Response(
                 {"detail": "Booking tidak memiliki pembayaran."},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        payment = booking.payment
+        payment = latest_payment
         payment.status = PaymentStatus.REJECTED
         payment.reviewed_by = request.user
         payment.reviewed_at = timezone.now()
@@ -1502,10 +1679,11 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=["patch"], url_path="payment/status")
     def update_payment_status(self, request, pk=None):
-        """Update payment status for a booking."""
+        """Update status of the latest payment for a booking."""
         booking = self.get_object()
         
-        if not hasattr(booking, 'payment') or not booking.payment:
+        latest_payment = booking.payments.order_by('-created_at').first()
+        if not latest_payment:
             return Response(
                 {"detail": "Booking tidak memiliki pembayaran."},
                 status=status.HTTP_400_BAD_REQUEST
@@ -1524,7 +1702,7 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        payment = booking.payment
+        payment = latest_payment
         payment.status = new_status
         payment.reviewed_by = request.user
         payment.reviewed_at = timezone.now()

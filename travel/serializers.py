@@ -33,6 +33,12 @@ class ResellerGroupListField(serializers.PrimaryKeyRelatedField):
     - String-to-int conversion for individual IDs
     """
     
+    def __init__(self, **kwargs):
+        # Ensure queryset is set if not provided
+        if 'queryset' not in kwargs:
+            kwargs['queryset'] = ResellerGroup.objects.filter(is_active=True)
+        super().__init__(**kwargs)
+    
     def get_value(self, dictionary):
         """
         Override to handle JSON string arrays from FormData.
@@ -541,15 +547,17 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
 class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
     """Serializer for creating/updating tour packages (excludes nested relations).
     
-    Note: reseller_groups is included in fields but suppliers cannot modify it.
-    Only admins can set reseller groups via AdminTourPackageSerializer.
+    Suppliers can now modify reseller_groups to control which reseller groups can view and book their tours.
+    If reseller_groups is empty, the tour is visible to all resellers.
     """
     
     supplier = serializers.PrimaryKeyRelatedField(read_only=True)
     reseller_groups = ResellerGroupListField(
         many=True,
         required=False,
-        read_only=True,  # Suppliers cannot modify reseller groups
+        allow_empty=True,
+        queryset=ResellerGroup.objects.filter(is_active=True),
+        # Suppliers can now modify reseller groups
     )
     
     class Meta:
@@ -666,22 +674,32 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
             slug = TourPackageSerializer._generate_unique_slug(name)
         
         validated_data["slug"] = slug
-        # Remove reseller_groups from validated_data - suppliers cannot set this
-        validated_data.pop("reseller_groups", None)
-        return super().create(validated_data)
+        
+        # Handle reseller_groups ManyToMany field
+        reseller_groups = validated_data.pop("reseller_groups", None)
+        
+        # Create the instance first
+        instance = super().create(validated_data)
+        
+        # Then set the reseller_groups if provided
+        if reseller_groups is not None:
+            instance.reseller_groups.set(reseller_groups)
+        
+        return instance
     
     def update(self, instance, validated_data):
-        """Update tour package. Suppliers cannot modify reseller_groups."""
-        # Remove reseller_groups from validated_data - suppliers cannot modify this
-        # Only admins can modify reseller groups via AdminTourPackageSerializer
-        validated_data.pop("reseller_groups", None)
+        """Update tour package, including reseller_groups."""
+        # Handle reseller_groups ManyToMany field separately
+        reseller_groups = validated_data.pop("reseller_groups", None)
         
         # Update other fields
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
         
-        # reseller_groups is read-only for suppliers, so we don't update it here
+        # Update reseller_groups if provided (even if empty list to clear groups)
+        if reseller_groups is not None:
+            instance.reseller_groups.set(reseller_groups)
         
         return instance
 
@@ -915,12 +933,18 @@ class BookingListSerializer(serializers.ModelSerializer):
     departure_date = serializers.DateField(source="tour_date.departure_date", read_only=True)
     seats_booked = serializers.IntegerField(read_only=True)
     total_amount = serializers.IntegerField(read_only=True)
-    payment_status = serializers.CharField(source="payment.status", read_only=True, allow_null=True)
+    payment_status = serializers.SerializerMethodField()
+    
+    def get_payment_status(self, obj):
+        """Get status of the latest payment (for backward compatibility)."""
+        latest_payment = obj.payments.order_by('-created_at').first()
+        return latest_payment.status if latest_payment else None
     
     class Meta:
         model = Booking
         fields = [
             "id",
+            "booking_number",
             "reseller",
             "reseller_name",
             "tour_date",
@@ -934,7 +958,7 @@ class BookingListSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at", "seats_booked", "total_amount", "payment_status"]
+        read_only_fields = ["id", "booking_number", "created_at", "updated_at", "seats_booked", "total_amount", "payment_status"]
 
 
 class BookingUpdateSerializer(serializers.ModelSerializer):
@@ -1173,15 +1197,20 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         """
         Create commission records for the booking reseller and their upline.
         
+        Commission is calculated PER SEAT (per passenger), not per booking.
+        The final commission amount = commission_per_seat * number_of_seats_in_booking.
+        
         Commission calculation logic:
         1. Level 0 (Booking Reseller):
            - First check ResellerTourCommission for this reseller + tour package (reseller-specific override)
            - If not found, use TourPackage.commission (general tour commission)
+           - Commission amount = commission_per_seat * booking.seats_booked
            - Only create if commission amount > 0
         
         2. Level 1 (Direct Upline/Sponsor):
            - Get booking reseller's sponsor
-           - Use sponsor.upline_commission_amount
+           - Use sponsor.upline_commission_amount (also per seat)
+           - Commission amount = upline_commission_per_seat * booking.seats_booked
            - Only create if sponsor exists and amount > 0
         """
         from .models import ResellerCommission, ResellerTourCommission
@@ -1191,17 +1220,21 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         
         booking_reseller = booking.reseller
         tour_package = booking.tour_date.package
+        seats_count = booking.seats_booked  # Number of passengers/seats in this booking
         
         # Level 0: Commission for the reseller who made the booking
         # Commission comes from: ResellerTourCommission (if exists) OR TourPackage.commission (fallback)
-        tour_commission = tour_package.get_reseller_commission(booking_reseller)
+        tour_commission_per_seat = tour_package.get_reseller_commission(booking_reseller)
         
-        if tour_commission is not None and tour_commission > 0:
+        if tour_commission_per_seat is not None and tour_commission_per_seat > 0:
+            # Multiply commission per seat by number of seats
+            total_commission = tour_commission_per_seat * seats_count
+            
             commission = ResellerCommission.objects.create(
                 booking=booking,
                 reseller=booking_reseller,
                 level=0,
-                amount=tour_commission
+                amount=total_commission
             )
             # Check if it came from ResellerTourCommission or TourPackage.commission
             has_specific = ResellerTourCommission.objects.filter(
@@ -1212,7 +1245,8 @@ class BookingCreateSerializer(serializers.ModelSerializer):
             commission_source = "ResellerTourCommission" if has_specific else "TourPackage.commission"
             logger.info(
                 f"Created commission {commission.id} for reseller {booking_reseller.id}: "
-                f"{tour_commission} IDR from {commission_source} (tour {tour_package.id}, booking {booking.id})"
+                f"{total_commission} IDR ({tour_commission_per_seat} IDR/seat × {seats_count} seats) "
+                f"from {commission_source} (tour {tour_package.id}, booking {booking.id})"
             )
         else:
             logger.warning(
@@ -1224,21 +1258,57 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         # Level 1: Commission for the direct upline (sponsor)
         if booking_reseller.sponsor:
             upline = booking_reseller.sponsor
-            upline_commission = upline.upline_commission_amount
+            upline_commission_per_seat = upline.upline_commission_amount
             
             # Create commission record for upline (level 1) if amount > 0
-            if upline_commission and upline_commission > 0:
+            # Multiply commission per seat by number of seats
+            if upline_commission_per_seat and upline_commission_per_seat > 0:
+                total_upline_commission = upline_commission_per_seat * seats_count
+                
                 upline_commission_obj = ResellerCommission.objects.create(
                     booking=booking,
                     reseller=upline,
                     level=1,
-                    amount=upline_commission
+                    amount=total_upline_commission
                 )
-                logger.info(f"Created upline commission {upline_commission_obj.id} for upline {upline.id}: {upline_commission} IDR (booking {booking.id})")
+                logger.info(
+                    f"Created upline commission {upline_commission_obj.id} for upline {upline.id}: "
+                    f"{total_upline_commission} IDR ({upline_commission_per_seat} IDR/seat × {seats_count} seats) "
+                    f"(booking {booking.id})"
+                )
             else:
-                logger.info(f"No upline commission created: upline_commission_amount={upline_commission}")
+                logger.info(f"No upline commission created: upline_commission_amount={upline_commission_per_seat}")
         else:
             logger.info(f"No sponsor for reseller {booking_reseller.id}, skipping upline commission")
+
+
+class PaymentSerializer(serializers.ModelSerializer):
+    """Serializer for individual payment records."""
+    
+    reviewed_by_email = serializers.EmailField(source="reviewed_by.email", read_only=True, allow_null=True)
+    
+    class Meta:
+        model = Payment
+        fields = [
+            "id",
+            "amount",
+            "transfer_date",
+            "proof_image",
+            "status",
+            "reviewed_by",
+            "reviewed_by_email",
+            "reviewed_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "reviewed_by",
+            "reviewed_by_email",
+            "reviewed_at",
+            "created_at",
+            "updated_at",
+        ]
 
 
 class BookingSerializer(serializers.ModelSerializer):
@@ -1257,12 +1327,43 @@ class BookingSerializer(serializers.ModelSerializer):
     total_amount = serializers.IntegerField(read_only=True)
     subtotal = serializers.IntegerField(read_only=True)
     seat_slots = SeatSlotSerializer(many=True, read_only=True)
-    payment_status = serializers.CharField(source="payment.status", read_only=True, allow_null=True)
-    payment_amount = serializers.IntegerField(source="payment.amount", read_only=True, allow_null=True)
-    payment_transfer_date = serializers.DateField(source="payment.transfer_date", read_only=True, allow_null=True)
-    payment_proof_image = serializers.ImageField(source="payment.proof_image", read_only=True, allow_null=True)
-    payment_id = serializers.IntegerField(source="payment.id", read_only=True, allow_null=True)
+    
+    # Payment history (list of all payments)
+    payments = PaymentSerializer(many=True, read_only=True)
+    
+    # Backward compatibility: latest payment info (for existing code)
+    payment_status = serializers.SerializerMethodField()
+    payment_amount = serializers.SerializerMethodField()
+    payment_transfer_date = serializers.SerializerMethodField()
+    payment_proof_image = serializers.SerializerMethodField()
+    payment_id = serializers.SerializerMethodField()
+    
     reseller_commission = serializers.SerializerMethodField()
+    
+    def get_payment_status(self, obj):
+        """Get status of the latest payment (for backward compatibility)."""
+        latest_payment = obj.payments.order_by('-created_at').first()
+        return latest_payment.status if latest_payment else None
+    
+    def get_payment_amount(self, obj):
+        """Get amount of the latest payment (for backward compatibility)."""
+        latest_payment = obj.payments.order_by('-created_at').first()
+        return latest_payment.amount if latest_payment else None
+    
+    def get_payment_transfer_date(self, obj):
+        """Get transfer date of the latest payment (for backward compatibility)."""
+        latest_payment = obj.payments.order_by('-created_at').first()
+        return latest_payment.transfer_date if latest_payment else None
+    
+    def get_payment_proof_image(self, obj):
+        """Get proof image of the latest payment (for backward compatibility)."""
+        latest_payment = obj.payments.order_by('-created_at').first()
+        return latest_payment.proof_image.url if latest_payment and latest_payment.proof_image else None
+    
+    def get_payment_id(self, obj):
+        """Get ID of the latest payment (for backward compatibility)."""
+        latest_payment = obj.payments.order_by('-created_at').first()
+        return latest_payment.id if latest_payment else None
     
     def get_reseller_commission(self, obj):
         """Get commission amount for the reseller who made this booking."""
@@ -1281,6 +1382,7 @@ class BookingSerializer(serializers.ModelSerializer):
         model = Booking
         fields = [
             "id",
+            "booking_number",
             "reseller",
             "reseller_name",
             "reseller_email",
@@ -1299,6 +1401,7 @@ class BookingSerializer(serializers.ModelSerializer):
             "total_amount",
             "notes",
             "seat_slots",
+            "payments",
             "payment_status",
             "payment_amount",
             "payment_transfer_date",
@@ -1310,6 +1413,7 @@ class BookingSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "id",
+            "booking_number",
             "created_at",
             "updated_at",
             "seats_booked",
@@ -1320,10 +1424,76 @@ class BookingSerializer(serializers.ModelSerializer):
         ]
 
 
+# ==================== COMMISSION SERIALIZERS ====================
+
+class ResellerCommissionSerializer(serializers.ModelSerializer):
+    """Serializer for reseller commission history."""
+    
+    booking_id = serializers.IntegerField(source="booking.id", read_only=True)
+    booking_number = serializers.CharField(source="booking.booking_number", read_only=True)
+    booking_status = serializers.CharField(source="booking.status", read_only=True)
+    tour_package_name = serializers.CharField(source="booking.tour_date.package.name", read_only=True)
+    tour_package_slug = serializers.SlugField(source="booking.tour_date.package.slug", read_only=True)
+    departure_date = serializers.DateField(source="booking.tour_date.departure_date", read_only=True)
+    seats_booked = serializers.SerializerMethodField()
+    booking_total_amount = serializers.IntegerField(source="booking.total_amount", read_only=True)
+    level_display = serializers.SerializerMethodField()
+    
+    def get_seats_booked(self, obj):
+        """Get seats booked count from prefetched seat_slots or by querying."""
+        booking = obj.booking
+        if hasattr(booking, '_prefetched_objects_cache') and 'seat_slots' in booking._prefetched_objects_cache:
+            return len(booking._prefetched_objects_cache['seat_slots'])
+        return booking.seat_slots.count()
+    
+    def get_level_display(self, obj):
+        """Get human-readable level description."""
+        if obj.level == 0:
+            return "Booking Saya"
+        elif obj.level == 1:
+            return "Dari Downline Langsung"
+        else:
+            return f"Dari Downline (Level {obj.level})"
+    
+    class Meta:
+        model = ResellerCommission
+        fields = [
+            "id",
+            "booking_id",
+            "booking_number",
+            "booking_status",
+            "tour_package_name",
+            "tour_package_slug",
+            "departure_date",
+            "seats_booked",
+            "booking_total_amount",
+            "level",
+            "level_display",
+            "amount",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "booking_id",
+            "booking_status",
+            "tour_package_name",
+            "tour_package_slug",
+            "departure_date",
+            "seats_booked",
+            "booking_total_amount",
+            "level",
+            "level_display",
+            "amount",
+            "created_at",
+            "updated_at",
+        ]
+
+
 # ==================== PAYMENT SERIALIZERS ====================
 
-class PaymentSerializer(serializers.ModelSerializer):
-    """Serializer for payment records with validation."""
+class PaymentDetailSerializer(serializers.ModelSerializer):
+    """Serializer for payment records with booking details (used in admin views)."""
     
     booking_id = serializers.IntegerField(source="booking.id", read_only=True)
     booking_total_amount = serializers.IntegerField(source="booking.total_amount", read_only=True)
@@ -1373,6 +1543,31 @@ class PaymentUpdateSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "booking",
+            "reviewed_by",
+            "reviewed_at",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class ResellerPaymentUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for resellers to upload/update payment details (amount, transfer_date, proof_image).
+    
+    Resellers can only upload payment information, but cannot change the payment status.
+    Status must be set by suppliers or admins.
+    """
+    
+    class Meta:
+        model = Payment
+        fields = [
+            "amount",
+            "transfer_date",
+            "proof_image",
+        ]
+        read_only_fields = [
+            "id",
+            "booking",
+            "status",
             "reviewed_by",
             "reviewed_at",
             "created_at",

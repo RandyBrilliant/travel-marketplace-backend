@@ -50,6 +50,45 @@ sudo ./deploy/update.sh
 
 ---
 
+## 🔄 Resetting Database (After Migration Reset)
+
+**⚠️ WARNING: This will DELETE ALL DATA in the database!**
+
+If you've reset your migrations and need to start fresh in production, use one of these scripts:
+
+### Option 1: Reset Database (Recommended)
+This drops and recreates the database while keeping the Docker volume:
+```bash
+# Make script executable (if not already)
+chmod +x deploy/reset-db-production.sh
+
+# Run the reset script
+sudo ./deploy/reset-db-production.sh
+```
+
+### Option 2: Reset Database Volume (Alternative)
+This removes the entire database volume and recreates everything:
+```bash
+# Make script executable (if not already)
+chmod +x deploy/reset-db-volume.sh
+
+# Run the volume reset script
+sudo ./deploy/reset-db-volume.sh
+```
+
+**After reset:**
+1. Create a new superuser:
+   ```bash
+   docker compose -f docker-compose.prod.yml exec api python manage.py createsuperuser
+   ```
+
+2. Verify migrations:
+   ```bash
+   docker compose -f docker-compose.prod.yml exec api python manage.py showmigrations
+   ```
+
+---
+
 ## 📊 Common Commands
 
 ```bash

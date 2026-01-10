@@ -383,6 +383,13 @@ class AdminSupplierProfileViewSet(BaseAdminProfileViewSet):
     filterset_fields = ["user__is_active"]
     search_fields = ["company_name", "contact_person", "user__email"]
 
+    def list(self, request, *args, **kwargs):
+        """
+        List all supplier profiles with pagination.
+        Use parent's list method which properly handles pagination via DEFAULT_PAGINATION_CLASS.
+        """
+        return super().list(request, *args, **kwargs)
+
     def get_user_role(self):
         return UserRole.SUPPLIER
 
@@ -400,6 +407,13 @@ class AdminResellerProfileViewSet(BaseAdminProfileViewSet):
         "bank_account_name",
         "bank_account_number",
     ]
+
+    def list(self, request, *args, **kwargs):
+        """
+        List all reseller profiles with pagination.
+        Use parent's list method which properly handles pagination via DEFAULT_PAGINATION_CLASS.
+        """
+        return super().list(request, *args, **kwargs)
 
     def get_user_role(self):
         return UserRole.RESELLER
@@ -444,6 +458,16 @@ class AdminStaffProfileViewSet(BaseAdminProfileViewSet):
     serializer_class = AdminStaffProfileSerializer
     filterset_fields = ["user__is_active"]
     search_fields = ["full_name", "user__email"]
+    
+    def list(self, request, *args, **kwargs):
+        """
+        List all staff profiles with pagination.
+        Use parent's list method which properly handles pagination via DEFAULT_PAGINATION_CLASS.
+        """
+        # Use parent's list method - it automatically applies pagination from settings
+        # DEFAULT_PAGINATION_CLASS is 'rest_framework.pagination.PageNumberPagination'
+        # which respects PAGE_SIZE_QUERY_PARAM='page_size' to allow custom page sizes
+        return super().list(request, *args, **kwargs)
 
     def get_user_role(self):
         return UserRole.STAFF

@@ -57,6 +57,10 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS('Creating mock data...'))
         
         with transaction.atomic():
+            # Create staff
+            staff = self._create_staff()
+            self.stdout.write(self.style.SUCCESS(f'Created {len(staff)} staff members'))
+            
             # Create suppliers
             suppliers = self._create_suppliers()
             self.stdout.write(self.style.SUCCESS(f'Created {len(suppliers)} suppliers'))
@@ -90,7 +94,8 @@ class Command(BaseCommand):
         ResellerGroup.objects.all().delete()
         ResellerProfile.objects.all().delete()
         SupplierProfile.objects.all().delete()
-        CustomUser.objects.filter(role__in=[UserRole.SUPPLIER, UserRole.RESELLER]).delete()
+        StaffProfile.objects.all().delete()
+        CustomUser.objects.filter(role__in=[UserRole.SUPPLIER, UserRole.RESELLER, UserRole.STAFF]).delete()
 
     def _download_image(self, url, max_size=(800, 800)):
         """Download an image from URL and return a Django ContentFile."""
@@ -121,6 +126,225 @@ class Command(BaseCommand):
         except Exception as e:
             self.stdout.write(self.style.WARNING(f'Failed to download image from {url}: {e}'))
             return None
+
+    def _create_staff(self):
+        """Create mock staff members - Indonesian names."""
+        # Unsplash images for staff profile photos (professional portraits)
+        staff_photo_urls = [
+            'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=400&h=400&fit=crop',  # Professional man
+            'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=400&fit=crop',  # Professional woman
+            'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=400&fit=crop',  # Professional man
+            'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=400&h=400&fit=crop',  # Professional woman
+            'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400&h=400&fit=crop',  # Professional man
+            'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400&h=400&fit=crop',  # Professional woman
+            'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400&h=400&fit=crop',  # Professional man
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&h=400&fit=crop',  # Professional woman
+            'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=400&h=400&fit=crop',  # Professional man
+            'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=400&h=400&fit=crop',  # Professional man
+            'https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?w=400&h=400&fit=crop',  # Professional woman
+            'https://images.unsplash.com/photo-1507591064344-4c6ce005b128?w=400&h=400&fit=crop',  # Professional woman
+            'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400&h=400&fit=crop',  # Professional woman
+            'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=400&fit=crop',  # Professional man
+            'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=400&h=400&fit=crop',  # Professional man
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&h=400&fit=crop',  # Professional woman
+            'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400&h=400&fit=crop',  # Professional man
+            'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=400&h=400&fit=crop',  # Professional man
+            'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=400&h=400&fit=crop',  # Professional man
+            'https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?w=400&h=400&fit=crop',  # Professional woman
+            'https://images.unsplash.com/photo-1507591064344-4c6ce005b128?w=400&h=400&fit=crop',  # Professional woman
+            'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400&h=400&fit=crop',  # Professional woman
+            'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=400&h=400&fit=crop',  # Professional man
+            'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=400&fit=crop',  # Professional man
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&h=400&fit=crop',  # Professional woman
+            'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400&h=400&fit=crop',  # Professional man
+            'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=400&h=400&fit=crop',  # Professional man
+            'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=400&h=400&fit=crop',  # Professional man
+            'https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?w=400&h=400&fit=crop',  # Professional woman
+        ]
+        
+        staff_data = [
+            {
+                'email': 'staff1@travelmarketplace.com',
+                'full_name': 'Ahmad Wijaya',
+                'contact_phone': '+62-811-1001-1001',
+            },
+            {
+                'email': 'staff2@travelmarketplace.com',
+                'full_name': 'Siti Rahayu',
+                'contact_phone': '+62-811-1002-1002',
+            },
+            {
+                'email': 'staff3@travelmarketplace.com',
+                'full_name': 'Bambang Sutrisno',
+                'contact_phone': '+62-811-1003-1003',
+            },
+            {
+                'email': 'staff4@travelmarketplace.com',
+                'full_name': 'Dewi Lestari',
+                'contact_phone': '+62-811-1004-1004',
+            },
+            {
+                'email': 'staff5@travelmarketplace.com',
+                'full_name': 'Eko Prasetyo',
+                'contact_phone': '+62-811-1005-1005',
+            },
+            {
+                'email': 'staff6@travelmarketplace.com',
+                'full_name': 'Fitri Handayani',
+                'contact_phone': '+62-811-1006-1006',
+            },
+            {
+                'email': 'staff7@travelmarketplace.com',
+                'full_name': 'Gunawan Setiawan',
+                'contact_phone': '+62-811-1007-1007',
+            },
+            {
+                'email': 'staff8@travelmarketplace.com',
+                'full_name': 'Hesti Novianti',
+                'contact_phone': '+62-811-1008-1008',
+            },
+            {
+                'email': 'staff9@travelmarketplace.com',
+                'full_name': 'Indra Kurniawan',
+                'contact_phone': '+62-811-1009-1009',
+            },
+            {
+                'email': 'staff10@travelmarketplace.com',
+                'full_name': 'Juli Susanti',
+                'contact_phone': '+62-811-1010-1010',
+            },
+            {
+                'email': 'staff11@travelmarketplace.com',
+                'full_name': 'Kurniawan Wibowo',
+                'contact_phone': '+62-811-1011-1011',
+            },
+            {
+                'email': 'staff12@travelmarketplace.com',
+                'full_name': 'Lina Marlina',
+                'contact_phone': '+62-811-1012-1012',
+            },
+            {
+                'email': 'staff13@travelmarketplace.com',
+                'full_name': 'Muhammad Fauzan',
+                'contact_phone': '+62-811-1013-1013',
+            },
+            {
+                'email': 'staff14@travelmarketplace.com',
+                'full_name': 'Nurhayati Sari',
+                'contact_phone': '+62-811-1014-1014',
+            },
+            {
+                'email': 'staff15@travelmarketplace.com',
+                'full_name': 'Oka Mahendra',
+                'contact_phone': '+62-811-1015-1015',
+            },
+            {
+                'email': 'staff16@travelmarketplace.com',
+                'full_name': 'Putri Anggraeni',
+                'contact_phone': '+62-811-1016-1016',
+            },
+            {
+                'email': 'staff17@travelmarketplace.com',
+                'full_name': 'Rudi Hermawan',
+                'contact_phone': '+62-811-1017-1017',
+            },
+            {
+                'email': 'staff18@travelmarketplace.com',
+                'full_name': 'Sari Indrawati',
+                'contact_phone': '+62-811-1018-1018',
+            },
+            {
+                'email': 'staff19@travelmarketplace.com',
+                'full_name': 'Teguh Santoso',
+                'contact_phone': '+62-811-1019-1019',
+            },
+            {
+                'email': 'staff20@travelmarketplace.com',
+                'full_name': 'Umi Rahmawati',
+                'contact_phone': '+62-811-1020-1020',
+            },
+            {
+                'email': 'staff21@travelmarketplace.com',
+                'full_name': 'Vito Ramadhan',
+                'contact_phone': '+62-811-1021-1021',
+            },
+            {
+                'email': 'staff22@travelmarketplace.com',
+                'full_name': 'Winda Sari',
+                'contact_phone': '+62-811-1022-1022',
+            },
+            {
+                'email': 'staff23@travelmarketplace.com',
+                'full_name': 'Yoga Pratama',
+                'contact_phone': '+62-811-1023-1023',
+            },
+            {
+                'email': 'staff24@travelmarketplace.com',
+                'full_name': 'Zahra Fadilah',
+                'contact_phone': '+62-811-1024-1024',
+            },
+            {
+                'email': 'staff25@travelmarketplace.com',
+                'full_name': 'Andika Permana',
+                'contact_phone': '+62-811-1025-1025',
+            },
+            {
+                'email': 'staff26@travelmarketplace.com',
+                'full_name': 'Bella Kusuma',
+                'contact_phone': '+62-811-1026-1026',
+            },
+            {
+                'email': 'staff27@travelmarketplace.com',
+                'full_name': 'Cahya Nugroho',
+                'contact_phone': '+62-811-1027-1027',
+            },
+            {
+                'email': 'staff28@travelmarketplace.com',
+                'full_name': 'Diana Puspita',
+                'contact_phone': '+62-811-1028-1028',
+            },
+            {
+                'email': 'staff29@travelmarketplace.com',
+                'full_name': 'Eko Yulianto',
+                'contact_phone': '+62-811-1029-1029',
+            },
+            {
+                'email': 'staff30@travelmarketplace.com',
+                'full_name': 'Febrianti Wardani',
+                'contact_phone': '+62-811-1030-1030',
+            },
+        ]
+        
+        staff = []
+        for idx, data in enumerate(staff_data):
+            user = CustomUser.objects.create_user(
+                email=data['email'],
+                password='password123',
+                role=UserRole.STAFF,
+                email_verified=True,
+                email_verified_at=timezone.now(),
+                is_active=True,
+            )
+            
+            staff_profile = StaffProfile.objects.create(
+                user=user,
+                full_name=data['full_name'],
+                contact_phone=data['contact_phone'],
+            )
+            
+            # Download and assign profile photo
+            if idx < len(staff_photo_urls):
+                photo_file = self._download_image(staff_photo_urls[idx])
+                if photo_file:
+                    staff_profile.photo.save(
+                        f'staff_{staff_profile.id}.jpg',
+                        photo_file,
+                        save=True
+                    )
+            
+            staff.append(staff_profile)
+        
+        return staff
 
     def _create_suppliers(self):
         """Create mock suppliers - all Indonesian tour companies."""

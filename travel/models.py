@@ -187,7 +187,7 @@ class TourPackage(models.Model):
     # Commission settings (Admin-only editable)
     commission = models.IntegerField(
         validators=[MinValueValidator(0)],
-        help_text=_("Commission amount for the tour package."),
+        help_text=_("Commission amount per seat (per passenger) in IDR for the tour package."),
         default=0,
     )
 
@@ -241,11 +241,14 @@ class TourPackage(models.Model):
     
     def get_reseller_commission(self, reseller):
         """
-        Get the fixed commission amount for a specific reseller for this tour package.
+        Get the fixed commission amount per seat (per passenger) for a specific reseller for this tour package.
         Returns:
         - ResellerTourCommission.commission_amount if exists (reseller-specific override)
         - TourPackage.commission if ResellerTourCommission doesn't exist (general tour commission)
         - None if both are 0 or not set
+        
+        Note: This returns commission PER SEAT. The actual commission for a booking will be
+        multiplied by the number of seats in the booking.
         """
         try:
             commission = ResellerTourCommission.objects.get(
@@ -746,6 +749,13 @@ class Booking(models.Model):
 
 
     notes = models.TextField(blank=True)
+    
+    booking_number = models.CharField(
+        max_length=20,
+        unique=True,
+        db_index=True,
+        help_text=_("Unique professional booking reference number (e.g., BK-2024-000123)."),
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -762,7 +772,38 @@ class Booking(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"Booking #{self.pk} - {self.tour_date} ({self.seats_booked} seats)"
+        return f"Booking {self.booking_number} - {self.tour_date} ({self.seats_booked} seats)"
+    
+    def generate_booking_number(self):
+        """
+        Generate a professional booking number in format: BK-YYYY-NNNNNN
+        where YYYY is the year and NNNNNN is a 6-digit sequential number.
+        """
+        from django.utils import timezone
+        from django.db.models import Max
+        
+        current_year = timezone.now().year
+        
+        # Get the maximum booking number for this year
+        max_booking = Booking.objects.filter(
+            booking_number__startswith=f'BK-{current_year}-'
+        ).aggregate(Max('booking_number'))
+        
+        max_number = max_booking['booking_number__max']
+        
+        if max_number:
+            # Extract the number part and increment
+            try:
+                last_number = int(max_number.split('-')[-1])
+                next_number = last_number + 1
+            except (ValueError, IndexError):
+                next_number = 1
+        else:
+            # First booking of the year
+            next_number = 1
+        
+        # Format as 6-digit number with leading zeros
+        return f'BK-{current_year}-{next_number:06d}'
     
     @property
     def seats_booked(self):
@@ -788,16 +829,11 @@ class Booking(models.Model):
         return self.status == BookingStatus.PENDING
     
     def can_be_confirmed(self):
-        """Check if booking can be confirmed (has approved payment)."""
+        """Check if booking can be confirmed (has at least one approved payment)."""
         if self.status != BookingStatus.PENDING:
             return False
-        # Check if payment exists and is approved
-        # Use a query to safely check if payment exists (avoids RelatedObjectDoesNotExist)
-        try:
-            payment = Payment.objects.get(booking=self)
-            return payment.status == PaymentStatus.APPROVED
-        except Payment.DoesNotExist:
-            return False
+        # Check if any payment exists and is approved
+        return Payment.objects.filter(booking=self, status=PaymentStatus.APPROVED).exists()
     
     def clean(self):
         """Validate booking has at least one seat slot."""
@@ -808,7 +844,11 @@ class Booking(models.Model):
             })
     
     def save(self, *args, **kwargs):
-        """Validate before saving."""
+        """Validate before saving and generate booking number if new."""
+        # Generate booking number only for new bookings
+        if not self.booking_number:
+            self.booking_number = self.generate_booking_number()
+        
         self.full_clean()
         super().save(*args, **kwargs)
 
@@ -817,12 +857,13 @@ class Booking(models.Model):
 class Payment(models.Model):
     """
     Manual payment record where reseller uploads transfer proof and details.
+    A booking can have multiple payment records (payment history).
     """
 
-    booking = models.OneToOneField(
+    booking = models.ForeignKey(
         Booking,
         on_delete=models.CASCADE,
-        related_name="payment",
+        related_name="payments",
     )
     amount = models.IntegerField(
         validators=[MinValueValidator(0)],
@@ -886,15 +927,9 @@ class Payment(models.Model):
                     'transfer_date': 'Tanggal transfer tidak boleh di masa depan.'
                 })
         
-        # Validate payment amount matches booking total (with small tolerance for rounding)
-        if self.booking_id and self.amount:
-            expected_amount = self.booking.total_amount
-            # Allow 1% tolerance for rounding differences
-            tolerance = int(expected_amount * 0.01)
-            if abs(self.amount - expected_amount) > tolerance:
-                raise ValidationError({
-                    'amount': f'Jumlah pembayaran ({self.amount:,} IDR) tidak sesuai dengan total booking ({expected_amount:,} IDR).'
-                })
+        # Note: With multiple payments, we don't validate against total_amount here
+        # The total of all approved payments should match booking total, but individual
+        # payments can be partial. This validation is removed to allow partial payments.
     
     def save(self, *args, **kwargs):
         """Validate before saving."""
@@ -902,13 +937,17 @@ class Payment(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self) -> str:
-        return f"Payment for booking #{self.booking_id} - Rp. {self.amount:,}"
+        booking_number = self.booking.booking_number if self.booking else f"#{self.booking_id}"
+        return f"Payment for booking {booking_number} - Rp. {self.amount:,}"
 
 
 class ResellerTourCommission(models.Model):
     """
     Commission settings per reseller per tour package.
-    Each reseller can have a different fixed commission amount for each tour package.
+    Each reseller can have a different fixed commission amount per seat for each tour package.
+    
+    Note: commission_amount is PER SEAT (per passenger). The actual commission for a booking
+    will be multiplied by the number of seats in the booking.
     """
 
     reseller = models.ForeignKey(
@@ -925,7 +964,7 @@ class ResellerTourCommission(models.Model):
     )
     commission_amount = models.PositiveIntegerField(
         validators=[MinValueValidator(1)],
-        help_text=_("Fixed commission amount in IDR for this reseller for this tour package. Must be greater than zero."),
+        help_text=_("Fixed commission amount per seat (per passenger) in IDR for this reseller for this tour package. Must be greater than zero."),
     )
     is_active = models.BooleanField(
         default=True,
@@ -953,6 +992,9 @@ class ResellerCommission(models.Model):
     """
     Commission entries per reseller per booking.
 
+    IMPORTANT: Commission is calculated PER SEAT (per passenger), not per booking.
+    The amount stored here is the total commission = commission_per_seat × number_of_seats_in_booking.
+
     This supports:
     - the reseller who made the booking (level 0), and
     - their uplines (level 1, 2, ...) for override commissions.
@@ -974,7 +1016,7 @@ class ResellerCommission(models.Model):
     )
     amount = models.PositiveIntegerField(
         validators=[MinValueValidator(1)],
-        help_text=_("Commission amount in IDR (Indonesian Rupiah). Must be at least 1 IDR.")
+        help_text=_("Total commission amount in IDR (commission_per_seat × number_of_seats). Must be at least 1 IDR.")
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -990,7 +1032,8 @@ class ResellerCommission(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"Commission {self.amount} for {self.reseller} (booking #{self.booking_id}, level {self.level})"
+        booking_number = self.booking.booking_number if self.booking else f"#{self.booking_id}"
+        return f"Commission {self.amount} for {self.reseller} (booking {booking_number}, level {self.level})"
 
 
 class WithdrawalRequestStatus(models.TextChoices):

@@ -36,6 +36,7 @@ from travel.views import (
     SupplierTourDateViewSet,
     SupplierTourImageViewSet,
     SupplierBookingViewSet,
+    SupplierResellerGroupViewSet,
     ResellerBookingViewSet,
     AdminResellerTourCommissionViewSet,
     AdminResellerGroupViewSet,
@@ -57,6 +58,7 @@ router.register(r"suppliers/me/tours", SupplierTourPackageViewSet, basename="sup
 router.register(r"suppliers/me/tour-dates", SupplierTourDateViewSet, basename="supplier-tour-date")
 router.register(r"suppliers/me/tour-images", SupplierTourImageViewSet, basename="supplier-tour-image")
 router.register(r"suppliers/me/bookings", SupplierBookingViewSet, basename="supplier-booking")
+router.register(r"suppliers/me/reseller-groups", SupplierResellerGroupViewSet, basename="supplier-reseller-group")
 
 # Reseller booking endpoints
 router.register(r"resellers/me/bookings", ResellerBookingViewSet, basename="reseller-booking")
