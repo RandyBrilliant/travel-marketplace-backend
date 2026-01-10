@@ -375,9 +375,10 @@ class PublicTourPackageListView(APIView):
         from hashlib import md5
         
         # Get reseller profile early for both cache key and filtering (optimize to fetch once)
+        # Check if user has reseller profile (supports dual roles)
         reseller_profile = None
         reseller_group_ids = []
-        if request.user.is_authenticated and request.user.role == UserRole.RESELLER:
+        if request.user.is_authenticated and request.user.is_reseller:
             try:
                 reseller_profile = ResellerProfile.objects.prefetch_related('reseller_groups').get(user=request.user)
                 reseller_groups = reseller_profile.reseller_groups.filter(is_active=True)
@@ -390,11 +391,10 @@ class PublicTourPackageListView(APIView):
         # Different resellers see different tours based on their groups
         user_identifier = 'anonymous'
         if request.user.is_authenticated:
-            if request.user.role == UserRole.RESELLER:
-                if reseller_profile:
-                    user_identifier = f'reseller_{reseller_profile.id}_groups_{"_".join(map(str, reseller_group_ids))}'
-                else:
-                    user_identifier = f'reseller_{request.user.id}_no_profile'
+            if reseller_profile:
+                user_identifier = f'reseller_{reseller_profile.id}_groups_{"_".join(map(str, reseller_group_ids))}'
+            elif request.user.is_reseller:
+                user_identifier = f'reseller_{request.user.id}_no_profile'
             else:
                 user_identifier = request.user.role
         
@@ -435,6 +435,7 @@ class PublicTourPackageListView(APIView):
         
         # Filter by reseller groups - only show tours visible to the authenticated reseller
         # For anonymous/public users or non-reseller users, exclude tours with reseller groups
+        # Supports dual roles - users with reseller profile can see reseller tours
         if reseller_profile is not None:
             # Filter tours that are either:
             # 1. Not assigned to any group (visible to all), OR
@@ -451,14 +452,15 @@ class PublicTourPackageListView(APIView):
                 # Reseller doesn't belong to any groups
                 # Only show tours with no group assignment (visible to all)
                 queryset = queryset.filter(reseller_groups__isnull=True)
-        elif request.user.is_authenticated and request.user.role == UserRole.RESELLER:
-            # Reseller profile doesn't exist, only show tours with no group assignment
+        elif request.user.is_authenticated and request.user.is_reseller:
+            # User has reseller profile but it doesn't exist (shouldn't happen, but handle gracefully)
+            # Only show tours with no group assignment
             # This prevents unauthorized access to group-restricted tours
             queryset = queryset.filter(reseller_groups__isnull=True)
         else:
-            # For anonymous users or non-reseller authenticated users (staff, supplier, etc.),
+            # For anonymous users or authenticated users without reseller profile,
             # exclude tours that have any reseller groups assigned
-            # These tours should only be visible to resellers with appropriate group access
+            # These tours should only be visible to users with reseller profiles and appropriate group access
             queryset = queryset.filter(reseller_groups__isnull=True)
         
         # Search
@@ -551,8 +553,9 @@ class PublicTourPackageDetailView(APIView):
         
         # Check if tour has reseller group restrictions
         if tour_groups.exists():
-            # Tour has group restrictions - only resellers with appropriate group access can view
-            if request.user.is_authenticated and request.user.role == UserRole.RESELLER:
+            # Tour has group restrictions - only users with reseller profile and appropriate group access can view
+            # Supports dual roles - suppliers with reseller profiles can access reseller tours
+            if request.user.is_authenticated and request.user.is_reseller:
                 try:
                     # Prefetch reseller_profile for serializer to avoid N+1 query
                     reseller_profile = ResellerProfile.objects.prefetch_related('reseller_groups').select_related('user').get(user=request.user)
@@ -573,12 +576,12 @@ class PublicTourPackageDetailView(APIView):
                     # Reseller profile doesn't exist, deny access
                     raise Http404("Paket tur tidak ditemukan")
             else:
-                # Anonymous user or non-reseller user - deny access to group-restricted tours
+                # Anonymous user or user without reseller profile - deny access to group-restricted tours
                 raise Http404("Paket tur tidak ditemukan")
         else:
             # Tour has no group restrictions - visible to everyone
-            # Cache reseller_profile for serializer if user is a reseller
-            if request.user.is_authenticated and request.user.role == UserRole.RESELLER:
+            # Cache reseller_profile for serializer if user has reseller profile (supports dual roles)
+            if request.user.is_authenticated and request.user.is_reseller:
                 try:
                     reseller_profile = ResellerProfile.objects.prefetch_related('reseller_groups').select_related('user').get(user=request.user)
                     request.user.reseller_profile = reseller_profile  # Cache for serializer

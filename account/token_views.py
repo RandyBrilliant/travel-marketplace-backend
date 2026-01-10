@@ -1,5 +1,4 @@
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-from rest_framework.throttling import AnonRateThrottle
 from rest_framework.response import Response
 from rest_framework import status
 from django.conf import settings
@@ -10,37 +9,14 @@ from account.token_serializers import CustomTokenObtainPairSerializer
 logger = logging.getLogger(__name__)
 
 
-class LoginThrottle(AnonRateThrottle):
-    """Custom throttle for login endpoint - higher rate in development."""
-    def get_rate(self):
-        # Disable throttling in DEBUG mode, use higher rate in production
-        if settings.DEBUG:
-            return None  # No throttling in development
-        return '100/minute'  # Increased from 20/minute
-
-
-class RefreshTokenThrottle(AnonRateThrottle):
-    """
-    Custom throttle for token refresh endpoint.
-    Prevents abuse of refresh token endpoint by limiting requests per IP.
-    More lenient than login throttle since refreshing is a normal operation.
-    """
-    def get_rate(self):
-        # Disable throttling in DEBUG mode, use higher rate in production
-        if settings.DEBUG:
-            return None  # No throttling in development
-        return '30/minute'  # 30 refreshes per minute per IP
-
-
 class CustomTokenObtainPairView(TokenObtainPairView):
     """
     Token obtain view that sets tokens in httpOnly cookies instead of response body.
     Uses CustomTokenObtainPairSerializer to include role and name in the token payload.
-    Includes rate limiting to prevent brute force attacks.
     """
 
     serializer_class = CustomTokenObtainPairSerializer
-    throttle_classes = [LoginThrottle] if not settings.DEBUG else []
+    throttle_classes = []
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -133,10 +109,9 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 class CustomTokenRefreshView(TokenRefreshView):
     """
     Token refresh view that reads refresh token from cookie and sets new tokens in cookies.
-    Includes rate limiting to prevent brute force attacks on token refresh endpoint.
     """
     
-    throttle_classes = [RefreshTokenThrottle] if not settings.DEBUG else []
+    throttle_classes = []
     
     def post(self, request, *args, **kwargs):
         # Get refresh token from cookie or request body (for backward compatibility)

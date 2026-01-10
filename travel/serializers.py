@@ -530,11 +530,12 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
         return TourDateSerializer(dates_to_show, many=True, context=self.context).data
     
     def get_reseller_commission(self, obj):
-        """Return reseller commission amount if user is authenticated reseller."""
-        from account.models import UserRole
-        
+        """
+        Return reseller commission amount if user has reseller profile.
+        Supports dual roles - suppliers with reseller profiles can see commission.
+        """
         request = self.context.get("request")
-        if request and request.user.is_authenticated and request.user.role == UserRole.RESELLER:
+        if request and request.user.is_authenticated and request.user.is_reseller:
             # Use prefetched reseller_profile if available to avoid N+1 query
             if hasattr(request.user, 'reseller_profile'):
                 reseller_profile = request.user.reseller_profile

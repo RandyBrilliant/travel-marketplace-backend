@@ -17,13 +17,16 @@ from .serializers import (
 
 
 class IsReseller(permissions.BasePermission):
-    """Permission check for reseller role."""
+    """
+    Permission check for reseller profile.
+    Allows any authenticated user who has a reseller profile (supports dual roles).
+    """
     
     def has_permission(self, request, view):
         return (
             request.user
             and request.user.is_authenticated
-            and request.user.role == UserRole.RESELLER
+            and request.user.is_reseller  # Checks if user has reseller_profile
         )
 
 

@@ -208,22 +208,9 @@ CORS_ALLOW_HEADERS = [
     'pragma',  # Allow pragma header (used by browsers for cache control)
 ]
 
-# Throttle configuration - disable in DEBUG mode, use higher limits in production
-if DEBUG:
-    # Disable throttling in development
-    REST_FRAMEWORK_THROTTLE_CLASSES = []
-    REST_FRAMEWORK_THROTTLE_RATES = {}
-else:
-    # Production throttling with higher limits
-    REST_FRAMEWORK_THROTTLE_CLASSES = [
-        'rest_framework.throttling.AnonRateThrottle',
-        'rest_framework.throttling.UserRateThrottle'
-    ]
-    REST_FRAMEWORK_THROTTLE_RATES = {
-        'anon': '10000/hour',  # Increased from 100/hour
-        'user': '100000/hour',  # Increased from 1000/hour
-        'login': '100/minute',  # Increased from 5/minute
-    }
+# Throttle configuration - throttling disabled
+REST_FRAMEWORK_THROTTLE_CLASSES = []
+REST_FRAMEWORK_THROTTLE_RATES = {}
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (

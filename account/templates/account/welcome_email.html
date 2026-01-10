@@ -208,7 +208,14 @@
             </div>
             
             <div class="button-container">
-                <a href="{{ FRONTEND_URL }}/dashboard" class="button">Buka Dashboard</a>
+                {% if user.role == 'SUPPLIER' %}
+                <a href="{{ FRONTEND_URL }}/supplier" class="button">Buka Dashboard</a>
+                {% elif user.role == 'RESELLER' %}
+                <a href="{{ FRONTEND_URL }}/profile" class="button">Buka Profil</a>
+                {% else %}
+                <a href="{{ FRONTEND_URL }}/admin" class="button">Buka Dashboard</a>
+                {% endif %}
+                
             </div>
             
             <div class="message" style="margin-top: 32px;">

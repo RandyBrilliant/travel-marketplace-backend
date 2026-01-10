@@ -2,7 +2,6 @@ from rest_framework import viewsets, permissions, status, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.throttling import AnonRateThrottle
 from django.db import transaction, IntegrityError
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.encoding import force_str
@@ -27,18 +26,6 @@ from account.serializers import (
     AdminStaffProfileSerializer,
     ChangePasswordSerializer,
 )
-
-
-class RegistrationThrottle(AnonRateThrottle):
-    """
-    Custom throttle for public registration endpoints.
-    Prevents spam registration and account enumeration attacks.
-    """
-    def get_rate(self):
-        # Disable throttling in DEBUG mode, use stricter rate in production
-        if settings.DEBUG:
-            return None  # No throttling in development
-        return '5/hour'  # Max 5 registration attempts per IP per hour
 
 
 class BaseOwnProfileViewSet(viewsets.ModelViewSet):
@@ -143,6 +130,7 @@ class ResellerProfileViewSet(BaseOwnProfileViewSet):
     """
     CRUD for the authenticated reseller's own profile.
     Now supports dual roles - users can have both supplier and reseller profiles.
+    Suppliers can create reseller profiles from their dashboard.
     """
 
     serializer_class = ResellerProfileSerializer
@@ -151,14 +139,27 @@ class ResellerProfileViewSet(BaseOwnProfileViewSet):
         if not user.is_authenticated:
             return ResellerProfile.objects.none()
         # Check if user has reseller profile (supports dual roles)
+        # Note: This is used for GET/UPDATE/DELETE operations
+        # POST (create) is handled separately in perform_create
         if not user.is_reseller:
             return ResellerProfile.objects.none()
         return ResellerProfile.objects.select_related('user', 'sponsor', 'group_root').filter(user=user)
     
+    def create(self, request, *args, **kwargs):
+        """
+        Create reseller profile for current authenticated user.
+        Explicitly allows any authenticated user (including suppliers) to create a reseller profile.
+        This enables dual role support - suppliers can become resellers and vice versa.
+        The check for existing profile is handled in perform_create.
+        """
+        # Use the parent's create method which will call perform_create
+        # This explicitly allows any authenticated user to create, regardless of current role
+        return super().create(request, *args, **kwargs)
+    
     def perform_create(self, serializer):
         """
         Create reseller profile for current user.
-        Allows users with any role to add a reseller profile (dual role support).
+        Allows users with any role (including suppliers) to add a reseller profile (dual role support).
         """
         # Check if user already has a reseller profile
         if hasattr(self.request.user, 'reseller_profile'):
@@ -1110,10 +1111,9 @@ class RegisterResellerView(APIView):
     """
     Public API endpoint for reseller registration.
     Creates a new user with RESELLER role and associated ResellerProfile.
-    Includes rate limiting to prevent spam and abuse.
     """
     permission_classes = [permissions.AllowAny]
-    throttle_classes = [RegistrationThrottle]
+    throttle_classes = []
 
     def post(self, request):
         """
@@ -1226,28 +1226,6 @@ class RegisterResellerView(APIView):
                     logger = logging.getLogger(__name__)
                     logger.error(f"Failed to send welcome email: {str(e)}")
 
-                # Clear login throttle cache for this IP to allow immediate login after registration
-                # This prevents "too many requests" error when user tries to login right after registration
-                try:
-                    from django.core.cache import cache
-                    # Get IP address (handles both direct and proxied requests)
-                    ip_address = request.META.get('REMOTE_ADDR')
-                    if not ip_address:
-                        forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR', '')
-                        if forwarded_for:
-                            ip_address = forwarded_for.split(',')[0].strip()
-                    
-                    if ip_address:
-                        # DRF AnonRateThrottle cache key format: throttle_anon_<ip_address>
-                        # Clear the throttle cache for this IP
-                        cache_key = f'throttle_anon_{ip_address}'
-                        cache.delete(cache_key)
-                except Exception as e:
-                    # Log but don't fail registration if throttle clearing fails
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.warning(f"Failed to clear login throttle cache: {str(e)}")
-
                 # Auto-login: Generate tokens and set them in cookies
                 try:
                     from account.token_serializers import CustomTokenObtainPairSerializer
@@ -1325,11 +1303,10 @@ class RegisterSupplierView(APIView):
     """
     Public API endpoint for supplier registration.
     Creates a new user with SUPPLIER role and associated SupplierProfile.
-    Includes rate limiting to prevent spam and abuse.
     """
 
     permission_classes = [permissions.AllowAny]
-    throttle_classes = [RegistrationThrottle]
+    throttle_classes = []
 
     def post(self, request):
         """
