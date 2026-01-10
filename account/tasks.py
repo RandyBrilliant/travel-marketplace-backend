@@ -180,12 +180,19 @@ def send_welcome_email(self, user_id):
         user = CustomUser.objects.get(pk=user_id)
         logger.info(f"Found user: {user.email}")
         
-        # Get profile name based on role
+        # Get profile name based on profiles (supports dual roles)
+        # Check primary role's profile first, then fallback to other profiles
         profile_name = user.email
-        if user.role == 'SUPPLIER' and hasattr(user, 'supplier_profile'):
-            profile_name = user.supplier_profile.company_name
-        elif user.role == 'RESELLER' and hasattr(user, 'reseller_profile'):
-            profile_name = user.reseller_profile.full_name
+        if user.role == 'SUPPLIER':
+            if hasattr(user, 'supplier_profile'):
+                profile_name = user.supplier_profile.company_name
+            elif hasattr(user, 'reseller_profile'):
+                profile_name = user.reseller_profile.full_name
+        elif user.role == 'RESELLER':
+            if hasattr(user, 'reseller_profile'):
+                profile_name = user.reseller_profile.full_name
+            elif hasattr(user, 'supplier_profile'):
+                profile_name = user.supplier_profile.company_name
         elif user.role == 'STAFF' and hasattr(user, 'staff_profile'):
             profile_name = user.staff_profile.full_name
         

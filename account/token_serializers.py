@@ -16,23 +16,40 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
     def _get_profile_info(cls, user):
         """
-        Get profile information (full name and photo URL) based on user role.
+        Get profile information (full name and photo URL) based on user profiles.
+        Supports dual roles - checks both supplier and reseller profiles.
+        Prioritizes primary role's profile, but checks both.
         Returns tuple: (full_name, photo_url)
         """
         full_name = None
         photo_url = None
         
         try:
-            if user.role == UserRole.SUPPLIER and hasattr(user, "supplier_profile"):
-                profile = user.supplier_profile
-                full_name = profile.company_name
-                if profile.photo:
-                    photo_url = profile.photo.url
-            elif user.role == UserRole.RESELLER and hasattr(user, "reseller_profile"):
-                profile = user.reseller_profile
-                full_name = profile.full_name
-                if profile.photo:
-                    photo_url = profile.photo.url
+            # Check profiles based on primary role first, then check other profiles for dual roles
+            if user.role == UserRole.SUPPLIER:
+                if hasattr(user, "supplier_profile"):
+                    profile = user.supplier_profile
+                    full_name = profile.company_name
+                    if profile.photo:
+                        photo_url = profile.photo.url
+                # Also check reseller profile for dual roles
+                elif hasattr(user, "reseller_profile"):
+                    profile = user.reseller_profile
+                    full_name = profile.full_name
+                    if profile.photo:
+                        photo_url = profile.photo.url
+            elif user.role == UserRole.RESELLER:
+                if hasattr(user, "reseller_profile"):
+                    profile = user.reseller_profile
+                    full_name = profile.full_name
+                    if profile.photo:
+                        photo_url = profile.photo.url
+                # Also check supplier profile for dual roles
+                elif hasattr(user, "supplier_profile"):
+                    profile = user.supplier_profile
+                    full_name = profile.company_name
+                    if profile.photo:
+                        photo_url = profile.photo.url
             elif user.role == UserRole.STAFF and hasattr(user, "staff_profile"):
                 profile = user.staff_profile
                 full_name = profile.full_name
@@ -76,6 +93,11 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         token["email"] = user.email
         token["role"] = user.role
         token["email_verified"] = user.email_verified
+
+        # Include profile flags for dual role support
+        # These flags help frontend determine which profiles the user has
+        token["has_reseller_profile"] = hasattr(user, "reseller_profile")
+        token["has_supplier_profile"] = hasattr(user, "supplier_profile")
 
         # Get full name and profile picture URL
         full_name, photo_url = cls._get_profile_info(user)
