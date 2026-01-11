@@ -372,10 +372,32 @@ class ResellerProfile(models.Model):
 
     def all_downlines(self):
         """
-        Returns all downline members in the same group tree (including deep levels).
-        This uses group_root as a simple way to query all members under the same tree.
+        Returns all downline members under this reseller (including all nested levels).
+        This recursively traverses the tree by following the sponsor relationship.
         """
-        return type(self).objects.filter(group_root=self).exclude(pk=self.pk)
+        from django.db.models import Q
+        
+        # Get all reseller IDs in the downline tree
+        downline_ids = set()
+        to_process = [self.pk]
+        
+        while to_process:
+            # Get direct downlines of current batch
+            current_id = to_process.pop(0)
+            direct_downlines = type(self).objects.filter(
+                sponsor_id=current_id
+            ).values_list('id', flat=True)
+            
+            for downline_id in direct_downlines:
+                if downline_id not in downline_ids:
+                    downline_ids.add(downline_id)
+                    to_process.append(downline_id)
+        
+        # Return queryset of all downlines
+        if downline_ids:
+            return type(self).objects.filter(id__in=downline_ids)
+        else:
+            return type(self).objects.none()
     
     def get_total_commission_earned(self):
         """
