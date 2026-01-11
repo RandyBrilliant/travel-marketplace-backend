@@ -5,7 +5,6 @@ from .models import (
     ItineraryCard,
     ItineraryCardAttachment,
     ItineraryCardChecklist,
-    ItineraryCardComment,
 )
 
 
@@ -30,7 +29,7 @@ class ItineraryBoardAdmin(admin.ModelAdmin):
 
 @admin.register(ItineraryColumn)
 class ItineraryColumnAdmin(admin.ModelAdmin):
-    list_display = ['title', 'board', 'order', 'color', 'created_at']
+    list_display = ['title', 'board', 'order', 'created_at']
     list_filter = ['board', 'created_at']
     search_fields = ['title', 'board__title']
     ordering = ['board', 'order']
@@ -61,16 +60,4 @@ class ItineraryCardChecklistAdmin(admin.ModelAdmin):
     def items_count(self, obj):
         return len(obj.items)
     items_count.short_description = 'Items'
-
-
-@admin.register(ItineraryCardComment)
-class ItineraryCardCommentAdmin(admin.ModelAdmin):
-    list_display = ['card', 'user', 'text_preview', 'created_at']
-    list_filter = ['created_at']
-    search_fields = ['text', 'card__title', 'user__email']
-    readonly_fields = ['created_at', 'updated_at']
-    
-    def text_preview(self, obj):
-        return obj.text[:50] + '...' if len(obj.text) > 50 else obj.text
-    text_preview.short_description = 'Text'
 

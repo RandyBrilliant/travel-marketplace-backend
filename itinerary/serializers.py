@@ -6,40 +6,7 @@ from .models import (
     ItineraryCard,
     ItineraryCardAttachment,
     ItineraryCardChecklist,
-    ItineraryCardComment,
 )
-
-
-class ItineraryCardCommentSerializer(serializers.ModelSerializer):
-    """Serializer for card comments."""
-    
-    user_email = serializers.EmailField(source='user.email', read_only=True, allow_null=True)
-    user_name = serializers.SerializerMethodField()
-    
-    def get_user_name(self, obj):
-        """Get user's display name."""
-        if obj.user:
-            if hasattr(obj.user, 'reseller_profile'):
-                return obj.user.reseller_profile.full_name
-            elif hasattr(obj.user, 'supplier_profile'):
-                return obj.user.supplier_profile.company_name
-            elif hasattr(obj.user, 'staff_profile'):
-                return obj.user.staff_profile.full_name
-        return None
-    
-    class Meta:
-        model = ItineraryCardComment
-        fields = [
-            'id',
-            'card',
-            'user',
-            'user_email',
-            'user_name',
-            'text',
-            'created_at',
-            'updated_at',
-        ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
 
 
 class ItineraryCardChecklistSerializer(serializers.ModelSerializer):
@@ -107,8 +74,6 @@ class ItineraryCardSerializer(serializers.ModelSerializer):
     cover_image_url = serializers.SerializerMethodField()
     attachments = ItineraryCardAttachmentSerializer(many=True, read_only=True)
     checklists = ItineraryCardChecklistSerializer(many=True, read_only=True)
-    comments = ItineraryCardCommentSerializer(many=True, read_only=True)
-    comments_count = serializers.IntegerField(source='comments.count', read_only=True)
     created_by_email = serializers.EmailField(source='created_by.email', read_only=True, allow_null=True)
     
     def get_cover_image_url(self, obj):
@@ -136,7 +101,6 @@ class ItineraryCardSerializer(serializers.ModelSerializer):
             'longitude',
             'cover_image',
             'cover_image_url',
-            'color',
             'order',
             'created_by',
             'created_by_email',
@@ -144,8 +108,6 @@ class ItineraryCardSerializer(serializers.ModelSerializer):
             'updated_at',
             'attachments',
             'checklists',
-            'comments',
-            'comments_count',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
@@ -164,7 +126,6 @@ class ItineraryColumnSerializer(serializers.ModelSerializer):
             'title',
             'description',
             'order',
-            'color',
             'created_at',
             'updated_at',
             'cards',
@@ -261,7 +222,6 @@ class ItineraryColumnCreateUpdateSerializer(serializers.ModelSerializer):
             'title',
             'description',
             'order',
-            'color',
             'created_at',
             'updated_at',
         ]
@@ -286,7 +246,6 @@ class ItineraryCardCreateUpdateSerializer(serializers.ModelSerializer):
             'latitude',
             'longitude',
             'cover_image',
-            'color',
             'order',
             'created_by',
             'created_at',
@@ -370,25 +329,3 @@ class ItineraryCardChecklistCreateUpdateSerializer(serializers.ModelSerializer):
                 item['completed'] = False
         
         return value
-
-
-class ItineraryCardCommentCreateUpdateSerializer(serializers.ModelSerializer):
-    """Serializer for creating and updating comments."""
-    
-    class Meta:
-        model = ItineraryCardComment
-        fields = [
-            'id',
-            'card',
-            'user',
-            'text',
-            'created_at',
-            'updated_at',
-        ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
-    
-    def validate_text(self, value):
-        """Validate text is not empty."""
-        if not value or not value.strip():
-            raise serializers.ValidationError("Teks komentar wajib diisi.")
-        return value.strip()

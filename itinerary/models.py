@@ -114,11 +114,6 @@ class ItineraryColumn(models.Model):
         default=0,
         help_text=_("Display order (lower = first)")
     )
-    color = models.CharField(
-        max_length=7,
-        default='#0079bf',
-        help_text=_("Hex color code for column header")
-    )
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -189,11 +184,6 @@ class ItineraryCard(models.Model):
         upload_to='itinerary/card_covers/',
         null=True,
         blank=True
-    )
-    color = models.CharField(
-        max_length=7,
-        blank=True,
-        help_text=_("Card accent color (hex code)")
     )
     
     # Ordering
@@ -295,32 +285,4 @@ class ItineraryCardChecklist(models.Model):
         completed_count = sum(1 for item in self.items if item.get('completed', False))
         total_count = len(self.items)
         return f"{self.card.title} - {self.title} ({completed_count}/{total_count})"
-
-
-class ItineraryCardComment(models.Model):
-    """Comments on cards for collaboration"""
-    
-    card = models.ForeignKey(
-        ItineraryCard,
-        on_delete=models.CASCADE,
-        related_name='comments'
-    )
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True
-    )
-    text = models.TextField()
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    
-    class Meta:
-        verbose_name = "Card Comment"
-        verbose_name_plural = "Card Comments"
-        ordering = ['created_at']
-    
-    def __str__(self) -> str:
-        user_display = self.user.email if self.user else "Anonymous"
-        return f"{self.card.title} - Comment by {user_display}"
 

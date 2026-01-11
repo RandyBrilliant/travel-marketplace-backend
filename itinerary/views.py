@@ -8,14 +8,13 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.db import models
 
-from rest_framework.permissions import IsAdminUser, IsAuthenticated
+from rest_framework.permissions import IsAdminUser, IsAuthenticated, AllowAny, AllowAny
 from .models import (
     ItineraryBoard,
     ItineraryColumn,
     ItineraryCard,
     ItineraryCardAttachment,
     ItineraryCardChecklist,
-    ItineraryCardComment,
 )
 from .serializers import (
     ItineraryBoardListSerializer,
@@ -29,8 +28,6 @@ from .serializers import (
     ItineraryCardAttachmentCreateUpdateSerializer,
     ItineraryCardChecklistSerializer,
     ItineraryCardChecklistCreateUpdateSerializer,
-    ItineraryCardCommentSerializer,
-    ItineraryCardCommentCreateUpdateSerializer,
 )
 from account.models import ResellerProfile
 
@@ -68,7 +65,6 @@ class AdminItineraryBoardViewSet(viewsets.ModelViewSet):
             'columns__cards',
             'columns__cards__attachments',
             'columns__cards__checklists',
-            'columns__cards__comments',
         ).all()
         
         # Filter by is_public
@@ -159,8 +155,6 @@ class AdminItineraryCardViewSet(viewsets.ModelViewSet):
         ).prefetch_related(
             'attachments',
             'checklists',
-            'comments',
-            'comments__user',
         ).all()
         
         # Filter by column if provided
@@ -224,41 +218,14 @@ class AdminItineraryCardChecklistViewSet(viewsets.ModelViewSet):
         return ItineraryCardChecklistSerializer
 
 
-class AdminItineraryCardCommentViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for admin to manage card comments.
-    Admin has full CRUD access.
-    """
-    
-    permission_classes = [IsAdminUser]
-    queryset = ItineraryCardComment.objects.all()
-    filter_backends = [DjangoFilterBackend, OrderingFilter]
-    filterset_fields = ['card']
-    ordering_fields = ['created_at']
-    ordering = ['created_at']
-    
-    def get_serializer_class(self):
-        """Use different serializers for list/detail vs create/update."""
-        if self.action in ['create', 'update', 'partial_update']:
-            return ItineraryCardCommentCreateUpdateSerializer
-        return ItineraryCardCommentSerializer
-    
-    def perform_create(self, serializer):
-        """Set user to current user if not provided."""
-        if 'user' not in serializer.validated_data:
-            serializer.save(user=self.request.user)
-        else:
-            serializer.save()
-
-
 class ResellerItineraryBoardListView(APIView):
     """
-    Public/Reseller view for listing itinerary boards.
-    Resellers can view public boards (read-only).
-    Returns only public boards for resellers.
+    Public view for listing itinerary boards.
+    Anyone (including non-logged in users) can view public boards (read-only).
+    Returns only public boards.
     """
     
-    permission_classes = [IsReseller]
+    permission_classes = [AllowAny]
     
     def get(self, request):
         """Get list of public itinerary boards."""
@@ -304,11 +271,11 @@ class ResellerItineraryBoardListView(APIView):
 
 class ResellerItineraryBoardDetailView(APIView):
     """
-    Public/Reseller view for retrieving a single itinerary board.
-    Resellers can view public board details (read-only).
+    Public view for retrieving a single itinerary board.
+    Anyone (including non-logged in users) can view public board details (read-only).
     """
     
-    permission_classes = [IsReseller]
+    permission_classes = [AllowAny]
     
     def get(self, request, pk=None, slug=None):
         """Get board detail by ID or slug."""
@@ -324,8 +291,6 @@ class ResellerItineraryBoardDetailView(APIView):
                     'columns__cards',
                     'columns__cards__attachments',
                     'columns__cards__checklists',
-                    'columns__cards__comments',
-                    'columns__cards__comments__user',
                 ).get()
             elif slug:
                 board = ItineraryBoard.objects.filter(
@@ -338,8 +303,6 @@ class ResellerItineraryBoardDetailView(APIView):
                     'columns__cards',
                     'columns__cards__attachments',
                     'columns__cards__checklists',
-                    'columns__cards__comments',
-                    'columns__cards__comments__user',
                 ).get()
             else:
                 raise Http404("ID board atau slug wajib diisi.")
