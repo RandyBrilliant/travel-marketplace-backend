@@ -53,6 +53,7 @@ INSTALLED_APPS = [
 
     "account.apps.AccountConfig",
     "travel.apps.TravelConfig",
+    "itinerary.apps.ItineraryConfig",
 ]
 
 MIDDLEWARE = [

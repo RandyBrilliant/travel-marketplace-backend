@@ -1,0 +1,394 @@
+from rest_framework import serializers
+from django.conf import settings
+from .models import (
+    ItineraryBoard,
+    ItineraryColumn,
+    ItineraryCard,
+    ItineraryCardAttachment,
+    ItineraryCardChecklist,
+    ItineraryCardComment,
+)
+
+
+class ItineraryCardCommentSerializer(serializers.ModelSerializer):
+    """Serializer for card comments."""
+    
+    user_email = serializers.EmailField(source='user.email', read_only=True, allow_null=True)
+    user_name = serializers.SerializerMethodField()
+    
+    def get_user_name(self, obj):
+        """Get user's display name."""
+        if obj.user:
+            if hasattr(obj.user, 'reseller_profile'):
+                return obj.user.reseller_profile.full_name
+            elif hasattr(obj.user, 'supplier_profile'):
+                return obj.user.supplier_profile.company_name
+            elif hasattr(obj.user, 'staff_profile'):
+                return obj.user.staff_profile.full_name
+        return None
+    
+    class Meta:
+        model = ItineraryCardComment
+        fields = [
+            'id',
+            'card',
+            'user',
+            'user_email',
+            'user_name',
+            'text',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ItineraryCardChecklistSerializer(serializers.ModelSerializer):
+    """Serializer for card checklists."""
+    
+    items_count = serializers.SerializerMethodField()
+    completed_count = serializers.SerializerMethodField()
+    
+    def get_items_count(self, obj):
+        return len(obj.items) if obj.items else 0
+    
+    def get_completed_count(self, obj):
+        if not obj.items:
+            return 0
+        return sum(1 for item in obj.items if item.get('completed', False))
+    
+    class Meta:
+        model = ItineraryCardChecklist
+        fields = [
+            'id',
+            'card',
+            'title',
+            'items',
+            'items_count',
+            'completed_count',
+            'order',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ItineraryCardAttachmentSerializer(serializers.ModelSerializer):
+    """Serializer for card attachments."""
+    
+    file_url = serializers.SerializerMethodField()
+    
+    def get_file_url(self, obj):
+        """Get full URL for the attachment file."""
+        if obj.file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.file.url)
+            return obj.file.url
+        return None
+    
+    class Meta:
+        model = ItineraryCardAttachment
+        fields = [
+            'id',
+            'card',
+            'file',
+            'file_url',
+            'name',
+            'file_type',
+            'file_size',
+            'created_at',
+        ]
+        read_only_fields = ['id', 'created_at']
+
+
+class ItineraryCardSerializer(serializers.ModelSerializer):
+    """Serializer for itinerary cards."""
+    
+    cover_image_url = serializers.SerializerMethodField()
+    attachments = ItineraryCardAttachmentSerializer(many=True, read_only=True)
+    checklists = ItineraryCardChecklistSerializer(many=True, read_only=True)
+    comments = ItineraryCardCommentSerializer(many=True, read_only=True)
+    comments_count = serializers.IntegerField(source='comments.count', read_only=True)
+    created_by_email = serializers.EmailField(source='created_by.email', read_only=True, allow_null=True)
+    
+    def get_cover_image_url(self, obj):
+        """Get full URL for the cover image."""
+        if obj.cover_image:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.cover_image.url)
+            return obj.cover_image.url
+        return None
+    
+    class Meta:
+        model = ItineraryCard
+        fields = [
+            'id',
+            'column',
+            'title',
+            'description',
+            'start_time',
+            'end_time',
+            'date',
+            'location_name',
+            'location_address',
+            'latitude',
+            'longitude',
+            'cover_image',
+            'cover_image_url',
+            'color',
+            'order',
+            'created_by',
+            'created_by_email',
+            'created_at',
+            'updated_at',
+            'attachments',
+            'checklists',
+            'comments',
+            'comments_count',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ItineraryColumnSerializer(serializers.ModelSerializer):
+    """Serializer for itinerary columns."""
+    
+    cards = ItineraryCardSerializer(many=True, read_only=True)
+    cards_count = serializers.IntegerField(source='cards.count', read_only=True)
+    
+    class Meta:
+        model = ItineraryColumn
+        fields = [
+            'id',
+            'board',
+            'title',
+            'description',
+            'order',
+            'color',
+            'created_at',
+            'updated_at',
+            'cards',
+            'cards_count',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ItineraryBoardListSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for board list views."""
+    
+    created_by_email = serializers.EmailField(source='created_by.email', read_only=True, allow_null=True)
+    columns_count = serializers.IntegerField(source='columns.count', read_only=True)
+    
+    class Meta:
+        model = ItineraryBoard
+        fields = [
+            'id',
+            'title',
+            'slug',
+            'description',
+            'is_public',
+            'allow_editing',
+            'share_token',
+            'created_by',
+            'created_by_email',
+            'created_at',
+            'updated_at',
+            'columns_count',
+        ]
+        read_only_fields = ['id', 'slug', 'share_token', 'created_at', 'updated_at']
+
+
+class ItineraryBoardDetailSerializer(serializers.ModelSerializer):
+    """Detailed serializer for board detail views."""
+    
+    columns = ItineraryColumnSerializer(many=True, read_only=True)
+    columns_count = serializers.IntegerField(source='columns.count', read_only=True)
+    created_by_email = serializers.EmailField(source='created_by.email', read_only=True, allow_null=True)
+    
+    class Meta:
+        model = ItineraryBoard
+        fields = [
+            'id',
+            'title',
+            'slug',
+            'description',
+            'is_public',
+            'allow_editing',
+            'share_token',
+            'created_by',
+            'created_by_email',
+            'created_at',
+            'updated_at',
+            'columns',
+            'columns_count',
+        ]
+        read_only_fields = ['id', 'slug', 'share_token', 'created_at', 'updated_at']
+
+
+class ItineraryBoardCreateUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for creating and updating boards (admin only)."""
+    
+    class Meta:
+        model = ItineraryBoard
+        fields = [
+            'id',
+            'title',
+            'slug',
+            'description',
+            'is_public',
+            'allow_editing',
+            'created_by',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'slug', 'created_at', 'updated_at']
+    
+    def validate_title(self, value):
+        """Validate title is not empty."""
+        if not value or not value.strip():
+            raise serializers.ValidationError("Judul wajib diisi.")
+        return value.strip()
+
+
+class ItineraryColumnCreateUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for creating and updating columns."""
+    
+    class Meta:
+        model = ItineraryColumn
+        fields = [
+            'id',
+            'board',
+            'title',
+            'description',
+            'order',
+            'color',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ItineraryCardCreateUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for creating and updating cards."""
+    
+    class Meta:
+        model = ItineraryCard
+        fields = [
+            'id',
+            'column',
+            'title',
+            'description',
+            'start_time',
+            'end_time',
+            'date',
+            'location_name',
+            'location_address',
+            'latitude',
+            'longitude',
+            'cover_image',
+            'color',
+            'order',
+            'created_by',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ItineraryCardAttachmentCreateUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for creating and updating attachments."""
+    
+    class Meta:
+        model = ItineraryCardAttachment
+        fields = [
+            'id',
+            'card',
+            'file',
+            'name',
+            'file_type',
+            'file_size',
+            'created_at',
+        ]
+        read_only_fields = ['id', 'created_at']
+    
+    def validate_file(self, value):
+        """Validate file is provided."""
+        if not value:
+            raise serializers.ValidationError("File wajib diisi.")
+        return value
+    
+    def validate(self, attrs):
+        """Auto-populate file_type and file_size if file is provided."""
+        if 'file' in attrs and attrs['file']:
+            file = attrs['file']
+            # Auto-detect file type
+            if 'file_type' not in attrs or not attrs['file_type']:
+                import mimetypes
+                file_type, _ = mimetypes.guess_type(file.name)
+                attrs['file_type'] = file_type or file.name.split('.')[-1] if '.' in file.name else 'unknown'
+            
+            # Auto-calculate file size
+            if 'file_size' not in attrs or not attrs['file_size']:
+                attrs['file_size'] = file.size
+            
+            # Auto-set name if not provided
+            if 'name' not in attrs or not attrs['name']:
+                attrs['name'] = file.name
+        
+        return attrs
+
+
+class ItineraryCardChecklistCreateUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for creating and updating checklists."""
+    
+    class Meta:
+        model = ItineraryCardChecklist
+        fields = [
+            'id',
+            'card',
+            'title',
+            'items',
+            'order',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+    
+    def validate_items(self, value):
+        """Validate items structure."""
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Items harus berupa array.")
+        
+        for item in value:
+            if not isinstance(item, dict):
+                raise serializers.ValidationError("Setiap item harus berupa objek.")
+            if 'text' not in item:
+                raise serializers.ValidationError("Setiap item harus memiliki field 'text'.")
+            if 'id' not in item:
+                raise serializers.ValidationError("Setiap item harus memiliki field 'id'.")
+            if 'completed' not in item:
+                item['completed'] = False
+        
+        return value
+
+
+class ItineraryCardCommentCreateUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for creating and updating comments."""
+    
+    class Meta:
+        model = ItineraryCardComment
+        fields = [
+            'id',
+            'card',
+            'user',
+            'text',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+    
+    def validate_text(self, value):
+        """Validate text is not empty."""
+        if not value or not value.strip():
+            raise serializers.ValidationError("Teks komentar wajib diisi.")
+        return value.strip()
