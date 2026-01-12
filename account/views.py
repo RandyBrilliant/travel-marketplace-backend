@@ -280,12 +280,17 @@ class BaseAdminProfileViewSet(viewsets.ModelViewSet):
                     user_role = self.get_user_role()
                     # Staff users need is_staff=True to access admin endpoints
                     is_staff = user_role == UserRole.STAFF
+                    # Staff users automatically have their email verified
+                    email_verified = user_role == UserRole.STAFF
+                    email_verified_at = timezone.now() if email_verified else None
                     user = CustomUser.objects.create_user(
                         email=email,
                         password=password,
                         role=user_role,
                         is_active=True,
                         is_staff=is_staff,
+                        email_verified=email_verified,
+                        email_verified_at=email_verified_at,
                     )
                     validated_data["user"] = user
             except IntegrityError as e:

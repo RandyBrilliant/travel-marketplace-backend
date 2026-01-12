@@ -194,6 +194,12 @@ class TourPackage(models.Model):
     # Status
     is_active = models.BooleanField(default=True)
     
+    # Flexible booking option
+    is_flexible = models.BooleanField(
+        default=False,
+        help_text=_("If True, allows booking for any date without pre-created TourDate. TourDate will be created automatically on booking.")
+    )
+    
     # Reseller groups that can access this tour package
     # If empty, tour is visible to all resellers
     # If not empty, only resellers in these groups can see this tour
@@ -299,9 +305,13 @@ class TourDate(models.Model):
         default=False,
         help_text=_("Mark if this date is considered high season."),
     )
+    has_shopping_stop = models.BooleanField(
+        default=False,
+        help_text=_("Whether this tour date includes shopping stop. Allows multiple prices for the same departure date."),
+    )
 
     class Meta:
-        unique_together = ("package", "departure_date")
+        unique_together = ("package", "departure_date", "has_shopping_stop")
         ordering = ["departure_date"]
         verbose_name = "Tour Date"
         verbose_name_plural = "Tour Dates"
@@ -323,7 +333,7 @@ class TourDate(models.Model):
         ]
     
     def clean(self):
-        """Validate departure date and price."""
+        """Validate departure date, price, and unique constraint."""
         super().clean()
         
         if self.departure_date:
@@ -346,6 +356,24 @@ class TourDate(models.Model):
             raise ValidationError({
                 'price': 'Harga tidak boleh negatif.'
             })
+        
+        # Check for duplicate combination of package, departure_date, and has_shopping_stop
+        if self.package and self.departure_date:
+            existing = TourDate.objects.filter(
+                package=self.package,
+                departure_date=self.departure_date,
+                has_shopping_stop=self.has_shopping_stop
+            )
+            # Exclude current instance if updating
+            if self.pk:
+                existing = existing.exclude(pk=self.pk)
+            
+            if existing.exists():
+                variant_text = "dengan shopping stop" if self.has_shopping_stop else "tanpa shopping stop"
+                raise ValidationError({
+                    '__all__': f'Tanggal keberangkatan {variant_text} untuk paket ini sudah ada. '
+                              f'Untuk tanggal yang sama, Anda dapat membuat varian dengan opsi shopping stop yang berbeda.'
+                })
     
     def save(self, *args, **kwargs):
         """Validate and auto-generate seat slots if this is a new TourDate."""

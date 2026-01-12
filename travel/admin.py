@@ -78,16 +78,16 @@ class TourDateAdmin(admin.ModelAdmin):
     Note: remaining_seats is now a computed property (not a database field).
     It calculates available seats dynamically from seat_slots.
     """
-    list_display = ["package", "departure_date", "price", "total_seats", "airline", "remaining_seats", "is_high_season"]
+    list_display = ["package", "departure_date", "price", "total_seats", "airline", "remaining_seats", "is_high_season", "has_shopping_stop"]
     list_display_links = ["package", "departure_date"]
-    list_filter = ["departure_date", "is_high_season", "package__supplier"]
+    list_filter = ["departure_date", "is_high_season", "has_shopping_stop", "package__supplier"]
     search_fields = ["package__name", "package__country"]
     readonly_fields = ["remaining_seats", "available_seats_count", "booked_seats_count"]
     date_hierarchy = "departure_date"
     
     fieldsets = (
         ("Tour Information", {
-            "fields": ("package", "departure_date", "airline", "is_high_season")
+            "fields": ("package", "departure_date", "airline", "is_high_season", "has_shopping_stop")
         }),
         ("Pricing & Capacity", {
             "fields": ("price", "total_seats", "remaining_seats", "available_seats_count", "booked_seats_count")

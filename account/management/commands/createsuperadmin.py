@@ -22,6 +22,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.core.exceptions import ValidationError
 from django.contrib.auth.password_validation import validate_password
 from django.db import transaction
+from django.utils import timezone
 
 from account.models import CustomUser, StaffProfile, UserRole
 
@@ -105,11 +106,13 @@ class Command(BaseCommand):
         # Create superuser and staff profile in a transaction
         try:
             with transaction.atomic():
-                # Create superuser
+                # Create superuser with email automatically verified (staff users)
                 user = CustomUser.objects.create_superuser(
                     email=email,
                     password=password,
                     role=UserRole.STAFF,
+                    email_verified=True,
+                    email_verified_at=timezone.now(),
                 )
 
                 # Create staff profile

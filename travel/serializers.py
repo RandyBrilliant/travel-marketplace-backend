@@ -250,6 +250,7 @@ class TourDateSerializer(serializers.ModelSerializer):
             "total_seats",
             "remaining_seats",
             "is_high_season",
+            "has_shopping_stop",
             "available_seats_count",
             "booked_seats_count",
             "seat_slots",
@@ -285,6 +286,36 @@ class TourDateSerializer(serializers.ModelSerializer):
         if value is not None and value < 1:
             raise serializers.ValidationError("Total kursi harus minimal 1.")
         return value
+    
+    def validate(self, attrs):
+        """Validate that the combination of package, departure_date, and has_shopping_stop is unique."""
+        from travel.models import TourDate
+        
+        # Get package from instance if updating, or from attrs if creating
+        package = attrs.get('package') or (self.instance.package if self.instance else None)
+        departure_date = attrs.get('departure_date')
+        has_shopping_stop = attrs.get('has_shopping_stop', False)
+        
+        if package and departure_date:
+            # Check if a TourDate with this combination already exists
+            queryset = TourDate.objects.filter(
+                package=package,
+                departure_date=departure_date,
+                has_shopping_stop=has_shopping_stop
+            )
+            
+            # Exclude current instance if updating
+            if self.instance:
+                queryset = queryset.exclude(pk=self.instance.pk)
+            
+            if queryset.exists():
+                variant_text = "dengan shopping stop" if has_shopping_stop else "tanpa shopping stop"
+                raise serializers.ValidationError(
+                    f"Tanggal keberangkatan {variant_text} untuk paket ini sudah ada. "
+                    f"Silakan gunakan tanggal yang berbeda atau ubah opsi shopping stop."
+                )
+        
+        return attrs
     
     def get_seat_slots(self, obj):
         """Return seat slots ordered by seat number."""
@@ -349,6 +380,7 @@ class TourPackageSerializer(serializers.ModelSerializer):
             "itinerary_pdf",
             "itinerary_pdf_url",
             "is_active",
+            "is_flexible",
             "images",
             "dates",
             "reseller_groups",
@@ -489,6 +521,7 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
             "supplier_name",
             "reseller_commission",
             "is_active",
+            "is_flexible",
             "created_at",
         ]
         read_only_fields = [
@@ -588,6 +621,7 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
             "tipping_price",
             "itinerary_pdf",
             "is_active",
+            "is_flexible",
             "reseller_groups",
             "commission",
         ]
@@ -767,6 +801,7 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
             "tipping_price",
             "itinerary_pdf",
             "is_active",
+            "is_flexible",
             "reseller_groups",
             "reseller_groups_detail",
             "images",
@@ -996,14 +1031,47 @@ class SeatSlotCreateSerializer(serializers.ModelSerializer):
 
 
 class BookingCreateSerializer(serializers.ModelSerializer):
-    """Serializer for creating bookings with seat slots and passenger details."""
+    """Serializer for creating bookings with seat slots and passenger details.
     
+    For flexible packages (is_flexible=True), accepts package_id and departure_date
+    instead of tour_date, and automatically creates/get TourDate.
+    """
+    
+    # Make tour_date optional since flexible packages don't provide it
+    tour_date = serializers.PrimaryKeyRelatedField(
+        queryset=TourDate.objects.all(),
+        required=False,
+        allow_null=True
+    )
     seat_slots = SeatSlotCreateSerializer(many=True, required=True)
+    # Optional fields for flexible packages
+    package_id = serializers.IntegerField(required=False, write_only=True)
+    departure_date = serializers.DateField(required=False, write_only=True)
+    
+    def validate_departure_date(self, value):
+        """Validate departure date is in the future and not too far ahead (for flexible packages)."""
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        if value:
+            today = timezone.now().date()
+            
+            if value < today:
+                raise serializers.ValidationError("Tanggal keberangkatan harus di masa depan.")
+            
+            # Limit advance bookings to 2 years
+            max_future_date = today + timedelta(days=730)
+            if value > max_future_date:
+                raise serializers.ValidationError("Tanggal keberangkatan tidak boleh lebih dari 2 tahun ke depan.")
+        
+        return value
     
     class Meta:
         model = Booking
         fields = [
             "tour_date",
+            "package_id",
+            "departure_date",
             "platform_fee",
             "total_amount",
             "notes",
@@ -1071,10 +1139,41 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         return value
     
     def validate(self, attrs):
-        """Validate seat slots belong to the tour date."""
+        """Validate booking data and seat slots."""
         tour_date = attrs.get('tour_date')
+        package_id = attrs.get('package_id')
+        departure_date = attrs.get('departure_date')
         seat_slots = attrs.get('seat_slots', [])
         
+        # Validate that either tour_date (regular) or package_id + departure_date (flexible) is provided
+        if not tour_date and (not package_id or not departure_date):
+            raise serializers.ValidationError({
+                '__all__': 'Either tour_date (for regular packages) or package_id + departure_date (for flexible packages) must be provided.'
+            })
+        
+        if tour_date and (package_id or departure_date):
+            raise serializers.ValidationError({
+                '__all__': 'Cannot specify both tour_date and package_id/departure_date. Use tour_date for regular packages, or package_id + departure_date for flexible packages.'
+            })
+        
+        # For flexible packages: validate package exists and is flexible
+        if package_id and departure_date:
+            try:
+                from .models import TourPackage
+                tour_package = TourPackage.objects.get(pk=package_id, is_active=True)
+                if not tour_package.is_flexible:
+                    raise serializers.ValidationError({
+                        'package_id': 'This package is not flexible. Please use tour_date instead.'
+                    })
+                # Store package object and departure_date for use in create()
+                attrs['_tour_package'] = tour_package
+                attrs['_departure_date'] = departure_date
+            except TourPackage.DoesNotExist:
+                raise serializers.ValidationError({
+                    'package_id': 'Tour package not found or not active.'
+                })
+        
+        # For regular packages, validate seat availability
         if tour_date and seat_slots:
             # Check if we have enough available seats
             available_count = tour_date.seat_slots.filter(status=SeatSlotStatus.AVAILABLE).count()
@@ -1111,12 +1210,71 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         return attrs
     
     def create(self, validated_data):
-        """Create booking and assign seat slots with passenger details."""
+        """Create booking and assign seat slots with passenger details.
+        
+        For flexible packages, automatically creates/get TourDate if it doesn't exist.
+        """
         from django.db import transaction
+        from django.utils import timezone
+        from .models import TourPackage, TourDate, SeatSlotStatus
         
         seat_slots_data = validated_data.pop('seat_slots')
-        tour_date = validated_data['tour_date']
+        
+        # Handle flexible packages: get or create TourDate
+        tour_package = validated_data.pop('_tour_package', None)
+        departure_date = validated_data.pop('_departure_date', None)
+        
+        # Remove fields that are not part of the Booking model
+        validated_data.pop('package_id', None)
+        validated_data.pop('departure_date', None)
+        
+        # Get number of passengers early (needed for flexible package seat creation)
         num_passengers = len(seat_slots_data)
+        
+        if tour_package and departure_date:
+            # Flexible package: get or create TourDate
+            # Use get_or_create with transaction to handle concurrent bookings
+            with transaction.atomic():
+                tour_date, created = TourDate.objects.get_or_create(
+                    package=tour_package,
+                    departure_date=departure_date,
+                    has_shopping_stop=False,  # Default for flexible packages
+                    defaults={
+                        'price': tour_package.base_price,
+                        'total_seats': num_passengers,  # Create only the number of seats needed for this booking
+                        'is_high_season': False,
+                    }
+                )
+                # If TourDate was just created, it will auto-generate seat slots via save() signal
+                # If it already existed, check if we need to add more seats
+                if not created:
+                    # TourDate already exists - check if we have enough seats
+                    existing_seats_count = tour_date.seat_slots.count()
+                    if existing_seats_count < num_passengers:
+                        # Need to add more seats to accommodate this booking
+                        from .models import SeatSlot, SeatSlotStatus
+                        seats_to_add = num_passengers - existing_seats_count
+                        new_seat_slots = []
+                        for i in range(seats_to_add):
+                            new_seat_slots.append(
+                                SeatSlot(
+                                    tour_date=tour_date,
+                                    seat_number=str(existing_seats_count + i + 1),
+                                    status=SeatSlotStatus.AVAILABLE
+                                )
+                            )
+                        SeatSlot.objects.bulk_create(new_seat_slots)
+                        # Update total_seats to reflect the new count
+                        tour_date.total_seats = tour_date.seat_slots.count()
+                        tour_date.save(update_fields=['total_seats'])
+                validated_data['tour_date'] = tour_date
+        else:
+            # Regular package: use provided tour_date
+            tour_date = validated_data.get('tour_date')
+            if not tour_date:
+                raise ValidationError('tour_date is required for regular packages')
+        
+        tour_date = validated_data['tour_date']
         
         with transaction.atomic():
             # Use select_for_update to prevent race conditions

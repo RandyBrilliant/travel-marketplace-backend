@@ -151,6 +151,113 @@ class SupplierTourPackageViewSet(viewsets.ModelViewSet):
         
         serializer = ResellerGroupSerializer(queryset, many=True, context={"request": request})
         return Response(serializer.data)
+    
+    @action(detail=True, methods=["get", "post"], url_path="dates")
+    def manage_dates(self, request, pk=None):
+        """
+        Manage tour dates for a package.
+        
+        GET: List tour dates with pagination and filtering.
+        - Supports date filtering via `from_date` and `to_date` query parameters (YYYY-MM-DD format)
+        - Supports pagination via `page` and `page_size` query parameters
+        - Supports ordering via `ordering` query parameter (default: departure_date)
+        
+        POST: Create a new tour date.
+        
+        Optimized query to prefetch seat_slots for remaining_seats calculation.
+        """
+        # Get tour package directly to avoid queryset ordering conflicts
+        # The ordering parameter is for TourDate, not TourPackage
+        if not request.user.is_authenticated:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Authentication required.")
+        
+        try:
+            supplier_profile = SupplierProfile.objects.get(user=request.user)
+            tour_package = TourPackage.objects.select_related("supplier", "supplier__user").get(
+                pk=pk, supplier=supplier_profile
+            )
+        except SupplierProfile.DoesNotExist:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Supplier profile not found.")
+        except TourPackage.DoesNotExist:
+            from rest_framework.exceptions import NotFound
+            raise NotFound("Tour package not found.")
+        
+        if request.method == "GET":
+            from django.utils.dateparse import parse_date
+            from django.utils import timezone
+            
+            # Start with base queryset
+            dates = tour_package.dates.prefetch_related("seat_slots").all()
+            
+            # Apply date filtering
+            from_date = request.query_params.get("from_date")
+            to_date = request.query_params.get("to_date")
+            
+            if from_date:
+                try:
+                    from_date_parsed = parse_date(from_date)
+                    if from_date_parsed:
+                        dates = dates.filter(departure_date__gte=from_date_parsed)
+                except (ValueError, TypeError):
+                    pass  # Invalid date format, ignore filter
+            
+            if to_date:
+                try:
+                    to_date_parsed = parse_date(to_date)
+                    if to_date_parsed:
+                        dates = dates.filter(departure_date__lte=to_date_parsed)
+                except (ValueError, TypeError):
+                    pass  # Invalid date format, ignore filter
+            
+            # Apply ordering (default to departure_date)
+            ordering = request.query_params.get("ordering", "departure_date")
+            if ordering:
+                dates = dates.order_by(*ordering.split(","))
+            
+            # Apply pagination
+            page = self.paginate_queryset(dates)
+            if page is not None:
+                serializer = TourDateSerializer(page, many=True, context={"request": request})
+                return self.get_paginated_response(serializer.data)
+            
+            # If no pagination, return all
+            serializer = TourDateSerializer(dates, many=True, context={"request": request})
+            return Response(serializer.data)
+        
+        elif request.method == "POST":
+            serializer = TourDateSerializer(data=request.data, context={"request": request})
+            serializer.is_valid(raise_exception=True)
+            try:
+                tour_date = serializer.save(package=tour_package)
+                # Prefetch seat_slots for the response
+                tour_date = TourDate.objects.prefetch_related("seat_slots").get(pk=tour_date.pk)
+                response_serializer = TourDateSerializer(tour_date, context={"request": request})
+                return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+            except ValidationError as e:
+                raise ValidationError({"detail": str(e)})
+    
+    @action(detail=True, methods=["get", "post"], url_path="images")
+    def manage_images(self, request, pk=None):
+        """Manage tour images for a package."""
+        tour_package = self.get_object()
+        
+        if request.method == "GET":
+            images = tour_package.images.all()
+            serializer = TourImageSerializer(images, many=True, context={"request": request})
+            return Response(serializer.data)
+        
+        elif request.method == "POST":
+            serializer = TourImageCreateUpdateSerializer(data=request.data, context={"request": request})
+            serializer.is_valid(raise_exception=True)
+            try:
+                tour_image = serializer.save(package=tour_package)
+                # Use read serializer for response
+                response_serializer = TourImageSerializer(tour_image, context={"request": request})
+                return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+            except ValidationError as e:
+                raise ValidationError({"detail": str(e)})
 
 
 class SupplierResellerGroupViewSet(viewsets.ModelViewSet):
@@ -212,54 +319,6 @@ class SupplierResellerGroupViewSet(viewsets.ModelViewSet):
         
         serializer = ResellerProfileSerializer(queryset, many=True, context={"request": request})
         return Response(serializer.data)
-    
-    @action(detail=True, methods=["get", "post"], url_path="dates")
-    def manage_dates(self, request, pk=None):
-        """
-        Manage tour dates for a package.
-        
-        Optimized query to prefetch seat_slots for remaining_seats calculation.
-        """
-        tour_package = self.get_object()
-        
-        if request.method == "GET":
-            # Prefetch seat_slots to optimize remaining_seats property calculation
-            dates = tour_package.dates.prefetch_related("seat_slots").all()
-            serializer = TourDateSerializer(dates, many=True, context={"request": request})
-            return Response(serializer.data)
-        
-        elif request.method == "POST":
-            serializer = TourDateSerializer(data=request.data, context={"request": request})
-            serializer.is_valid(raise_exception=True)
-            try:
-                tour_date = serializer.save(package=tour_package)
-                # Prefetch seat_slots for the response
-                tour_date = TourDate.objects.prefetch_related("seat_slots").get(pk=tour_date.pk)
-                response_serializer = TourDateSerializer(tour_date, context={"request": request})
-                return Response(response_serializer.data, status=status.HTTP_201_CREATED)
-            except ValidationError as e:
-                raise ValidationError({"detail": str(e)})
-    
-    @action(detail=True, methods=["get", "post"], url_path="images")
-    def manage_images(self, request, pk=None):
-        """Manage tour images for a package."""
-        tour_package = self.get_object()
-        
-        if request.method == "GET":
-            images = tour_package.images.all()
-            serializer = TourImageSerializer(images, many=True, context={"request": request})
-            return Response(serializer.data)
-        
-        elif request.method == "POST":
-            serializer = TourImageCreateUpdateSerializer(data=request.data, context={"request": request})
-            serializer.is_valid(raise_exception=True)
-            try:
-                tour_image = serializer.save(package=tour_package)
-                # Use read serializer for response
-                response_serializer = TourImageSerializer(tour_image, context={"request": request})
-                return Response(response_serializer.data, status=status.HTTP_201_CREATED)
-            except ValidationError as e:
-                raise ValidationError({"detail": str(e)})
 
 
 class SupplierTourDateViewSet(viewsets.ModelViewSet):
@@ -716,6 +775,82 @@ class AdminTourPackageViewSet(viewsets.ModelViewSet):
             serializer.save(supplier=supplier)
         except SupplierProfile.DoesNotExist:
             raise ValidationError({"supplier": ["Profil supplier tidak ditemukan."]})
+    
+    @action(detail=True, methods=["get", "post"], url_path="dates")
+    def manage_dates(self, request, pk=None):
+        """
+        Manage tour dates for a package (Admin view).
+        
+        GET: List tour dates with pagination and filtering.
+        - Supports date filtering via `from_date` and `to_date` query parameters (YYYY-MM-DD format)
+        - Supports pagination via `page` and `page_size` query parameters
+        - Supports ordering via `ordering` query parameter (default: departure_date)
+        
+        POST: Create a new tour date.
+        
+        Optimized query to prefetch seat_slots for remaining_seats calculation.
+        """
+        # Get tour package directly to avoid queryset ordering conflicts
+        # The ordering parameter is for TourDate, not TourPackage
+        try:
+            tour_package = TourPackage.objects.select_related("supplier", "supplier__user").get(pk=pk)
+        except TourPackage.DoesNotExist:
+            from rest_framework.exceptions import NotFound
+            raise NotFound("Tour package not found.")
+        
+        if request.method == "GET":
+            from django.utils.dateparse import parse_date
+            from django.utils import timezone
+            
+            # Start with base queryset
+            dates = tour_package.dates.prefetch_related("seat_slots").all()
+            
+            # Apply date filtering
+            from_date = request.query_params.get("from_date")
+            to_date = request.query_params.get("to_date")
+            
+            if from_date:
+                try:
+                    from_date_parsed = parse_date(from_date)
+                    if from_date_parsed:
+                        dates = dates.filter(departure_date__gte=from_date_parsed)
+                except (ValueError, TypeError):
+                    pass  # Invalid date format, ignore filter
+            
+            if to_date:
+                try:
+                    to_date_parsed = parse_date(to_date)
+                    if to_date_parsed:
+                        dates = dates.filter(departure_date__lte=to_date_parsed)
+                except (ValueError, TypeError):
+                    pass  # Invalid date format, ignore filter
+            
+            # Apply ordering (default to departure_date)
+            ordering = request.query_params.get("ordering", "departure_date")
+            if ordering:
+                dates = dates.order_by(*ordering.split(","))
+            
+            # Apply pagination
+            page = self.paginate_queryset(dates)
+            if page is not None:
+                serializer = TourDateSerializer(page, many=True, context={"request": request})
+                return self.get_paginated_response(serializer.data)
+            
+            # If no pagination, return all
+            serializer = TourDateSerializer(dates, many=True, context={"request": request})
+            return Response(serializer.data)
+        
+        elif request.method == "POST":
+            serializer = TourDateSerializer(data=request.data, context={"request": request})
+            serializer.is_valid(raise_exception=True)
+            try:
+                tour_date = serializer.save(package=tour_package)
+                # Prefetch seat_slots for the response
+                tour_date = TourDate.objects.prefetch_related("seat_slots").get(pk=tour_date.pk)
+                response_serializer = TourDateSerializer(tour_date, context={"request": request})
+                return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+            except ValidationError as e:
+                raise ValidationError({"detail": str(e)})
 
 
 class AdminResellerTourCommissionViewSet(viewsets.ModelViewSet):
