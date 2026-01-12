@@ -174,10 +174,19 @@ class ResellerProfileViewSet(BaseOwnProfileViewSet):
         """
         Get direct downlines for the current reseller with commission information.
         Returns list of direct downlines with their commission stats.
+        Only shows commission that the upline (current reseller) gets from each downline.
         """
         try:
-            profile = self.get_queryset().first()
-            if not profile:
+            # Get the current user's reseller profile directly to ensure correctness
+            if not request.user.is_authenticated:
+                return Response(
+                    {"detail": "Authentication required."},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+            
+            try:
+                profile = ResellerProfile.objects.select_related('user').get(user=request.user)
+            except ResellerProfile.DoesNotExist:
                 return Response(
                     {"detail": "Reseller profile not found."},
                     status=status.HTTP_404_NOT_FOUND
@@ -192,19 +201,17 @@ class ResellerProfileViewSet(BaseOwnProfileViewSet):
             
             downlines_data = []
             for downline in direct_downlines:
-                # Get commission earned from this downline's sales (level 1 = direct downline)
+                # Get commission earned by the upline (current reseller) from this downline's sales
+                # Level 1 means commission from direct downline
                 commissions_from_downline = ResellerCommission.objects.filter(
-                    reseller=profile,
-                    booking__reseller=downline,
+                    reseller=profile,  # The upline (current reseller) who receives the commission
+                    booking__reseller=downline,  # The downline who made the booking
                     booking__status=BookingStatus.CONFIRMED,
                     level=1  # Level 1 means commission from direct downline
                 ).aggregate(
                     total_commission=Sum('amount'),
                     total_bookings=Count('booking', distinct=True)
                 )
-                
-                # Get downline's own commission earned
-                downline_own_commission = downline.get_total_commission_earned()
                 
                 downlines_data.append({
                     'id': downline.id,
@@ -215,7 +222,6 @@ class ResellerProfileViewSet(BaseOwnProfileViewSet):
                     'created_at': downline.created_at,
                     'total_commission_from_downline': commissions_from_downline['total_commission'] or 0,
                     'total_bookings_from_downline': commissions_from_downline['total_bookings'] or 0,
-                    'downline_own_commission_earned': downline_own_commission,
                     'direct_downline_count': downline.direct_downline_count,
                 })
             
