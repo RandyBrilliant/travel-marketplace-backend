@@ -282,9 +282,19 @@ class TourDateSerializer(serializers.ModelSerializer):
         return value
     
     def validate_total_seats(self, value):
-        """Validate total seats is at least 1."""
+        """Validate total seats is at least 1 and not less than booked seats."""
         if value is not None and value < 1:
             raise serializers.ValidationError("Total kursi harus minimal 1.")
+        
+        # If updating, check that new total_seats is not less than booked seats
+        if self.instance and value is not None:
+            booked_seats_count = self.instance.seat_slots.filter(status=SeatSlotStatus.BOOKED).count()
+            if value < booked_seats_count:
+                raise serializers.ValidationError(
+                    f"Total kursi tidak boleh kurang dari jumlah kursi yang sudah dibooking. "
+                    f"Saat ini ada {booked_seats_count} kursi yang sudah dibooking."
+                )
+        
         return value
     
     def validate(self, attrs):
@@ -316,6 +326,67 @@ class TourDateSerializer(serializers.ModelSerializer):
                 )
         
         return attrs
+    
+    def update(self, instance, validated_data):
+        """
+        Update tour date and regenerate seats if total_seats changed.
+        When total_seats is updated:
+        - Delete all seats that don't have status BOOKED (preserve booked seats)
+        - Regenerate seats based on new total_seats count
+        """
+        total_seats_changed = 'total_seats' in validated_data and validated_data['total_seats'] != instance.total_seats
+        
+        # Update the instance
+        instance = super().update(instance, validated_data)
+        
+        # If total_seats changed, regenerate seats
+        if total_seats_changed:
+            # Delete all seats that are not booked (preserve booked seats)
+            instance.seat_slots.exclude(status=SeatSlotStatus.BOOKED).delete()
+            
+            # Regenerate seats based on new total_seats
+            # Count existing booked seats
+            booked_seats_count = instance.seat_slots.filter(status=SeatSlotStatus.BOOKED).count()
+            
+            # Generate new seats to match total_seats
+            seats_needed = instance.total_seats - booked_seats_count
+            
+            if seats_needed > 0:
+                # Get existing seat numbers to avoid duplicates
+                existing_slots = set(
+                    instance.seat_slots.values_list('seat_number', flat=True)
+                )
+                
+                # Convert existing slots to integers for comparison
+                existing_nums = set()
+                for slot in existing_slots:
+                    try:
+                        existing_nums.add(int(slot))
+                    except (ValueError, TypeError):
+                        pass
+                
+                # Generate numeric seat numbers
+                slots_to_create = []
+                slot_num = 1
+                while len(slots_to_create) < seats_needed:
+                    # Find next available seat number
+                    while slot_num in existing_nums:
+                        slot_num += 1
+                    
+                    slots_to_create.append(
+                        SeatSlot(
+                            tour_date=instance,
+                            seat_number=str(slot_num),
+                            status=SeatSlotStatus.AVAILABLE,
+                        )
+                    )
+                    existing_nums.add(slot_num)
+                    slot_num += 1
+                
+                if slots_to_create:
+                    SeatSlot.objects.bulk_create(slots_to_create, batch_size=100)
+        
+        return instance
     
     def get_seat_slots(self, obj):
         """Return seat slots ordered by seat number."""
