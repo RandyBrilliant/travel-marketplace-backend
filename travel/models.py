@@ -1021,20 +1021,25 @@ class ResellerCommission(models.Model):
     Commission entries per reseller per booking.
 
     IMPORTANT: 
-    - Level 0 (booking reseller): Commission is calculated PER SEAT (per passenger).
-      The amount = commission_per_seat × number_of_seats_in_booking.
-    - Level 1-3 (upline commissions): Fixed amounts per booking:
-      - Level 1: 50,000 IDR (fixed per booking)
-      - Level 2: 25,000 IDR (fixed per booking)
-      - Level 3: 25,000 IDR (fixed per booking)
+    - Level 0 (booking reseller): Commission is calculated as:
+      1. Base commission = commission_per_seat × number_of_seats_in_booking
+      2. Upline deduction = 100,000 IDR (distributed to uplines)
+      3. Reseller keeps = base_commission - 100,000 IDR
+      Example: If base is 150,000 IDR, reseller keeps 50,000 IDR
+      
+    - Level 1-3 (upline commissions): Fixed amounts deducted from booking reseller:
+      - Level 1: 50,000 IDR (50% of 100,000 deduction)
+      - Level 2: 25,000 IDR (25% of 100,000 deduction)
+      - Level 3: 25,000 IDR (25% of 100,000 deduction)
     - Level 4 and above: No commission (0 IDR)
 
-    Example hierarchy when A makes a booking:
-    - A (Level 0): Gets commission from tour package (per seat)
-    - B (Level 1): Gets 50,000 IDR (A's sponsor)
-    - C (Level 2): Gets 25,000 IDR (B's sponsor)
-    - D (Level 3): Gets 25,000 IDR (C's sponsor)
+    Example when A makes a booking earning 150,000 IDR base commission:
+    - A (Level 0): Gets 50,000 IDR (150,000 - 100,000 deduction)
+    - B (Level 1): Gets 50,000 IDR (A's sponsor) - from deduction
+    - C (Level 2): Gets 25,000 IDR (B's sponsor) - from deduction
+    - D (Level 3): Gets 25,000 IDR (C's sponsor) - from deduction
     - E (Level 4): Gets nothing (D's sponsor)
+    Total distributed: 50k + 50k + 25k + 25k = 150,000 IDR (matches base)
     """
 
     booking = models.ForeignKey(
@@ -1055,8 +1060,8 @@ class ResellerCommission(models.Model):
         validators=[MinValueValidator(1)],
         help_text=_(
             "Total commission amount in IDR. "
-            "For Level 0: commission_per_seat × number_of_seats. "
-            "For Levels 1-3: fixed amount per booking (Level 1: 50k, Level 2-3: 25k). "
+            "For Level 0: (commission_per_seat × number_of_seats) - 100,000 IDR upline deduction. "
+            "For Levels 1-3: fixed amount from deduction (Level 1: 50k, Level 2-3: 25k). "
             "Must be at least 1 IDR."
         )
     )

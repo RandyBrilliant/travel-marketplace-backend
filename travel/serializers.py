@@ -1041,6 +1041,7 @@ class BookingListSerializer(serializers.ModelSerializer):
     
     reseller_name = serializers.CharField(source="reseller.full_name", read_only=True)
     tour_package_name = serializers.CharField(source="tour_date.package.name", read_only=True)
+    supplier_name = serializers.CharField(source="tour_date.package.supplier.company_name", read_only=True)
     departure_date = serializers.DateField(source="tour_date.departure_date", read_only=True)
     seats_booked = serializers.IntegerField(read_only=True)
     total_amount = serializers.IntegerField(read_only=True)
@@ -1060,6 +1061,7 @@ class BookingListSerializer(serializers.ModelSerializer):
             "reseller_name",
             "tour_date",
             "tour_package_name",
+            "supplier_name",
             "departure_date",
             "status",
             "seats_booked",
@@ -1435,21 +1437,27 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         1. Level 0 (Booking Reseller):
            - First check ResellerTourCommission for this reseller + tour package (reseller-specific override)
            - If not found, use TourPackage.commission (general tour commission)
-           - Commission amount = commission_per_seat * booking.seats_booked (per seat calculation)
-           - Only create if commission amount > 0
+           - Base commission amount = commission_per_seat * booking.seats_booked (per seat calculation)
+           - From the base commission, 100,000 IDR is deducted and distributed to uplines
+           - Reseller keeps: base_commission - 100,000 IDR
+           - Only create if final commission amount > 0
         
-        2. Upline Commission Structure (Fixed amounts per booking):
-           - Level 1 (Direct Upline/Sponsor): 50,000 IDR (fixed per booking)
-           - Level 2 (Sponsor's Sponsor): 25,000 IDR (fixed per booking)
-           - Level 3 (Level 2's Sponsor): 25,000 IDR (fixed per booking)
+        2. Upline Commission Structure (Deducted from reseller's commission):
+           The 100,000 IDR deducted from the reseller is distributed as follows:
+           - Level 1 (Direct Upline/Sponsor): 50,000 IDR (50% of 100k)
+           - Level 2 (Sponsor's Sponsor): 25,000 IDR (25% of 100k)
+           - Level 3 (Level 2's Sponsor): 25,000 IDR (25% of 100k)
            - Level 4 and above: No commission (0 IDR)
            
-        Example hierarchy:
-        - A makes booking (Level 0) → gets commission from tour package
-        - A was recruited by B (Level 1) → B gets 50,000 IDR
-        - B was recruited by C (Level 2) → C gets 25,000 IDR
-        - C was recruited by D (Level 3) → D gets 25,000 IDR
-        - D was recruited by E (Level 4) → E gets nothing (0 IDR)
+        Example:
+        - A makes booking and earns 150,000 IDR base commission
+        - 100,000 IDR is deducted from A's commission
+        - A keeps: 150,000 - 100,000 = 50,000 IDR (Level 0)
+        - B (recruited A) gets: 50,000 IDR (Level 1)
+        - C (recruited B) gets: 25,000 IDR (Level 2)
+        - D (recruited C) gets: 25,000 IDR (Level 3)
+        - E (recruited D) gets: 0 IDR (Level 4+)
+        Total: 50,000 + 50,000 + 25,000 + 25,000 = 150,000 IDR
         """
         from .models import ResellerCommission, ResellerTourCommission
         import logging
@@ -1460,48 +1468,64 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         tour_package = booking.tour_date.package
         seats_count = booking.seats_booked  # Number of passengers/seats in this booking
         
-        # Fixed upline commission amounts (per booking, not per seat)
+        # Fixed upline deduction and distribution
+        UPLINE_TOTAL_DEDUCTION = 100000  # Total amount deducted from reseller's commission
         UPLINE_COMMISSION_AMOUNTS = {
-            1: 50000,  # Level 1: 50,000 IDR
-            2: 25000,  # Level 2: 25,000 IDR
-            3: 25000,  # Level 3: 25,000 IDR
+            1: 50000,  # Level 1: 50% of deduction (50,000 IDR)
+            2: 25000,  # Level 2: 25% of deduction (25,000 IDR)
+            3: 25000,  # Level 3: 25% of deduction (25,000 IDR)
         }
         
         # Level 0: Commission for the reseller who made the booking
         # Commission comes from: ResellerTourCommission (if exists) OR TourPackage.commission (fallback)
-        # This is still calculated per seat
+        # This is calculated per seat, then upline deduction is subtracted
         tour_commission_per_seat = tour_package.get_reseller_commission(booking_reseller)
         
         if tour_commission_per_seat is not None and tour_commission_per_seat > 0:
-            # Multiply commission per seat by number of seats
-            total_commission = tour_commission_per_seat * seats_count
+            # Calculate base commission (before deduction)
+            base_commission = tour_commission_per_seat * seats_count
             
-            commission = ResellerCommission.objects.create(
-                booking=booking,
-                reseller=booking_reseller,
-                level=0,
-                amount=total_commission
-            )
-            # Check if it came from ResellerTourCommission or TourPackage.commission
-            has_specific = ResellerTourCommission.objects.filter(
-                reseller=booking_reseller,
-                tour_package=tour_package,
-                is_active=True
-            ).exists()
-            commission_source = "ResellerTourCommission" if has_specific else "TourPackage.commission"
-            logger.info(
-                f"Created commission {commission.id} for reseller {booking_reseller.id} (Level 0): "
-                f"{total_commission} IDR ({tour_commission_per_seat} IDR/seat × {seats_count} seats) "
-                f"from {commission_source} (tour {tour_package.id}, booking {booking.id})"
-            )
+            # Deduct upline share from reseller's commission
+            reseller_final_commission = base_commission - UPLINE_TOTAL_DEDUCTION
+            
+            # Only create commission if reseller gets something (commission must be positive)
+            if reseller_final_commission > 0:
+                commission = ResellerCommission.objects.create(
+                    booking=booking,
+                    reseller=booking_reseller,
+                    level=0,
+                    amount=reseller_final_commission
+                )
+                # Check if it came from ResellerTourCommission or TourPackage.commission
+                has_specific = ResellerTourCommission.objects.filter(
+                    reseller=booking_reseller,
+                    tour_package=tour_package,
+                    is_active=True
+                ).exists()
+                commission_source = "ResellerTourCommission" if has_specific else "TourPackage.commission"
+                logger.info(
+                    f"Created commission {commission.id} for reseller {booking_reseller.id} (Level 0): "
+                    f"{reseller_final_commission} IDR (base: {base_commission} IDR - upline deduction: {UPLINE_TOTAL_DEDUCTION} IDR) "
+                    f"from {commission_source} (tour {tour_package.id}, booking {booking.id})"
+                )
+            else:
+                logger.warning(
+                    f"No commission created for reseller {booking_reseller.id} on booking {booking.id} "
+                    f"because final commission after upline deduction would be {reseller_final_commission} IDR "
+                    f"(base: {base_commission} IDR - deduction: {UPLINE_TOTAL_DEDUCTION} IDR). "
+                    f"Commission must be positive."
+                )
         else:
             logger.warning(
                 f"No commission created for reseller {booking_reseller.id} on booking {booking.id} "
                 f"because tour package {tour_package.id} has no commission set "
                 f"(neither ResellerTourCommission nor TourPackage.commission)."
             )
+            # If reseller doesn't get commission, uplines shouldn't either
+            return
         
         # Upline Commission Structure: Traverse up to 3 levels with fixed amounts
+        # These amounts are deducted from the reseller's commission (already calculated above)
         current_upline = booking_reseller.sponsor
         level = 1
         
@@ -1518,7 +1542,7 @@ class BookingCreateSerializer(serializers.ModelSerializer):
                 )
                 logger.info(
                     f"Created upline commission {upline_commission_obj.id} for upline {current_upline.id} (Level {level}): "
-                    f"{commission_amount} IDR (fixed per booking) (booking {booking.id})"
+                    f"{commission_amount} IDR (deducted from booking reseller's commission) (booking {booking.id})"
                 )
             else:
                 logger.info(
@@ -1532,6 +1556,7 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         
         if level == 1:
             logger.info(f"No sponsor for reseller {booking_reseller.id}, skipping upline commission")
+
 
 
 class PaymentSerializer(serializers.ModelSerializer):

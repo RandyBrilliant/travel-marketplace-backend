@@ -47,6 +47,16 @@ from travel.views import (
     ResellerWithdrawalViewSet,
     AdminWithdrawalViewSet,
 )
+from travel.report_views import (
+    sales_report_view,
+    pax_report_view,
+    total_amount_report_view,
+    commission_payout_report_view,
+    supplier_sales_report_view,
+    supplier_pax_report_view,
+    supplier_total_amount_report_view,
+    supplier_commission_report_view,
+)
 
 router = DefaultRouter()
 router.register(r"suppliers/me/profile", SupplierProfileViewSet, basename="supplier-profile")
@@ -136,6 +146,16 @@ api_v1_patterns = [
     path("admin/<str:profile_type>/<int:profile_id>/activate-deactivate/", ActivateDeactivateAccountView.as_view(), name="activate-deactivate-account"),
     # Approve/Reject supplier endpoint
     path("admin/suppliers/<int:supplier_id>/approve-reject/", ApproveRejectSupplierView.as_view(), name="approve-reject-supplier"),
+    # Admin report endpoints
+    path("admin/reports/sales/", sales_report_view, name="admin-sales-report"),
+    path("admin/reports/pax/", pax_report_view, name="admin-pax-report"),
+    path("admin/reports/total-amount/", total_amount_report_view, name="admin-total-amount-report"),
+    path("admin/reports/commission-payout/", commission_payout_report_view, name="admin-commission-payout-report"),
+    # Supplier report endpoints
+    path("suppliers/me/reports/sales/", supplier_sales_report_view, name="supplier-sales-report"),
+    path("suppliers/me/reports/pax/", supplier_pax_report_view, name="supplier-pax-report"),
+    path("suppliers/me/reports/total-amount/", supplier_total_amount_report_view, name="supplier-total-amount-report"),
+    path("suppliers/me/reports/commission-payout/", supplier_commission_report_view, name="supplier-commission-payout-report"),
     # Public tour endpoints
     path("tours/", PublicTourPackageListView.as_view(), name="public-tour-list"),
     path("tours/<int:pk>/", PublicTourPackageDetailView.as_view(), name="public-tour-detail"),
