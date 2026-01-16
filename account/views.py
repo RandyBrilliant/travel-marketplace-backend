@@ -1192,7 +1192,7 @@ class RegisterResellerView(APIView):
             "full_name": "John Doe",
             "contact_phone": "+6281234567890" (optional),
             "address": "Address" (optional),
-            "sponsor_referral_code": "ABC123" (optional)
+            "sponsor_referral_code": "ABC123" (required)
         }
         """
         from account.serializers import ResellerProfileSerializer
@@ -1222,6 +1222,11 @@ class RegisterResellerView(APIView):
         if not full_name:
             return Response(
                 {'full_name': ['This field is required.']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if not sponsor_referral_code:
+            return Response(
+                {'sponsor_referral_code': ['This field is required.']},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -1255,17 +1260,17 @@ class RegisterResellerView(APIView):
                 # Import ResellerProfile before using it
                 from account.models import ResellerProfile
                 
-                # Handle sponsor referral code if provided
+                # Handle sponsor referral code (required for public registration)
                 sponsor = None
-                if sponsor_referral_code:
-                    try:
-                        sponsor = ResellerProfile.objects.get(referral_code=sponsor_referral_code)
-                    except ResellerProfile.DoesNotExist:
-                        user.delete()  # Clean up user if sponsor code is invalid
-                        return Response(
-                            {'sponsor_referral_code': [f"Sponsor with referral code '{sponsor_referral_code}' does not exist."]},
-                            status=status.HTTP_400_BAD_REQUEST
-                        )
+                normalized_code = sponsor_referral_code.upper().strip()
+                try:
+                    sponsor = ResellerProfile.objects.get(referral_code=normalized_code)
+                except ResellerProfile.DoesNotExist:
+                    user.delete()  # Clean up user if sponsor code is invalid
+                    return Response(
+                        {'sponsor_referral_code': [f"Sponsor with referral code '{normalized_code}' does not exist."]},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
 
                 # Create reseller profile using serializer to ensure referral code is generated
                 from account.serializers import generate_unique_referral_code
