@@ -5,6 +5,7 @@ from .models import (
     SupplierProfile,
     ResellerProfile,
     StaffProfile,
+    CustomerProfile,
 )
 
 # Register your models here.
@@ -151,6 +152,45 @@ class StaffProfileAdmin(admin.ModelAdmin):
         }),
         ('Staff Information', {
             'fields': ('full_name', 'contact_phone')
+        }),
+        ('Profile Photo', {
+            'fields': ('photo', 'photo_preview')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at')
+        }),
+    )
+    
+    def photo_preview(self, obj):
+        """Display photo preview in admin."""
+        if obj.photo:
+            return format_html(
+                '<img src="{}" style="max-height: 200px; max-width: 200px;" />',
+                obj.photo.url
+            )
+        return "No photo"
+    photo_preview.short_description = "Photo Preview"
+
+
+@admin.register(CustomerProfile)
+class CustomerProfileAdmin(admin.ModelAdmin):
+    """Admin interface for customer profiles."""
+    list_display = ('user', 'full_name', 'contact_phone', 'created_at')
+    list_filter = ('user__is_active', 'created_at')
+    search_fields = ('user__email', 'full_name', 'contact_phone')
+    readonly_fields = ('photo_preview', 'created_at', 'updated_at')
+    list_select_related = ('user',)
+    
+    def get_queryset(self, request):
+        """Optimize queryset with select_related to avoid N+1 queries."""
+        return super().get_queryset(request).select_related('user')
+    
+    fieldsets = (
+        ('User', {
+            'fields': ('user',)
+        }),
+        ('Customer Information', {
+            'fields': ('full_name', 'contact_phone', 'address')
         }),
         ('Profile Photo', {
             'fields': ('photo', 'photo_preview')

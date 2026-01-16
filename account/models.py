@@ -11,6 +11,7 @@ class UserRole(models.TextChoices):
     SUPPLIER = "SUPPLIER", _("Supplier")
     RESELLER = "RESELLER", _("Reseller")
     STAFF = "STAFF", _("Admin staff")
+    CUSTOMER = "CUSTOMER", _("Customer")
 
 
 class CustomUser(AbstractUser):
@@ -83,6 +84,14 @@ class CustomUser(AbstractUser):
         return hasattr(self, 'reseller_profile')
 
     @property
+    def is_customer(self) -> bool:
+        """
+        Check if user has customer profile.
+        Customers are end-users who book tours.
+        """
+        return hasattr(self, 'customer_profile')
+
+    @property
     def is_admin_staff(self) -> bool:
         """
         Convenience flag for your code to distinguish marketplace staff.
@@ -114,6 +123,8 @@ class CustomUser(AbstractUser):
             roles.append("Supplier")
         if self.is_reseller:
             roles.append("Reseller")
+        if self.is_customer:
+            roles.append("Customer")
         if self.is_admin_staff:
             roles.append("Admin Staff")
         return ", ".join(roles) if roles else "No roles"
@@ -541,3 +552,52 @@ class StaffProfile(models.Model):
         return f"{self.full_name} ({self.user.email})"
 
 
+class CustomerProfile(models.Model):
+    """
+    Profile for customer accounts.
+    Customers are end-users who browse and book tours.
+    They do not get commission or referrals - just pure booking.
+    """
+
+    user = models.OneToOneField(
+        "CustomUser",
+        on_delete=models.CASCADE,
+        related_name="customer_profile",
+        limit_choices_to={"role": UserRole.CUSTOMER},
+    )
+    full_name = models.CharField(
+        max_length=255,
+        help_text=_("Full name of the customer.")
+    )
+    contact_phone = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text=_("Contact phone number.")
+    )
+    address = models.TextField(
+        blank=True,
+        help_text=_("Customer address for billing/shipping purposes.")
+    )
+    photo = models.ImageField(
+        upload_to="profile_photos/customers/",
+        blank=True,
+        null=True,
+        verbose_name="Profile Photo",
+        help_text=_("Customer profile photo.")
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Customer Profile"
+        verbose_name_plural = "Customer Profiles"
+        indexes = [
+            models.Index(fields=["user"]),
+            models.Index(fields=["full_name"]),
+            models.Index(fields=["created_at"]),
+            models.Index(fields=["user", "created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.full_name} ({self.user.email})"

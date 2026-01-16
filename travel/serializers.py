@@ -638,18 +638,32 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
         Return reseller commission amount if user has reseller profile.
         Supports dual roles - suppliers with reseller profiles can see commission.
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         request = self.context.get("request")
+        if request:
+            logger.debug(f"[Commission Debug] request.user={request.user}, is_authenticated={request.user.is_authenticated}, is_reseller={getattr(request.user, 'is_reseller', 'N/A')}")
+            if hasattr(request.user, 'role'):
+                logger.debug(f"[Commission Debug] user.role={request.user.role}")
+        
         if request and request.user.is_authenticated and request.user.is_reseller:
+            logger.debug(f"[Commission Debug] User is authenticated reseller, attempting to get commission")
             # Use prefetched reseller_profile if available to avoid N+1 query
             if hasattr(request.user, 'reseller_profile'):
+                logger.debug(f"[Commission Debug] Using prefetched reseller_profile")
                 reseller_profile = request.user.reseller_profile
             else:
+                logger.debug(f"[Commission Debug] Fetching reseller_profile from DB")
                 try:
                     reseller_profile = ResellerProfile.objects.select_related('user').get(user=request.user)
                 except ResellerProfile.DoesNotExist:
+                    logger.warning(f"[Commission Debug] ResellerProfile.DoesNotExist for user {request.user}")
                     return None
             commission = obj.get_reseller_commission(reseller_profile)
+            logger.debug(f"[Commission Debug] commission={commission}")
             return commission
+        logger.debug(f"[Commission Debug] User not authenticated reseller, returning None")
         return None
 
 
@@ -1040,12 +1054,53 @@ class BookingListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for booking list view."""
     
     reseller_name = serializers.CharField(source="reseller.full_name", read_only=True)
+    reseller_email = serializers.EmailField(source="reseller.user.email", read_only=True)
+    reseller_phone = serializers.CharField(source="reseller.contact_phone", read_only=True)
+    customer_name = serializers.CharField(source="customer.full_name", read_only=True)
+    customer_email = serializers.EmailField(source="customer.user.email", read_only=True)
+    customer_phone = serializers.CharField(source="customer.contact_phone", read_only=True)
+    booked_by_type = serializers.SerializerMethodField()
+    booked_by_name = serializers.SerializerMethodField()
+    booked_by_email = serializers.SerializerMethodField()
+    booked_by_phone = serializers.SerializerMethodField()
     tour_package_name = serializers.CharField(source="tour_date.package.name", read_only=True)
     supplier_name = serializers.CharField(source="tour_date.package.supplier.company_name", read_only=True)
     departure_date = serializers.DateField(source="tour_date.departure_date", read_only=True)
     seats_booked = serializers.IntegerField(read_only=True)
     total_amount = serializers.IntegerField(read_only=True)
     payment_status = serializers.SerializerMethodField()
+    
+    def get_booked_by_type(self, obj):
+        """Get the type of user who made the booking (RESELLER or CUSTOMER)."""
+        if obj.reseller:
+            return "RESELLER"
+        elif obj.customer:
+            return "CUSTOMER"
+        return None
+    
+    def get_booked_by_name(self, obj):
+        """Get name of user who made the booking."""
+        if obj.reseller:
+            return obj.reseller.full_name
+        elif obj.customer:
+            return obj.customer.full_name
+        return None
+    
+    def get_booked_by_email(self, obj):
+        """Get email of user who made the booking."""
+        if obj.reseller:
+            return obj.reseller.user.email
+        elif obj.customer:
+            return obj.customer.user.email
+        return None
+    
+    def get_booked_by_phone(self, obj):
+        """Get phone of user who made the booking."""
+        if obj.reseller:
+            return obj.reseller.contact_phone
+        elif obj.customer:
+            return obj.customer.contact_phone
+        return None
     
     def get_payment_status(self, obj):
         """Get status of the latest payment (for backward compatibility)."""
@@ -1059,6 +1114,16 @@ class BookingListSerializer(serializers.ModelSerializer):
             "booking_number",
             "reseller",
             "reseller_name",
+            "reseller_email",
+            "reseller_phone",
+            "customer",
+            "customer_name",
+            "customer_email",
+            "customer_phone",
+            "booked_by_type",
+            "booked_by_name",
+            "booked_by_email",
+            "booked_by_phone",
             "tour_date",
             "tour_package_name",
             "supplier_name",
@@ -1433,6 +1498,8 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         """
         Create commission records for the booking reseller and their upline hierarchy.
         
+        NOTE: Customer bookings do NOT generate commissions. Only reseller bookings earn commission.
+        
         Commission calculation logic:
         1. Level 0 (Booking Reseller):
            - First check ResellerTourCommission for this reseller + tour package (reseller-specific override)
@@ -1464,29 +1531,59 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         
         logger = logging.getLogger(__name__)
         
+        # Skip commission creation for customer bookings
+        if not booking.reseller:
+            logger.info(
+                f"Skipping commission creation for booking {booking.id}: "
+                f"Customer booking (no reseller involved)."
+            )
+            return
+        
         booking_reseller = booking.reseller
         tour_package = booking.tour_date.package
         seats_count = booking.seats_booked  # Number of passengers/seats in this booking
         
-        # Fixed upline deduction and distribution
-        UPLINE_TOTAL_DEDUCTION = 100000  # Total amount deducted from reseller's commission
-        UPLINE_COMMISSION_AMOUNTS = {
-            1: 50000,  # Level 1: 50% of deduction (50,000 IDR)
-            2: 25000,  # Level 2: 25% of deduction (25,000 IDR)
-            3: 25000,  # Level 3: 25% of deduction (25,000 IDR)
+        # Fixed upline deduction and distribution percentages
+        # If base commission is >= 100,000 IDR, use fixed amounts
+        # If base commission is < 100,000 IDR, use percentage-based distribution
+        UPLINE_TOTAL_DEDUCTION_MAX = 100000  # Maximum deduction from reseller's commission
+        UPLINE_PERCENTAGE = 0.5  # 50% of base commission goes to uplines if commission < 100k
+        UPLINE_DISTRIBUTION = {
+            1: 0.50,  # Level 1: 50% of upline share
+            2: 0.25,  # Level 2: 25% of upline share
+            3: 0.25,  # Level 3: 25% of upline share
         }
         
         # Level 0: Commission for the reseller who made the booking
         # Commission comes from: ResellerTourCommission (if exists) OR TourPackage.commission (fallback)
-        # This is calculated per seat, then upline deduction is subtracted
+        # This is calculated per seat, then upline deduction is subtracted (only if reseller has uplines)
         tour_commission_per_seat = tour_package.get_reseller_commission(booking_reseller)
         
         if tour_commission_per_seat is not None and tour_commission_per_seat > 0:
             # Calculate base commission (before deduction)
             base_commission = tour_commission_per_seat * seats_count
             
-            # Deduct upline share from reseller's commission
-            reseller_final_commission = base_commission - UPLINE_TOTAL_DEDUCTION
+            # Check if reseller has any upline (sponsor)
+            # If no upline, reseller gets full commission without deduction
+            has_upline = booking_reseller.sponsor is not None
+            
+            if has_upline:
+                # Calculate upline deduction:
+                # - If base_commission >= 100k, deduct fixed 100k
+                # - If base_commission < 100k, deduct 50% of base commission
+                if base_commission >= UPLINE_TOTAL_DEDUCTION_MAX:
+                    upline_deduction = UPLINE_TOTAL_DEDUCTION_MAX
+                else:
+                    upline_deduction = int(base_commission * UPLINE_PERCENTAGE)
+            else:
+                # No upline = no deduction, reseller gets full commission
+                upline_deduction = 0
+                logger.info(
+                    f"Reseller {booking_reseller.id} has no upline (group root), no deduction applied"
+                )
+            
+            # Calculate final commission for reseller
+            reseller_final_commission = base_commission - upline_deduction
             
             # Only create commission if reseller gets something (commission must be positive)
             if reseller_final_commission > 0:
@@ -1505,16 +1602,17 @@ class BookingCreateSerializer(serializers.ModelSerializer):
                 commission_source = "ResellerTourCommission" if has_specific else "TourPackage.commission"
                 logger.info(
                     f"Created commission {commission.id} for reseller {booking_reseller.id} (Level 0): "
-                    f"{reseller_final_commission} IDR (base: {base_commission} IDR - upline deduction: {UPLINE_TOTAL_DEDUCTION} IDR) "
+                    f"{reseller_final_commission} IDR (base: {base_commission} IDR - upline deduction: {upline_deduction} IDR) "
                     f"from {commission_source} (tour {tour_package.id}, booking {booking.id})"
                 )
             else:
                 logger.warning(
                     f"No commission created for reseller {booking_reseller.id} on booking {booking.id} "
                     f"because final commission after upline deduction would be {reseller_final_commission} IDR "
-                    f"(base: {base_commission} IDR - deduction: {UPLINE_TOTAL_DEDUCTION} IDR). "
+                    f"(base: {base_commission} IDR - deduction: {upline_deduction} IDR). "
                     f"Commission must be positive."
                 )
+                return  # No upline commissions if reseller gets nothing
         else:
             logger.warning(
                 f"No commission created for reseller {booking_reseller.id} on booking {booking.id} "
@@ -1524,14 +1622,15 @@ class BookingCreateSerializer(serializers.ModelSerializer):
             # If reseller doesn't get commission, uplines shouldn't either
             return
         
-        # Upline Commission Structure: Traverse up to 3 levels with fixed amounts
-        # These amounts are deducted from the reseller's commission (already calculated above)
+        # Upline Commission Structure: Traverse up to 3 levels
+        # Calculate individual upline amounts based on total deduction
         current_upline = booking_reseller.sponsor
         level = 1
         
         while current_upline and level <= 3:
-            # Get fixed commission amount for this level
-            commission_amount = UPLINE_COMMISSION_AMOUNTS.get(level, 0)
+            # Calculate commission amount for this level based on deduction
+            distribution_percentage = UPLINE_DISTRIBUTION.get(level, 0)
+            commission_amount = int(upline_deduction * distribution_percentage)
             
             if commission_amount > 0:
                 upline_commission_obj = ResellerCommission.objects.create(
@@ -1542,7 +1641,7 @@ class BookingCreateSerializer(serializers.ModelSerializer):
                 )
                 logger.info(
                     f"Created upline commission {upline_commission_obj.id} for upline {current_upline.id} (Level {level}): "
-                    f"{commission_amount} IDR (deducted from booking reseller's commission) (booking {booking.id})"
+                    f"{commission_amount} IDR ({distribution_percentage*100}% of {upline_deduction} IDR deduction) (booking {booking.id})"
                 )
             else:
                 logger.info(

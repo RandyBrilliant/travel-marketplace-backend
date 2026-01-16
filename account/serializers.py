@@ -10,6 +10,7 @@ from account.models import (
     SupplierProfile,
     ResellerProfile,
     StaffProfile,
+    CustomerProfile,
     UserRole,
 )
 
@@ -277,6 +278,27 @@ class StaffProfileSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "user", "created_at", "updated_at"]
 
 
+class CustomerProfileSerializer(serializers.ModelSerializer):
+    """Serializer for customer profile CRUD operations."""
+    user = serializers.PrimaryKeyRelatedField(read_only=True)
+    email = serializers.EmailField(source="user.email", read_only=True)
+
+    class Meta:
+        model = CustomerProfile
+        fields = [
+            "id",
+            "user",
+            "email",
+            "full_name",
+            "contact_phone",
+            "address",
+            "photo",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "user", "email", "created_at", "updated_at"]
+
+
 # ==================== ADMIN SERIALIZERS ====================
 # Admin serializers that allow setting the user field and include nested user data
 
@@ -371,5 +393,19 @@ class AdminStaffProfileSerializer(BaseAdminProfileSerializer, StaffProfileSerial
 
     class Meta(StaffProfileSerializer.Meta):
         fields = StaffProfileSerializer.Meta.fields + ["user_data", "email", "password"]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class AdminCustomerProfileSerializer(BaseAdminProfileSerializer, CustomerProfileSerializer):
+    """Admin serializer that allows setting the user field and includes nested user data."""
+
+    user = serializers.PrimaryKeyRelatedField(
+        queryset=CustomUser.objects.filter(role=UserRole.CUSTOMER),
+        required=False,
+        allow_null=True,
+    )
+
+    class Meta(CustomerProfileSerializer.Meta):
+        fields = CustomerProfileSerializer.Meta.fields + ["user_data", "email", "password"]
         read_only_fields = ["id", "created_at", "updated_at"]
 

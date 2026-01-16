@@ -251,9 +251,10 @@ SIMPLE_JWT = {
     # SameSite cookie policy:
     # - "Lax" (default): Cookies sent for top-level navigation and same-site requests
     # - "Strict": Cookies only sent for same-site requests
-    # - "None": Cookies sent for all requests (requires Secure=True, use only for cross-domain)
-    # If frontend is cross-domain, use "SameSite=None; Secure" and update CORS
-    "AUTH_COOKIE_SAMESITE": "Lax",
+    # - "None": Cookies sent for all requests (requires Secure=True in production)
+    # For development with different ports (frontend:3000, backend:8000), use "None"
+    # In production on same domain, "Lax" is more secure
+    "AUTH_COOKIE_SAMESITE": "None" if DEBUG else "Lax",
 }
 
 AUTH_USER_MODEL = "account.CustomUser"

@@ -15,9 +15,11 @@ from account.views import (
     SupplierProfileViewSet,
     ResellerProfileViewSet,
     StaffProfileViewSet,
+    CustomerProfileViewSet,
     AdminSupplierProfileViewSet,
     AdminResellerProfileViewSet,
     AdminStaffProfileViewSet,
+    AdminCustomerProfileViewSet,
     CurrentUserView,
     LogoutView,
     ChangePasswordView,
@@ -30,6 +32,7 @@ from account.views import (
     ApproveRejectSupplierView,
     RegisterResellerView,
     RegisterSupplierView,
+    RegisterCustomerView,
 )
 from travel.views import (
     SupplierTourPackageViewSet,
@@ -38,6 +41,7 @@ from travel.views import (
     SupplierBookingViewSet,
     SupplierResellerGroupViewSet,
     ResellerBookingViewSet,
+    CustomerBookingViewSet,
     AdminResellerTourCommissionViewSet,
     AdminResellerGroupViewSet,
     AdminBookingViewSet,
@@ -62,6 +66,7 @@ router = DefaultRouter()
 router.register(r"suppliers/me/profile", SupplierProfileViewSet, basename="supplier-profile")
 router.register(r"resellers/me/profile", ResellerProfileViewSet, basename="reseller-profile")
 router.register(r"admin/staff/me/profile", StaffProfileViewSet, basename="staff-profile")
+router.register(r"customers/me/profile", CustomerProfileViewSet, basename="customer-profile")
 
 # Supplier tour management endpoints
 router.register(r"suppliers/me/tours", SupplierTourPackageViewSet, basename="supplier-tour-package")
@@ -75,6 +80,9 @@ router.register(r"resellers/me/bookings", ResellerBookingViewSet, basename="rese
 # Reseller withdrawal endpoints
 router.register(r"resellers/me/withdrawals", ResellerWithdrawalViewSet, basename="reseller-withdrawal")
 
+# Customer booking endpoints
+router.register(r"customers/me/bookings", CustomerBookingViewSet, basename="customer-booking")
+
 # Admin-only endpoints for managing all profiles
 router.register(
     r"admin/suppliers", AdminSupplierProfileViewSet, basename="admin-supplier-profile"
@@ -84,6 +92,9 @@ router.register(
 )
 router.register(
     r"admin/staff", AdminStaffProfileViewSet, basename="admin-staff-profile"
+)
+router.register(
+    r"admin/customers", AdminCustomerProfileViewSet, basename="admin-customer-profile"
 )
 # Admin-only endpoints for managing reseller tour commissions
 router.register(
@@ -133,6 +144,7 @@ api_v1_patterns = [
     # Public registration endpoints
     path("register/reseller/", RegisterResellerView.as_view(), name="register-reseller"),
     path("register/supplier/", RegisterSupplierView.as_view(), name="register-supplier"),
+    path("register/customer/", RegisterCustomerView.as_view(), name="register-customer"),
     # Password change endpoint (works for all user types)
     path("change-password/", ChangePasswordView.as_view(), name="change-password"),
     # Email verification endpoints

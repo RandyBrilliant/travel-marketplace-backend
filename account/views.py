@@ -15,15 +15,18 @@ from account.models import (
     SupplierProfile,
     ResellerProfile,
     StaffProfile,
+    CustomerProfile,
     UserRole,
 )
 from account.serializers import (
     SupplierProfileSerializer,
     ResellerProfileSerializer,
     StaffProfileSerializer,
+    CustomerProfileSerializer,
     AdminSupplierProfileSerializer,
     AdminResellerProfileSerializer,
     AdminStaffProfileSerializer,
+    AdminCustomerProfileSerializer,
     ChangePasswordSerializer,
 )
 
@@ -247,6 +250,36 @@ class StaffProfileViewSet(BaseOwnProfileViewSet):
         if not user.is_authenticated or user.role != UserRole.STAFF:
             return StaffProfile.objects.none()
         return StaffProfile.objects.select_related('user').filter(user=user)
+
+
+class CustomerProfileViewSet(BaseOwnProfileViewSet):
+    """
+    CRUD for the authenticated customer's own profile.
+    Customers can browse and book tours - no commission or referral logic.
+    """
+
+    serializer_class = CustomerProfileSerializer
+
+    def get_profile_queryset_for_user(self, user):
+        if not user.is_authenticated:
+            return CustomerProfile.objects.none()
+        # Check if user has customer profile
+        if not user.is_customer:
+            return CustomerProfile.objects.none()
+        return CustomerProfile.objects.select_related('user').filter(user=user)
+    
+    def perform_create(self, serializer):
+        """
+        Create customer profile for current user.
+        Customers don't need approval - instant access to browse and book tours.
+        """
+        # Check if user already has a customer profile
+        if hasattr(self.request.user, 'customer_profile'):
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError(
+                {"detail": "You already have a customer profile."}
+            )
+        serializer.save(user=self.request.user)
 
 
 # ==================== ADMIN VIEWSETS ====================
@@ -483,6 +516,28 @@ class AdminStaffProfileViewSet(BaseAdminProfileViewSet):
 
     def get_user_role(self):
         return UserRole.STAFF
+
+
+class AdminCustomerProfileViewSet(BaseAdminProfileViewSet):
+    """Admin-only CRUD (except delete) for managing all customer profiles."""
+
+    queryset = CustomerProfile.objects.select_related("user").order_by("-created_at")
+    serializer_class = AdminCustomerProfileSerializer
+    filterset_fields = ["user__is_active"]
+    search_fields = ["full_name", "user__email", "contact_phone"]
+    
+    def list(self, request, *args, **kwargs):
+        """
+        List all customer profiles with pagination.
+        Use parent's list method which properly handles pagination via DEFAULT_PAGINATION_CLASS.
+        """
+        # Use parent's list method - it automatically applies pagination from settings
+        # DEFAULT_PAGINATION_CLASS is 'rest_framework.pagination.PageNumberPagination'
+        # which respects PAGE_SIZE_QUERY_PARAM='page_size' to allow custom page sizes
+        return super().list(request, *args, **kwargs)
+
+    def get_user_role(self):
+        return UserRole.CUSTOMER
 
 
 # ==================== USER INFO ENDPOINT ====================
@@ -1480,4 +1535,162 @@ class RegisterSupplierView(APIView):
             return Response(
                 {'detail': f'An error occurred during supplier registration: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class RegisterCustomerView(APIView):
+    """
+    Public API endpoint for customer registration.
+    Creates a new user with CUSTOMER role and associated CustomerProfile.
+    """
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = []
+
+    def post(self, request):
+        """
+        Register a new customer account.
+        
+        Request body:
+        {
+            "email": "customer@example.com",
+            "password": "securepassword123",
+            "full_name": "Jane Doe",
+            "contact_phone": "+6281234567890" (optional),
+            "address": "Address" (optional)
+        }
+        """
+        email = request.data.get('email')
+        password = request.data.get('password')
+        full_name = request.data.get('full_name')
+        contact_phone = request.data.get('contact_phone', '')
+        address = request.data.get('address', '')
+
+        # Normalize email: lowercase and strip whitespace
+        if email:
+            email = email.lower().strip()
+
+        # Validate required fields
+        if not email:
+            return Response(
+                {'email': ['This field is required.']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if not password:
+            return Response(
+                {'password': ['This field is required.']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if not full_name:
+            return Response(
+                {'full_name': ['This field is required.']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check if user with this email already exists (case-insensitive)
+        if CustomUser.objects.filter(email=email).exists():
+            return Response(
+                {'email': ['A user with this email already exists.']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate password
+        try:
+            from django.contrib.auth.password_validation import validate_password
+            validate_password(password)
+        except Exception as e:
+            return Response(
+                {'password': list(e.messages) if hasattr(e, 'messages') else [str(e)]},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            with transaction.atomic():
+                # Create user with CUSTOMER role
+                user = CustomUser.objects.create_user(
+                    email=email,
+                    password=password,
+                    role=UserRole.CUSTOMER,
+                    is_active=True,
+                    email_verified=False,
+                )
+
+                # Create customer profile
+                CustomerProfile.objects.create(
+                    user=user,
+                    full_name=full_name,
+                    contact_phone=contact_phone,
+                    address=address,
+                )
+
+                # Send email verification
+                try:
+                    send_email_verification.delay(user.id)
+                except Exception as e:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.error(f"Failed to send verification email for customer: {str(e)}", exc_info=True)
+
+                # Auto-login after registration
+                try:
+                    from account.token_serializers import CustomTokenObtainPairSerializer
+                    refresh_token_obj = CustomTokenObtainPairSerializer.get_token(user)
+                    access_token = str(refresh_token_obj.access_token)
+                    refresh_token = str(refresh_token_obj)
+                    
+                    response = Response(
+                        {
+                            'detail': 'Customer account created successfully. You have been automatically logged in.',
+                            'user': {
+                                'id': user.id,
+                                'email': user.email,
+                                'role': user.role,
+                            }
+                        },
+                        status=status.HTTP_201_CREATED
+                    )
+                    
+                    is_secure = not settings.DEBUG
+                    max_age_access = int(settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME'].total_seconds())
+                    max_age_refresh = int(settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME'].total_seconds())
+                    
+                    response.set_cookie(
+                        key='access_token',
+                        value=access_token,
+                        max_age=max_age_access,
+                        httponly=True,
+                        secure=is_secure,
+                        samesite='Lax',
+                        path='/',
+                    )
+                    
+                    response.set_cookie(
+                        key='refresh_token',
+                        value=refresh_token,
+                        max_age=max_age_refresh,
+                        httponly=True,
+                        secure=is_secure,
+                        samesite='Lax',
+                        path='/',
+                    )
+                    
+                    return response
+                    
+                except Exception as e:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.error(f"Failed to generate tokens for customer auto-login: {str(e)}", exc_info=True)
+                
+                return Response(
+                    {
+                        'detail': 'Customer account created successfully. Please check your email to verify your account.',
+                        'user_id': user.id,
+                        'email': user.email,
+                    },
+                    status=status.HTTP_201_CREATED
+                )
+
+        except Exception as e:
+            return Response(
+                {'detail': f'An error occurred during customer registration: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )

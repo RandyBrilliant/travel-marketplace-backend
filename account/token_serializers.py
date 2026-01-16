@@ -55,6 +55,11 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                 full_name = profile.full_name
                 if profile.photo:
                     photo_url = profile.photo.url
+            elif user.role == UserRole.CUSTOMER and hasattr(user, "customer_profile"):
+                profile = user.customer_profile
+                full_name = profile.full_name
+                if profile.photo:
+                    photo_url = profile.photo.url
         except Exception:
             # If anything goes wrong, just skip to avoid breaking auth
             pass
@@ -98,6 +103,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         # These flags help frontend determine which profiles the user has
         token["has_reseller_profile"] = hasattr(user, "reseller_profile")
         token["has_supplier_profile"] = hasattr(user, "supplier_profile")
+        token["has_customer_profile"] = hasattr(user, "customer_profile")
 
         # Get full name and profile picture URL
         full_name, photo_url = cls._get_profile_info(user)

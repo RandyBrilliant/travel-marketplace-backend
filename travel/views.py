@@ -10,7 +10,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
 from rest_framework.permissions import IsAdminUser, IsAuthenticatedOrReadOnly
-from account.models import UserRole, SupplierProfile, ResellerProfile
+from account.models import UserRole, SupplierProfile, ResellerProfile, CustomerProfile
 from .models import TourPackage, TourDate, TourImage, ResellerTourCommission, ResellerGroup, Booking, BookingStatus, SeatSlotStatus, PaymentStatus, SeatSlot, WithdrawalRequest, WithdrawalRequestStatus, ResellerCommission
 from .serializers import (
     TourPackageSerializer,
@@ -59,6 +59,20 @@ class IsReseller(permissions.BasePermission):
             request.user
             and request.user.is_authenticated
             and request.user.is_reseller
+        )
+
+
+class IsCustomer(permissions.BasePermission):
+    """
+    Permission check for customer role.
+    Checks if user has customer profile.
+    """
+    
+    def has_permission(self, request, view):
+        return (
+            request.user
+            and request.user.is_authenticated
+            and request.user.is_customer
         )
 
 
@@ -585,6 +599,10 @@ class PublicTourPackageDetailView(APIView):
     def get(self, request, pk):
         """Get tour package detail by ID."""
         from django.http import Http404
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.debug(f"[Tour Detail] Getting tour {pk} for user {request.user} (authenticated={request.user.is_authenticated})")
         
         try:
             tour = TourPackage.objects.filter(
@@ -1512,6 +1530,158 @@ class ResellerBookingViewSet(viewsets.ModelViewSet):
         
         serializer = ResellerCommissionSerializer(queryset, many=True)
         return Response(serializer.data)
+
+
+class CustomerBookingViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for customers to view and create their own bookings.
+    Customers can create direct bookings without commission/referral logic.
+    """
+    
+    permission_classes = [IsCustomer]
+    queryset = Booking.objects.all()
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ["status", "tour_date", "tour_date__package"]
+    search_fields = [
+        "tour_date__package__name",
+    ]
+    ordering_fields = [
+        "created_at", "status", "total_amount",
+        "tour_date__package__name",
+    ]
+    ordering = ["-created_at"]
+    
+    def get_queryset(self):
+        """
+        Return only bookings belonging to the authenticated customer.
+        Allow filtering by status, tour_date, and search.
+        """
+        if not self.request.user.is_authenticated:
+            return Booking.objects.none()
+        
+        try:
+            customer_profile = CustomerProfile.objects.get(user=self.request.user)
+            # Get bookings created by this customer
+            queryset = Booking.objects.filter(
+                customer=customer_profile
+            ).select_related(
+                "customer", "customer__user", "tour_date", "tour_date__package"
+            ).prefetch_related(
+                "seat_slots", "seat_slots__tour_date", "payments"
+            ).all()
+            
+            # Apply additional filters
+            status_filter = self.request.query_params.get("status")
+            if status_filter:
+                queryset = queryset.filter(status=status_filter)
+            
+            tour_date_id = self.request.query_params.get("tour_date")
+            if tour_date_id:
+                queryset = queryset.filter(tour_date_id=tour_date_id)
+            
+            tour_package_id = self.request.query_params.get("tour_date__package")
+            if tour_package_id:
+                queryset = queryset.filter(tour_date__package_id=tour_package_id)
+            
+            # Search
+            search = self.request.query_params.get("search")
+            if search:
+                queryset = queryset.filter(
+                    models.Q(tour_date__package__name__icontains=search)
+                )
+            
+            # Ordering
+            ordering = self.request.query_params.get("ordering", "-created_at")
+            if ordering:
+                queryset = queryset.order_by(*ordering.split(","))
+            
+            return queryset
+        except CustomerProfile.DoesNotExist:
+            return Booking.objects.none()
+    
+    def get_serializer_class(self):
+        if self.action == "list":
+            return BookingListSerializer
+        if self.action == "create":
+            from .serializers import BookingCreateSerializer
+            return BookingCreateSerializer
+        return BookingSerializer
+    
+    def perform_create(self, serializer):
+        """Set the customer when creating a booking."""
+        try:
+            customer_profile = CustomerProfile.objects.get(user=self.request.user)
+            serializer.save(customer=customer_profile)
+        except CustomerProfile.DoesNotExist:
+            raise ValidationError(
+                {"detail": "Customer profile not found. Please complete your profile first."}
+            )
+    
+    @action(detail=True, methods=["patch"], url_path="payment")
+    def update_payment(self, request, pk=None):
+        """Upload or update payment details (amount, transfer_date, proof_image) for a booking.
+        
+        Customers can upload payment proof and details, but cannot change payment status.
+        Status must be set by suppliers or admins.
+        """
+        from .serializers import ResellerPaymentUpdateSerializer
+        from .models import Payment, PaymentStatus
+        from django.utils import timezone
+        
+        booking = self.get_object()
+        
+        # Ensure customer owns this booking
+        if not request.user.is_authenticated:
+            return Response(
+                {"detail": "Authentication required."},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        try:
+            customer_profile = CustomerProfile.objects.get(user=request.user)
+            if booking.customer != customer_profile:
+                return Response(
+                    {"detail": "You do not have permission to update this booking."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        except CustomerProfile.DoesNotExist:
+            return Response(
+                {"detail": "Customer profile not found."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Always create a new payment record (payment history)
+        # Validate required fields for creating a new payment
+        amount = request.data.get('amount')
+        transfer_date = request.data.get('transfer_date')
+        
+        if not amount or not transfer_date:
+            return Response(
+                {"detail": "Payment amount and transfer date are required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Prepare data for serializer (only include proof_image if it exists)
+        serializer_data = {
+            'amount': amount,
+            'transfer_date': transfer_date,
+        }
+        # Only include proof_image if it's in the request
+        if 'proof_image' in request.data and request.data['proof_image']:
+            serializer_data['proof_image'] = request.data['proof_image']
+        # Status always defaults to PENDING for customer uploads
+        serializer_data['status'] = PaymentStatus.PENDING
+        
+        # Use serializer to create payment (handles file uploads properly)
+        serializer = ResellerPaymentUpdateSerializer(data=serializer_data)
+        
+        if serializer.is_valid():
+            payment = serializer.save(booking=booking, status=PaymentStatus.PENDING)
+            # Return updated booking
+            booking_serializer = self.get_serializer(booking)
+            return Response(booking_serializer.data)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class AdminBookingViewSet(viewsets.ModelViewSet):

@@ -727,7 +727,8 @@ class SeatSlot(models.Model):
 
 class Booking(models.Model):
     """
-    A reseller booking a specific tour date on behalf of their customer.
+    A booking for a specific tour date.
+    Can be created by either a reseller (on behalf of customers) or a customer (direct booking).
     
     IMPORTANT: Understanding passengers:
     - seat_slots: Multiple SeatSlot objects, each representing ONE PASSENGER
@@ -735,21 +736,32 @@ class Booking(models.Model):
       One booking can have multiple seat slots (multiple passengers).
     
     Example:
-    - Reseller "ABC Travel" creates a booking
+    - Reseller "ABC Travel" creates a booking for their customers
+    - Customer "John Doe" creates a direct booking
     - seat_slots: 5 seats
       - Seat 1: passenger_name "John Smith"
       - Seat 2: passenger_name "Jane Smith"
-      - Seat 3: passenger_name "Bob Johnson"
-      - Seat 4: passenger_name "Alice Johnson"
-      - Seat 5: passenger_name "Charlie Brown"
+      - etc.
     
     Admin staff will review & confirm after payment proof is uploaded.
     """
 
+    # Either reseller OR customer must be set (not both)
     reseller = models.ForeignKey(
         "account.ResellerProfile",
         on_delete=models.CASCADE,
         related_name="bookings",
+        null=True,
+        blank=True,
+        help_text=_("Reseller who created this booking (null if booked by customer)."),
+    )
+    customer = models.ForeignKey(
+        "account.CustomerProfile",
+        on_delete=models.CASCADE,
+        related_name="bookings",
+        null=True,
+        blank=True,
+        help_text=_("Customer who created this booking (null if booked by reseller)."),
     )
     tour_date = models.ForeignKey(
         TourDate,
@@ -794,13 +806,52 @@ class Booking(models.Model):
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["reseller", "status"]),
+            models.Index(fields=["customer", "status"]),
             models.Index(fields=["tour_date", "status"]),
             models.Index(fields=["status", "created_at"]),
             models.Index(fields=["created_at"]),
         ]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(reseller__isnull=False, customer__isnull=True) |
+                    models.Q(reseller__isnull=True, customer__isnull=False)
+                ),
+                name="booking_either_reseller_or_customer"
+            )
+        ]
 
     def __str__(self) -> str:
-        return f"Booking {self.booking_number} - {self.tour_date} ({self.seats_booked} seats)"
+        booked_by = self.reseller.full_name if self.reseller else self.customer.full_name if self.customer else "Unknown"
+        return f"Booking {self.booking_number} - {self.tour_date} by {booked_by} ({self.seats_booked} seats)"
+    
+    @property
+    def is_customer_booking(self):
+        """Check if this booking was made by a customer (not a reseller)."""
+        return self.customer is not None
+    
+    @property
+    def is_reseller_booking(self):
+        """Check if this booking was made by a reseller."""
+        return self.reseller is not None
+    
+    @property
+    def booked_by_name(self):
+        """Get the name of who made the booking."""
+        if self.reseller:
+            return self.reseller.full_name
+        elif self.customer:
+            return self.customer.full_name
+        return "Unknown"
+    
+    @property
+    def booked_by_email(self):
+        """Get the email of who made the booking."""
+        if self.reseller:
+            return self.reseller.user.email
+        elif self.customer:
+            return self.customer.user.email
+        return None
     
     def generate_booking_number(self):
         """
@@ -864,8 +915,22 @@ class Booking(models.Model):
         return Payment.objects.filter(booking=self, status=PaymentStatus.APPROVED).exists()
     
     def clean(self):
-        """Validate booking has at least one seat slot."""
+        """Validate booking requirements."""
         super().clean()
+        
+        # Validate that either reseller OR customer is set (not both, not neither)
+        if self.reseller and self.customer:
+            raise ValidationError({
+                'reseller': 'Booking cannot have both reseller and customer. Choose one.',
+                'customer': 'Booking cannot have both reseller and customer. Choose one.',
+            })
+        
+        if not self.reseller and not self.customer:
+            raise ValidationError(
+                'Booking must be created by either a reseller or a customer.'
+            )
+        
+        # Validate booking has at least one seat slot (only for existing bookings)
         if self.pk and self.seat_slots.count() == 0:
             raise ValidationError({
                 'tour_date': 'Booking harus memiliki minimal satu kursi.'
