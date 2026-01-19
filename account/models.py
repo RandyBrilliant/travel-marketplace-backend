@@ -209,6 +209,24 @@ class SupplierProfile(models.Model):
         blank=True,
         help_text=_("Reason for rejection (if rejected)."),
     )
+    bank_name = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Bank Name",
+        help_text=_("Bank name for commission payouts."),
+    )
+    bank_account_name = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Bank Account Name",
+        help_text=_("Account holder name for commission payouts."),
+    )
+    bank_account_number = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name="Bank Account Number",
+        help_text=_("Bank account number for commission payouts."),
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

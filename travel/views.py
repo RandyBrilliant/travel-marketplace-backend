@@ -11,7 +11,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 
 from rest_framework.permissions import IsAdminUser, IsAuthenticatedOrReadOnly
 from account.models import UserRole, SupplierProfile, ResellerProfile, CustomerProfile
-from .models import TourPackage, TourDate, TourImage, ResellerTourCommission, ResellerGroup, Booking, BookingStatus, SeatSlotStatus, PaymentStatus, SeatSlot, WithdrawalRequest, WithdrawalRequestStatus, ResellerCommission
+from .models import TourPackage, TourDate, TourImage, ResellerTourCommission, ResellerGroup, Booking, BookingStatus, SeatSlotStatus, PaymentStatus, SeatSlot, WithdrawalRequest, WithdrawalRequestStatus, ResellerCommission, Currency
 from .serializers import (
     TourPackageSerializer,
     TourPackageListSerializer,
@@ -26,6 +26,7 @@ from .serializers import (
     BookingListSerializer,
     PublicTourPackageDetailSerializer,
     ResellerCommissionSerializer,
+    CurrencySerializer,
 )
 
 
@@ -74,6 +75,21 @@ class IsCustomer(permissions.BasePermission):
             and request.user.is_authenticated
             and request.user.is_customer
         )
+
+
+class CurrencyViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    ViewSet for viewing available currencies.
+    Read-only access for all authenticated users.
+    """
+    
+    permission_classes = [permissions.IsAuthenticated]
+    queryset = Currency.objects.filter(is_active=True).order_by("code")
+    serializer_class = CurrencySerializer
+    filterset_fields = ["code", "is_active"]
+    search_fields = ["code", "name", "symbol"]
+    ordering_fields = ["code", "name"]
+    ordering = ["code"]
 
 
 class SupplierTourPackageViewSet(viewsets.ModelViewSet):

@@ -50,7 +50,9 @@ from travel.views import (
     PublicTourPackageDetailView,
     ResellerWithdrawalViewSet,
     AdminWithdrawalViewSet,
+    CurrencyViewSet,
 )
+from itinerary.views import CustomerItineraryTransactionViewSet
 from travel.report_views import (
     sales_report_view,
     pax_report_view,
@@ -82,8 +84,11 @@ router.register(r"resellers/me/withdrawals", ResellerWithdrawalViewSet, basename
 
 # Customer booking endpoints
 router.register(r"customers/me/bookings", CustomerBookingViewSet, basename="customer-booking")
+# Customer itinerary transaction endpoints
+router.register(r"customers/me/itinerary-transactions", CustomerItineraryTransactionViewSet, basename="customer-itinerary-transaction")
 
-# Admin-only endpoints for managing all profiles
+# Currency endpoints (read-only for all authenticated users)
+router.register(r"currencies", CurrencyViewSet, basename="currency")
 router.register(
     r"admin/suppliers", AdminSupplierProfileViewSet, basename="admin-supplier-profile"
 )

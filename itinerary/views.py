@@ -15,6 +15,8 @@ from .models import (
     ItineraryCard,
     ItineraryCardAttachment,
     ItineraryCardChecklist,
+    ItineraryTransaction,
+    ItineraryTransactionStatus,
 )
 from .serializers import (
     ItineraryBoardListSerializer,
@@ -28,8 +30,11 @@ from .serializers import (
     ItineraryCardAttachmentCreateUpdateSerializer,
     ItineraryCardChecklistSerializer,
     ItineraryCardChecklistCreateUpdateSerializer,
+    ItineraryTransactionSerializer,
+    ItineraryTransactionCreateSerializer,
+    ItineraryTransactionListSerializer,
 )
-from account.models import ResellerProfile
+from account.models import ResellerProfile, CustomerProfile
 
 
 class IsReseller(permissions.BasePermission):
@@ -315,3 +320,133 @@ class ResellerItineraryBoardDetailView(APIView):
         )
         
         return Response(serializer.data)
+
+
+class IsCustomer(permissions.BasePermission):
+    """
+    Permission check for customer role.
+    Checks if user has customer profile.
+    """
+    
+    def has_permission(self, request, view):
+        return (
+            request.user
+            and request.user.is_authenticated
+            and request.user.is_customer
+        )
+
+
+class CustomerItineraryTransactionViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for customers to purchase and manage itinerary access.
+    Only authenticated customers can create transactions.
+    Customers can view their own transactions.
+    """
+    
+    permission_classes = [IsCustomer]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ["status", "board"]
+    search_fields = ["board__title"]
+    ordering_fields = ["created_at", "expires_at"]
+    ordering = ["-created_at"]
+    
+    def get_queryset(self):
+        """Return only transactions belonging to the authenticated customer."""
+        if not self.request.user.is_authenticated:
+            return ItineraryTransaction.objects.none()
+        
+        try:
+            customer_profile = CustomerProfile.objects.get(user=self.request.user)
+            queryset = ItineraryTransaction.objects.filter(
+                customer=self.request.user
+            ).select_related(
+                "board", "customer", "supplier", "supplier__user"
+            ).order_by("-created_at")
+            
+            return queryset
+        except CustomerProfile.DoesNotExist:
+            return ItineraryTransaction.objects.none()
+    
+    def get_serializer_class(self):
+        """Use different serializers for list vs detail/create."""
+        if self.action == "list":
+            return ItineraryTransactionListSerializer
+        if self.action == "create":
+            return ItineraryTransactionCreateSerializer
+        return ItineraryTransactionSerializer
+    
+    def perform_create(self, serializer):
+        """Create transaction for current customer."""
+        try:
+            customer_profile = CustomerProfile.objects.get(user=self.request.user)
+            # Set the customer to the current user
+            serializer.save(customer=self.request.user)
+        except CustomerProfile.DoesNotExist:
+            raise ValidationError(
+                {"detail": "Customer profile not found. Please complete your profile first."}
+            )
+    
+    @action(detail=True, methods=["patch"], url_path="activate")
+    def activate_transaction(self, request, pk=None):
+        """
+        Activate a pending itinerary transaction.
+        This grants the customer access to the itinerary for the specified duration.
+        """
+        transaction = self.get_object()
+        
+        if transaction.status != ItineraryTransactionStatus.PENDING:
+            return Response(
+                {"detail": f"Transaction is already {transaction.status}. Cannot activate."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            transaction.activate()
+            serializer = self.get_serializer(transaction)
+            return Response(serializer.data)
+        except Exception as e:
+            return Response(
+                {"detail": f"Error activating transaction: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    
+    @action(detail=True, methods=["post"], url_path="extend-access")
+    def extend_access(self, request, pk=None):
+        """
+        Extend the access duration for an active itinerary transaction.
+        
+        Request body:
+        {
+            "additional_days": 7
+        }
+        """
+        transaction = self.get_object()
+        additional_days = request.data.get("additional_days")
+        
+        if not additional_days:
+            return Response(
+                {"detail": "additional_days is required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            additional_days = int(additional_days)
+            if additional_days <= 0:
+                return Response(
+                    {"detail": "additional_days must be positive."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            transaction.extend_access(additional_days)
+            serializer = self.get_serializer(transaction)
+            return Response(serializer.data)
+        except ValueError:
+            return Response(
+                {"detail": "additional_days must be an integer."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            return Response(
+                {"detail": f"Error extending access: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )

@@ -32,6 +32,53 @@ class PaymentStatus(models.TextChoices):
     APPROVED = "APPROVED", _("Approved")
     REJECTED = "REJECTED", _("Rejected")
 
+
+class Currency(models.Model):
+    """
+    Currency model to support multiple currencies for tour packages.
+    Stores exchange rates and currency information.
+    """
+    code = models.CharField(
+        max_length=3,
+        unique=True,
+        db_index=True,
+        help_text=_("ISO 4217 currency code (e.g., 'USD', 'IDR', 'EUR')."),
+    )
+    name = models.CharField(
+        max_length=100,
+        help_text=_("Currency name (e.g., 'United States Dollar')."),
+    )
+    symbol = models.CharField(
+        max_length=10,
+        help_text=_("Currency symbol (e.g., '$', '₨', '€')."),
+    )
+    exchange_rate_to_idr = models.DecimalField(
+        max_digits=15,
+        decimal_places=4,
+        default=1.0,
+        validators=[MinValueValidator(0)],
+        help_text=_("Exchange rate relative to IDR (1 unit of this currency = X IDR)."),
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text=_("Whether this currency is available for use."),
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Currency"
+        verbose_name_plural = "Currencies"
+        ordering = ["code"]
+        indexes = [
+            models.Index(fields=["code"]),
+            models.Index(fields=["is_active"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.code} - {self.name} ({self.symbol})"
+
+
 class ResellerGroup(models.Model):
     """
     Group of resellers that can be assigned to specific tour packages.
@@ -174,6 +221,16 @@ class TourPackage(models.Model):
         validators=[MinValueValidator(0)],
         help_text=_("Tipping price in IDR (Indonesian Rupiah). Actual price can vary per date."),
         default=0,
+    )
+
+    # Currency support
+    currency = models.ForeignKey(
+        Currency,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="tour_packages",
+        help_text=_("Currency used for pricing. If null, IDR is assumed."),
     )
 
     # Itinerary PDF

@@ -18,11 +18,31 @@ from .models import (
     ResellerCommission,
     WithdrawalRequest,
     WithdrawalRequestStatus,
+    Currency,
 )
 from .utils import optimize_image_to_webp
 from account.models import ResellerProfile, SupplierProfile
 
 logger = logging.getLogger('travel')
+
+
+class CurrencySerializer(serializers.ModelSerializer):
+    """Serializer for currency information."""
+    
+    class Meta:
+        model = Currency
+        fields = [
+            'id',
+            'code',
+            'name',
+            'symbol',
+            'exchange_rate_to_idr',
+            'is_active',
+        ]
+        read_only_fields = [
+            'id',
+            'exchange_rate_to_idr',
+        ]
 
 
 class ResellerGroupListField(serializers.PrimaryKeyRelatedField):
@@ -419,6 +439,14 @@ class TourPackageSerializer(serializers.ModelSerializer):
     duration_display = serializers.CharField(read_only=True)
     group_size_display = serializers.CharField(read_only=True)
     itinerary_pdf_url = serializers.SerializerMethodField()
+    currency = CurrencySerializer(read_only=True)
+    currency_id = serializers.PrimaryKeyRelatedField(
+        source='currency',
+        queryset=Currency.objects.filter(is_active=True),
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
     reseller_groups = serializers.PrimaryKeyRelatedField(
         many=True,
         read_only=True
@@ -448,6 +476,8 @@ class TourPackageSerializer(serializers.ModelSerializer):
             "base_price",
             "visa_price",
             "tipping_price",
+            "currency",
+            "currency_id",
             "itinerary_pdf",
             "itinerary_pdf_url",
             "is_active",
@@ -470,6 +500,7 @@ class TourPackageSerializer(serializers.ModelSerializer):
             "group_size_display",
             "itinerary_pdf_url",
             "commission",
+            "currency",
         ]
     
     def get_itinerary_pdf_url(self, obj):
@@ -563,6 +594,7 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
     images = TourImageSerializer(many=True, read_only=True)
     dates = serializers.SerializerMethodField()
     reseller_commission = serializers.SerializerMethodField()
+    currency = CurrencySerializer(read_only=True)
     
     class Meta:
         model = TourPackage
@@ -586,6 +618,7 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
             "base_price",
             "visa_price",
             "tipping_price",
+            "currency",
             "itinerary_pdf_url",
             "images",
             "dates",
@@ -602,6 +635,7 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
             "group_size_display",
             "itinerary_pdf_url",
             "created_at",
+            "currency",
         ]
     
     def get_itinerary_pdf_url(self, obj):

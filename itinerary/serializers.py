@@ -6,6 +6,8 @@ from .models import (
     ItineraryCard,
     ItineraryCardAttachment,
     ItineraryCardChecklist,
+    ItineraryTransaction,
+    ItineraryTransactionStatus,
 )
 
 
@@ -328,4 +330,117 @@ class ItineraryCardChecklistCreateUpdateSerializer(serializers.ModelSerializer):
             if 'completed' not in item:
                 item['completed'] = False
         
+
+class ItineraryTransactionSerializer(serializers.ModelSerializer):
+    """Serializer for itinerary transactions."""
+    
+    customer_email = serializers.EmailField(source='customer.email', read_only=True)
+    board_title = serializers.CharField(source='board.title', read_only=True)
+    supplier_name = serializers.CharField(source='supplier.company_name', read_only=True, allow_null=True)
+    is_access_valid = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = ItineraryTransaction
+        fields = [
+            'id',
+            'board',
+            'board_title',
+            'customer',
+            'customer_email',
+            'supplier',
+            'supplier_name',
+            'status',
+            'access_duration_days',
+            'created_at',
+            'activated_at',
+            'expires_at',
+            'completed_at',
+            'booking_reference',
+            'transaction_reference',
+            'notes',
+            'is_access_valid',
+        ]
+        read_only_fields = [
+            'id',
+            'board_title',
+            'customer_email',
+            'supplier_name',
+            'created_at',
+            'activated_at',
+            'expires_at',
+            'completed_at',
+            'is_access_valid',
+        ]
+    
+    def get_is_access_valid(self, obj):
+        """Check if customer currently has valid access."""
+        return obj.is_access_valid()
+
+
+class ItineraryTransactionCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating itinerary transactions."""
+    
+    class Meta:
+        model = ItineraryTransaction
+        fields = [
+            'id',
+            'board',
+            'customer',
+            'supplier',
+            'status',
+            'access_duration_days',
+            'booking_reference',
+            'transaction_reference',
+            'notes',
+        ]
+        read_only_fields = ['id']
+    
+    def validate_status(self, value):
+        """Ensure status is valid on creation."""
+        allowed_statuses = [
+            ItineraryTransactionStatus.PENDING,
+            ItineraryTransactionStatus.ACTIVE,
+        ]
+        if value not in allowed_statuses:
+            raise serializers.ValidationError(
+                f"Initial status must be one of: {', '.join(allowed_statuses)}"
+            )
+        return value
+
+
+class ItineraryTransactionListSerializer(serializers.ModelSerializer):
+    """Serializer for listing itinerary transactions."""
+    
+    customer_email = serializers.EmailField(source='customer.email', read_only=True)
+    board_title = serializers.CharField(source='board.title', read_only=True)
+    supplier_name = serializers.CharField(source='supplier.company_name', read_only=True, allow_null=True)
+    is_access_valid = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = ItineraryTransaction
+        fields = [
+            'id',
+            'board_title',
+            'customer_email',
+            'supplier_name',
+            'status',
+            'access_duration_days',
+            'expires_at',
+            'booking_reference',
+            'is_access_valid',
+            'created_at',
+        ]
+        read_only_fields = [
+            'id',
+            'board_title',
+            'customer_email',
+            'supplier_name',
+            'is_access_valid',
+            'created_at',
+        ]
+    
+    def get_is_access_valid(self, obj):
+        """Check if customer currently has valid access."""
+        return obj.is_access_valid()
+
         return value

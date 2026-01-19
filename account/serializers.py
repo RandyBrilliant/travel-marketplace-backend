@@ -76,7 +76,6 @@ class SupplierProfileSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(source="user.email", read_only=True)
     email_verified = serializers.BooleanField(source="user.email_verified", read_only=True)
     approval_status = serializers.CharField(read_only=True)
-    approval_status_display = serializers.CharField(source="get_approval_status_display", read_only=True)
     approved_at = serializers.DateTimeField(read_only=True)
     rejection_reason = serializers.CharField(read_only=True)
 
@@ -93,15 +92,17 @@ class SupplierProfileSerializer(serializers.ModelSerializer):
             "email",
             "email_verified",
             "approval_status",
-            "approval_status_display",
             "approved_at",
             "rejection_reason",
+            "bank_name",
+            "bank_account_name",
+            "bank_account_number",
             "created_at",
             "updated_at",
         ]
         read_only_fields = [
             "id", "user", "email", "email_verified", "approval_status",
-            "approval_status_display", "approved_at", "rejection_reason",
+            "approved_at", "rejection_reason",
             "created_at", "updated_at"
         ]
 
@@ -114,7 +115,7 @@ class ResellerProfileSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
-    sponsor_name = serializers.CharField(source="sponsor.full_name", read_only=True)
+    sponsor_name = serializers.CharField(source="sponsor.full_name", read_only=True, allow_null=True)
     sponsor_referral_code = serializers.CharField(
         write_only=True,
         required=False,
@@ -347,16 +348,14 @@ class AdminSupplierProfileSerializer(BaseAdminProfileSerializer, SupplierProfile
         required=False,
         allow_null=True,
     )
-    # Allow admin to view approval fields (but approval should be done via dedicated endpoint)
-    approved_by_name = serializers.CharField(source="approved_by.email", read_only=True)
 
     class Meta(SupplierProfileSerializer.Meta):
         fields = SupplierProfileSerializer.Meta.fields + [
-            "user_data", "email", "password", "approved_by_name"
+            "user_data", "password"
         ]
         read_only_fields = [
-            "id", "created_at", "updated_at", "approval_status", 
-            "approval_status_display", "approved_at", "approved_by", "approved_by_name"
+            "id", "email", "user", "email_verified", "created_at", "updated_at", "approval_status", 
+            "approved_at", "rejection_reason"
         ]
 
 
@@ -370,12 +369,14 @@ class AdminResellerProfileSerializer(BaseAdminProfileSerializer, ResellerProfile
     )
 
     class Meta(ResellerProfileSerializer.Meta):
-        fields = ResellerProfileSerializer.Meta.fields + ["user_data", "email", "password"]
+        fields = ResellerProfileSerializer.Meta.fields + ["user_data", "password"]
         read_only_fields = [
             "id",
             "user",
+            "email",
             "referral_code",  # Auto-generated, should be read-only
             "group_root",
+            "group_root_name",
             "direct_downline_count",
             "created_at",
             "updated_at",
@@ -392,8 +393,8 @@ class AdminStaffProfileSerializer(BaseAdminProfileSerializer, StaffProfileSerial
     )
 
     class Meta(StaffProfileSerializer.Meta):
-        fields = StaffProfileSerializer.Meta.fields + ["user_data", "email", "password"]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        fields = StaffProfileSerializer.Meta.fields + ["user_data", "password"]
+        read_only_fields = ["id", "user", "created_at", "updated_at"]
 
 
 class AdminCustomerProfileSerializer(BaseAdminProfileSerializer, CustomerProfileSerializer):
@@ -406,6 +407,6 @@ class AdminCustomerProfileSerializer(BaseAdminProfileSerializer, CustomerProfile
     )
 
     class Meta(CustomerProfileSerializer.Meta):
-        fields = CustomerProfileSerializer.Meta.fields + ["user_data", "email", "password"]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        fields = CustomerProfileSerializer.Meta.fields + ["user_data", "password"]
+        read_only_fields = ["id", "user", "email", "created_at", "updated_at"]
 
