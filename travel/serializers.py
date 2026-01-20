@@ -36,12 +36,10 @@ class CurrencySerializer(serializers.ModelSerializer):
             'code',
             'name',
             'symbol',
-            'exchange_rate_to_idr',
             'is_active',
         ]
         read_only_fields = [
             'id',
-            'exchange_rate_to_idr',
         ]
 
 

@@ -9,6 +9,14 @@ from datetime import timedelta
 
 
 class ItineraryBoard(models.Model):
+    # Supplier who created and owns this itinerary board
+    supplier = models.ForeignKey(
+        "account.SupplierProfile",
+        on_delete=models.CASCADE,
+        related_name="itinerary_boards",
+        help_text=_("Supplier who created and owns this itinerary board."),
+    )
+    
     # Board metadata
     title = models.CharField(
         max_length=255,
@@ -39,12 +47,28 @@ class ItineraryBoard(models.Model):
         default=False,
         help_text=_("Allow public editing (or read-only for public, edit for owners)")
     )
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
+    
+    # Pricing
+    price = models.IntegerField(
+        validators=[MinValueValidator(0)],
+        help_text=_("Price for accessing this itinerary board in IDR (Indonesian Rupiah)."),
+        default=0,
+    )
+    
+    # Currency support
+    currency = models.ForeignKey(
+        "travel.Currency",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='created_itinerary_boards'
+        related_name="itinerary_boards",
+        help_text=_("Currency used for pricing. If null, IDR is assumed."),
+    )
+    
+    # Status
+    is_active = models.BooleanField(
+        default=True,
+        help_text=_("Whether this itinerary board is active and available for purchase."),
     )
     
     # Timestamps
@@ -56,8 +80,12 @@ class ItineraryBoard(models.Model):
         verbose_name_plural = "Itinerary Boards"
         ordering = ['-created_at']
         indexes = [
+            models.Index(fields=['supplier', 'is_public']),
+            models.Index(fields=['supplier', 'is_active']),
+            models.Index(fields=['is_active', 'is_public']),
             models.Index(fields=['share_token']),
             models.Index(fields=['slug']),
+            models.Index(fields=['created_at']),
         ]
     
     def __str__(self) -> str:
@@ -319,13 +347,15 @@ class ItineraryTransaction(models.Model):
         related_name="itinerary_transactions",
         help_text=_("Customer who has access to the itinerary."),
     )
-    supplier = models.ForeignKey(
-        "travel.SupplierProfile",
-        on_delete=models.CASCADE,
+    
+    # Link to tour booking (optional - if transaction is from a booking)
+    booking = models.ForeignKey(
+        "travel.Booking",
+        on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="itinerary_transactions",
-        help_text=_("Supplier who created the itinerary board."),
+        help_text=_("Related tour booking that triggered this itinerary access."),
     )
 
     # Transaction details
@@ -335,6 +365,13 @@ class ItineraryTransaction(models.Model):
         default=ItineraryTransactionStatus.PENDING,
         db_index=True,
         help_text=_("Current status of the transaction."),
+    )
+    
+    # Pricing (snapshot at time of purchase)
+    amount = models.IntegerField(
+        validators=[MinValueValidator(0)],
+        help_text=_("Amount paid for this transaction in IDR (snapshot from board price)."),
+        default=0,
     )
 
     # Access duration
@@ -346,6 +383,7 @@ class ItineraryTransaction(models.Model):
     
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
     activated_at = models.DateTimeField(
         null=True,
         blank=True,
@@ -362,16 +400,19 @@ class ItineraryTransaction(models.Model):
         help_text=_("When the transaction was completed or cancelled."),
     )
 
-    # Optional reference to booking/purchase
-    booking_reference = models.CharField(
-        max_length=255,
-        blank=True,
-        help_text=_("Reference to the booking or purchase that triggered this access (e.g., Booking ID)."),
+    # Transaction reference (auto-generated like booking_number)
+    transaction_number = models.CharField(
+        max_length=20,
+        unique=True,
+        db_index=True,
+        help_text=_("Unique transaction reference number (e.g., IT-2026-000001)."),
     )
-    transaction_reference = models.CharField(
+    
+    # Optional external reference
+    external_reference = models.CharField(
         max_length=255,
         blank=True,
-        help_text=_("Unique transaction reference for tracking."),
+        help_text=_("Optional external reference (e.g., payment gateway transaction ID)."),
     )
 
     # Additional notes
@@ -387,16 +428,54 @@ class ItineraryTransaction(models.Model):
         indexes = [
             models.Index(fields=["customer", "status"]),
             models.Index(fields=["board", "customer"]),
+            models.Index(fields=["board", "status"]),
+            models.Index(fields=["booking"]),
             models.Index(fields=["status", "expires_at"]),
+            models.Index(fields=["status", "created_at"]),
             models.Index(fields=["created_at"]),
         ]
 
     def __str__(self) -> str:
-        return f"{self.customer.email} - {self.board.title} ({self.status})"
+        return f"{self.transaction_number} - {self.customer.email} ({self.status})"
 
-    def save(self, *args, **kwargs):
-        """Set expires_at when status changes to ACTIVE."""
+    def generate_transaction_number(self):
+        """
+        Generate a professional transaction number in format: IT-YYYY-NNNNNN
+        where YYYY is the year and NNNNNN is a 6-digit sequential number.
+        """
         from django.utils import timezone
+        from django.db.models import Max
+        
+        current_year = timezone.now().year
+        
+        # Get the maximum transaction number for this year
+        max_transaction = ItineraryTransaction.objects.filter(
+            transaction_number__startswith=f'IT-{current_year}-'
+        ).aggregate(Max('transaction_number'))
+        
+        max_number = max_transaction['transaction_number__max']
+        
+        if max_number:
+            # Extract the number part and increment
+            try:
+                last_number = int(max_number.split('-')[-1])
+                next_number = last_number + 1
+            except (ValueError, IndexError):
+                next_number = 1
+        else:
+            # First transaction of the year
+            next_number = 1
+        
+        # Format as 6-digit number with leading zeros
+        return f'IT-{current_year}-{next_number:06d}'
+    
+    def save(self, *args, **kwargs):
+        """Generate transaction_number and set expires_at when status changes to ACTIVE."""
+        from django.utils import timezone
+        
+        # Generate transaction number if not set
+        if not self.transaction_number:
+            self.transaction_number = self.generate_transaction_number()
         
         if self.status == ItineraryTransactionStatus.ACTIVE and not self.activated_at:
             self.activated_at = timezone.now()

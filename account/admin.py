@@ -39,9 +39,9 @@ class CustomUserAdmin(admin.ModelAdmin):
 
 @admin.register(SupplierProfile)
 class SupplierProfileAdmin(admin.ModelAdmin):
-    list_display = ('user', 'company_name', 'contact_person', 'contact_phone')
+    list_display = ('user', 'company_name', 'contact_person', 'contact_phone', 'bank_account_name')
     list_filter = ('user__role', 'user__is_active', 'created_at')
-    search_fields = ('user__email', 'company_name', 'contact_person')
+    search_fields = ('user__email', 'company_name', 'contact_person', 'bank_account_name')
     readonly_fields = ('photo_preview', 'created_at', 'updated_at')
     list_select_related = ('user',)
     
@@ -58,6 +58,10 @@ class SupplierProfileAdmin(admin.ModelAdmin):
         }),
         ('Profile Photo', {
             'fields': ('photo', 'photo_preview')
+        }),
+        ('Banking Information', {
+            'fields': ('bank_name', 'bank_account_name', 'bank_account_number'),
+            'description': 'Bank account details for commission payouts.'
         }),
         ('Timestamps', {
             'fields': ('created_at', 'updated_at')

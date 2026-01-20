@@ -139,7 +139,7 @@ class ItineraryColumnSerializer(serializers.ModelSerializer):
 class ItineraryBoardListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for board list views."""
     
-    created_by_email = serializers.EmailField(source='created_by.email', read_only=True, allow_null=True)
+    supplier_name = serializers.CharField(source='supplier.company_name', read_only=True)
     columns_count = serializers.IntegerField(source='columns.count', read_only=True)
     
     class Meta:
@@ -152,8 +152,11 @@ class ItineraryBoardListSerializer(serializers.ModelSerializer):
             'is_public',
             'allow_editing',
             'share_token',
-            'created_by',
-            'created_by_email',
+            'supplier',
+            'supplier_name',
+            'price',
+            'currency',
+            'is_active',
             'created_at',
             'updated_at',
             'columns_count',
@@ -166,7 +169,7 @@ class ItineraryBoardDetailSerializer(serializers.ModelSerializer):
     
     columns = ItineraryColumnSerializer(many=True, read_only=True)
     columns_count = serializers.IntegerField(source='columns.count', read_only=True)
-    created_by_email = serializers.EmailField(source='created_by.email', read_only=True, allow_null=True)
+    supplier_name = serializers.CharField(source='supplier.company_name', read_only=True)
     
     class Meta:
         model = ItineraryBoard
@@ -178,13 +181,17 @@ class ItineraryBoardDetailSerializer(serializers.ModelSerializer):
             'is_public',
             'allow_editing',
             'share_token',
-            'created_by',
-            'created_by_email',
+            'supplier',
+            'supplier_name',
+            'price',
+            'currency',
+            'is_active',
             'created_at',
             'updated_at',
             'columns',
             'columns_count',
         ]
+        read_only_fields = ['id', 'slug', 'share_token', 'created_at', 'updated_at']
         read_only_fields = ['id', 'slug', 'share_token', 'created_at', 'updated_at']
 
 
@@ -195,16 +202,19 @@ class ItineraryBoardCreateUpdateSerializer(serializers.ModelSerializer):
         model = ItineraryBoard
         fields = [
             'id',
+            'supplier',
             'title',
             'slug',
             'description',
             'is_public',
             'allow_editing',
-            'created_by',
+            'price',
+            'currency',
+            'is_active',
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['id', 'slug', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'supplier', 'slug', 'created_at', 'updated_at']
     
     def validate_title(self, value):
         """Validate title is not empty."""

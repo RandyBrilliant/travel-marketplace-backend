@@ -47,50 +47,158 @@ class IsReseller(permissions.BasePermission):
         return request.user and request.user.is_authenticated and request.user.is_reseller
 
 
-class AdminItineraryBoardViewSet(viewsets.ModelViewSet):
+class IsSupplier(permissions.BasePermission):
     """
-    ViewSet for admin to manage itinerary boards.
-    Admin has full CRUD access.
+    Permission check for supplier role.
+    Checks if user has supplier profile.
     """
     
-    permission_classes = [IsAdminUser]
-    queryset = ItineraryBoard.objects.all()
+    def has_permission(self, request, view):
+        return request.user and request.user.is_authenticated and request.user.is_supplier
+
+
+class SupplierItineraryBoardViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for suppliers to manage their itinerary boards.
+    
+    Suppliers can:
+    - List their own itinerary boards
+    - Create new itinerary boards
+    - Retrieve, update, and delete their own itinerary boards
+    """
+    
+    permission_classes = [IsSupplier]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['is_public', 'allow_editing']
-    search_fields = ['title', 'description', 'slug']
-    ordering_fields = ['created_at', 'updated_at', 'title']
-    ordering = ['-created_at']
+    filterset_fields = ["is_public", "is_active"]
+    search_fields = ["title", "description", "slug"]
+    ordering_fields = ["created_at", "updated_at", "title", "price"]
+    ordering = ["-created_at"]
     
     def get_queryset(self):
-        """Return all boards with optimized queries."""
-        queryset = ItineraryBoard.objects.select_related(
-            'created_by'
-        ).prefetch_related(
-            'columns',
-            'columns__cards',
-            'columns__cards__attachments',
-            'columns__cards__checklists',
-        ).all()
+        """
+        Return only itinerary boards belonging to the authenticated supplier.
         
-        # Filter by is_public
-        is_public = self.request.query_params.get('is_public')
-        if is_public is not None:
-            queryset = queryset.filter(is_public=is_public.lower() == 'true')
+        Optimized with select_related and prefetch_related to avoid N+1 queries.
+        """
+        if not self.request.user.is_authenticated:
+            return ItineraryBoard.objects.none()
         
-        # Filter by allow_editing
-        allow_editing = self.request.query_params.get('allow_editing')
-        if allow_editing is not None:
-            queryset = queryset.filter(allow_editing=allow_editing.lower() == 'true')
-        
-        return queryset
+        try:
+            from account.models import SupplierProfile
+            supplier_profile = SupplierProfile.objects.get(user=self.request.user)
+            return ItineraryBoard.objects.filter(
+                supplier=supplier_profile
+            ).select_related(
+                "supplier", "supplier__user", "currency"
+            ).prefetch_related(
+                "columns", "columns__cards", "columns__cards__attachments"
+            ).all()
+        except Exception:
+            return ItineraryBoard.objects.none()
     
     def get_serializer_class(self):
-        """Use different serializers for list vs detail/create/update."""
-        if self.action == 'list':
+        """Use different serializers for list vs detail."""
+        if self.action == "list":
             return ItineraryBoardListSerializer
-        elif self.action in ['create', 'update', 'partial_update']:
+        elif self.action in ["create", "update", "partial_update"]:
             return ItineraryBoardCreateUpdateSerializer
         return ItineraryBoardDetailSerializer
+    
+    def perform_create(self, serializer):
+        """Set the supplier when creating an itinerary board."""
+        from account.models import SupplierProfile
+        try:
+            supplier_profile = SupplierProfile.objects.get(user=self.request.user)
+            serializer.save(supplier=supplier_profile)
+        except SupplierProfile.DoesNotExist:
+            raise ValidationError("User must have a supplier profile to create itinerary boards.")
+
+
+class SupplierItineraryColumnViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for suppliers to manage columns within their boards.
+    Suppliers can only manage columns for their own boards.
+    """
+    
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ['board']
+    ordering_fields = ['order', 'created_at']
+    ordering = ['order', 'id']
+    serializer_class = ItineraryColumnCreateUpdateSerializer
+    
+    def get_queryset(self):
+        """Only return columns for boards belonging to the current supplier."""
+        from account.models import SupplierProfile
+        try:
+            supplier_profile = SupplierProfile.objects.get(user=self.request.user)
+            queryset = ItineraryColumn.objects.filter(
+                board__supplier=supplier_profile
+            ).select_related('board').prefetch_related(
+                'cards',
+                'cards__attachments',
+                'cards__checklists',
+            )
+            
+            # Filter by board if provided
+            board_id = self.request.query_params.get('board')
+            if board_id:
+                queryset = queryset.filter(board_id=board_id)
+            
+            return queryset
+        except SupplierProfile.DoesNotExist:
+            return ItineraryColumn.objects.none()
+    
+    def get_serializer_class(self):
+        """Use appropriate serializer based on action."""
+        if self.action in ['create', 'update', 'partial_update']:
+            return ItineraryColumnCreateUpdateSerializer
+        return ItineraryColumnSerializer
+
+
+class SupplierItineraryCardViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for suppliers to manage cards within their boards.
+    Suppliers can only manage cards for columns in their own boards.
+    """
+    
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['column', 'date']
+    search_fields = ['title', 'description', 'location_name']
+    ordering_fields = ['order', 'date', 'start_time', 'created_at']
+    ordering = ['order', 'id']
+    
+    def get_queryset(self):
+        """Only return cards for boards belonging to the current supplier."""
+        from account.models import SupplierProfile
+        try:
+            supplier_profile = SupplierProfile.objects.get(user=self.request.user)
+            queryset = ItineraryCard.objects.filter(
+                column__board__supplier=supplier_profile
+            ).select_related(
+                'column',
+                'column__board',
+                'created_by'
+            ).prefetch_related(
+                'attachments',
+                'checklists',
+            )
+            
+            # Filter by column if provided
+            column_id = self.request.query_params.get('column')
+            if column_id:
+                queryset = queryset.filter(column_id=column_id)
+            
+            return queryset
+        except SupplierProfile.DoesNotExist:
+            return ItineraryCard.objects.none()
+    
+    def get_serializer_class(self):
+        """Use different serializers for list/detail vs create/update."""
+        if self.action in ['create', 'update', 'partial_update']:
+            return ItineraryCardCreateUpdateSerializer
+        return ItineraryCardSerializer
     
     def perform_create(self, serializer):
         """Set created_by to current user if not provided."""
@@ -98,6 +206,146 @@ class AdminItineraryBoardViewSet(viewsets.ModelViewSet):
             serializer.save(created_by=self.request.user)
         else:
             serializer.save()
+
+
+class SupplierItineraryCardAttachmentViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for suppliers to manage card attachments.
+    Suppliers can only manage attachments for cards in their own boards.
+    """
+    
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ['card']
+    ordering_fields = ['created_at']
+    ordering = ['created_at']
+    
+    def get_queryset(self):
+        """Only return attachments for cards in boards belonging to the current supplier."""
+        from account.models import SupplierProfile
+        try:
+            supplier_profile = SupplierProfile.objects.get(user=self.request.user)
+            return ItineraryCardAttachment.objects.filter(
+                card__column__board__supplier=supplier_profile
+            ).select_related('card')
+        except SupplierProfile.DoesNotExist:
+            return ItineraryCardAttachment.objects.none()
+    
+    def get_serializer_class(self):
+        """Use different serializers for list/detail vs create/update."""
+        if self.action in ['create', 'update', 'partial_update']:
+            return ItineraryCardAttachmentCreateUpdateSerializer
+        return ItineraryCardAttachmentSerializer
+
+
+class SupplierItineraryCardChecklistViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for suppliers to manage card checklists.
+    Suppliers can only manage checklists for cards in their own boards.
+    """
+    
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ['card']
+    ordering_fields = ['order', 'created_at']
+    ordering = ['order', 'id']
+    
+    def get_queryset(self):
+        """Only return checklists for cards in boards belonging to the current supplier."""
+        from account.models import SupplierProfile
+        try:
+            supplier_profile = SupplierProfile.objects.get(user=self.request.user)
+            return ItineraryCardChecklist.objects.filter(
+                card__column__board__supplier=supplier_profile
+            ).select_related('card')
+        except SupplierProfile.DoesNotExist:
+            return ItineraryCardChecklist.objects.none()
+    
+    def get_serializer_class(self):
+        """Use different serializers for list/detail vs create/update."""
+        if self.action in ['create', 'update', 'partial_update']:
+            return ItineraryCardChecklistCreateUpdateSerializer
+        return ItineraryCardChecklistSerializer
+
+
+class AdminItineraryBoardViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for admin to view and manage itinerary boards.
+    Admin can view, edit all boards but cannot create/delete them.
+    Suppliers create and manage their own boards.
+    """
+    
+    permission_classes = [IsAdminUser]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ["is_public", "is_active", "supplier"]
+    search_fields = ["title", "description", "slug", "supplier__company_name"]
+    ordering_fields = ["created_at", "updated_at", "title", "price"]
+    ordering = ["-created_at"]
+    
+    def get_queryset(self):
+        """Return all boards with optimized queries."""
+        queryset = ItineraryBoard.objects.select_related(
+            'supplier', 'supplier__user', 'currency'
+        ).prefetch_related(
+            'columns',
+            'columns__cards',
+            'columns__cards__attachments',
+            'columns__cards__checklists',
+        ).all()
+        
+        # Filter by supplier
+        supplier_id = self.request.query_params.get('supplier')
+        if supplier_id:
+            queryset = queryset.filter(supplier_id=supplier_id)
+        
+        # Filter by is_active
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active.lower() == 'true')
+        
+        # Filter by is_public
+        is_public = self.request.query_params.get('is_public')
+        if is_public is not None:
+            queryset = queryset.filter(is_public=is_public.lower() == 'true')
+        
+        return queryset
+    
+    def get_serializer_class(self):
+        """Use different serializers for list vs detail/update."""
+        if self.action == 'list':
+            return ItineraryBoardListSerializer
+        elif self.action in ['update', 'partial_update']:
+            return ItineraryBoardCreateUpdateSerializer
+        return ItineraryBoardDetailSerializer
+    
+    def perform_update(self, serializer):
+        """Admin can only update certain fields."""
+        serializer.save()
+    
+    def get_permissions(self):
+        """
+        Override permissions:
+        - Only admins can view/update (no create/delete)
+        """
+        if self.action in ['create', 'destroy']:
+            permission_classes = [IsAdminUser]
+            # But actually return 403 for create/destroy
+            return [IsAdminUser()]
+        return super().get_permissions()
+    
+    def create(self, request, *args, **kwargs):
+        """Suppliers create boards, not admins."""
+        return Response(
+            {"detail": "Admins cannot create itinerary boards. Suppliers create their own boards."},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    def destroy(self, request, *args, **kwargs):
+        """Admins cannot delete boards."""
+        return Response(
+            {"detail": "Admins cannot delete itinerary boards. Contact suppliers for deletion."},
+            status=status.HTTP_403_FORBIDDEN
+        )
 
 
 class AdminItineraryColumnViewSet(viewsets.ModelViewSet):
@@ -238,7 +486,7 @@ class ResellerItineraryBoardListView(APIView):
         queryset = ItineraryBoard.objects.filter(
             is_public=True
         ).select_related(
-            'created_by'
+            'supplier'
         ).prefetch_related(
             'columns',
         ).order_by('-created_at')
@@ -290,7 +538,7 @@ class ResellerItineraryBoardDetailView(APIView):
                     pk=pk,
                     is_public=True
                 ).select_related(
-                    'created_by'
+                    'supplier'
                 ).prefetch_related(
                     'columns',
                     'columns__cards',
@@ -302,7 +550,7 @@ class ResellerItineraryBoardDetailView(APIView):
                     slug=slug,
                     is_public=True
                 ).select_related(
-                    'created_by'
+                    'supplier'
                 ).prefetch_related(
                     'columns',
                     'columns__cards',

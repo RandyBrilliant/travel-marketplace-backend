@@ -52,13 +52,6 @@ class Currency(models.Model):
         max_length=10,
         help_text=_("Currency symbol (e.g., '$', '₨', '€')."),
     )
-    exchange_rate_to_idr = models.DecimalField(
-        max_digits=15,
-        decimal_places=4,
-        default=1.0,
-        validators=[MinValueValidator(0)],
-        help_text=_("Exchange rate relative to IDR (1 unit of this currency = X IDR)."),
-    )
     is_active = models.BooleanField(
         default=True,
         help_text=_("Whether this currency is available for use."),

@@ -51,6 +51,7 @@ from travel.views import (
     ResellerWithdrawalViewSet,
     AdminWithdrawalViewSet,
     CurrencyViewSet,
+    AdminCurrencyViewSet,
 )
 from itinerary.views import CustomerItineraryTransactionViewSet
 from travel.report_views import (
@@ -89,6 +90,10 @@ router.register(r"customers/me/itinerary-transactions", CustomerItineraryTransac
 
 # Currency endpoints (read-only for all authenticated users)
 router.register(r"currencies", CurrencyViewSet, basename="currency")
+# Admin currency management
+router.register(
+    r"admin/currencies", AdminCurrencyViewSet, basename="admin-currency"
+)
 router.register(
     r"admin/suppliers", AdminSupplierProfileViewSet, basename="admin-supplier-profile"
 )

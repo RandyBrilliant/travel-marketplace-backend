@@ -92,6 +92,21 @@ class CurrencyViewSet(viewsets.ReadOnlyModelViewSet):
     ordering = ["code"]
 
 
+class AdminCurrencyViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for admin to manage currencies (CRUD).
+    Admin-only access for full management.
+    """
+    
+    permission_classes = [permissions.IsAdminUser]
+    queryset = Currency.objects.all().order_by("code")
+    serializer_class = CurrencySerializer
+    filterset_fields = ["code", "is_active"]
+    search_fields = ["code", "name", "symbol"]
+    ordering_fields = ["code", "name", "is_active"]
+    ordering = ["code"]
+
+
 class SupplierTourPackageViewSet(viewsets.ModelViewSet):
     """
     ViewSet for suppliers to manage their tour packages.

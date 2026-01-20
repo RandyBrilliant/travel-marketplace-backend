@@ -10,19 +10,25 @@ from .models import (
 
 @admin.register(ItineraryBoard)
 class ItineraryBoardAdmin(admin.ModelAdmin):
-    list_display = ['title', 'slug', 'is_public', 'created_by', 'created_at']
-    list_filter = ['is_public', 'allow_editing', 'created_at']
-    search_fields = ['title', 'slug', 'share_token']
+    list_display = ['title', 'slug', 'is_public', 'supplier', 'price', 'is_active', 'created_at']
+    list_filter = ['is_public', 'allow_editing', 'is_active', 'supplier', 'created_at']
+    search_fields = ['title', 'slug', 'share_token', 'supplier__company_name']
     readonly_fields = ['share_token', 'created_at', 'updated_at']
     fieldsets = (
-        ('Board Information', {
-            'fields': ('title', 'description', 'slug')
+        ('Supplier & Board Information', {
+            'fields': ('supplier', 'title', 'description', 'slug')
+        }),
+        ('Pricing', {
+            'fields': ('price', 'currency')
         }),
         ('Visibility & Access', {
             'fields': ('is_public', 'allow_editing', 'share_token')
         }),
+        ('Status', {
+            'fields': ('is_active',)
+        }),
         ('Metadata', {
-            'fields': ('created_by', 'created_at', 'updated_at')
+            'fields': ('created_at', 'updated_at')
         }),
     )
 
