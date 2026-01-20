@@ -192,29 +192,28 @@ class ItineraryBoardDetailSerializer(serializers.ModelSerializer):
             'columns_count',
         ]
         read_only_fields = ['id', 'slug', 'share_token', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'slug', 'share_token', 'created_at', 'updated_at']
 
 
 class ItineraryBoardCreateUpdateSerializer(serializers.ModelSerializer):
-    """Serializer for creating and updating boards (admin only)."""
+    """Serializer for creating and updating boards."""
     
     class Meta:
         model = ItineraryBoard
         fields = [
             'id',
-            'supplier',
             'title',
-            'slug',
             'description',
             'is_public',
             'allow_editing',
             'price',
             'currency',
             'is_active',
+            'slug',
+            'share_token',
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['id', 'supplier', 'slug', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'slug', 'share_token', 'created_at', 'updated_at']
     
     def validate_title(self, value):
         """Validate title is not empty."""
@@ -346,7 +345,7 @@ class ItineraryTransactionSerializer(serializers.ModelSerializer):
     
     customer_email = serializers.EmailField(source='customer.email', read_only=True)
     board_title = serializers.CharField(source='board.title', read_only=True)
-    supplier_name = serializers.CharField(source='supplier.company_name', read_only=True, allow_null=True)
+    supplier_name = serializers.CharField(source='board.supplier.company_name', read_only=True, allow_null=True)
     is_access_valid = serializers.SerializerMethodField()
     
     class Meta:
@@ -357,16 +356,16 @@ class ItineraryTransactionSerializer(serializers.ModelSerializer):
             'board_title',
             'customer',
             'customer_email',
-            'supplier',
             'supplier_name',
             'status',
+            'amount',
             'access_duration_days',
             'created_at',
             'activated_at',
             'expires_at',
             'completed_at',
-            'booking_reference',
-            'transaction_reference',
+            'transaction_number',
+            'external_reference',
             'notes',
             'is_access_valid',
         ]
@@ -375,10 +374,12 @@ class ItineraryTransactionSerializer(serializers.ModelSerializer):
             'board_title',
             'customer_email',
             'supplier_name',
+            'amount',
             'created_at',
             'activated_at',
             'expires_at',
             'completed_at',
+            'transaction_number',
             'is_access_valid',
         ]
     
@@ -395,26 +396,17 @@ class ItineraryTransactionCreateSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'board',
-            'customer',
-            'supplier',
-            'status',
             'access_duration_days',
-            'booking_reference',
-            'transaction_reference',
             'notes',
         ]
         read_only_fields = ['id']
     
-    def validate_status(self, value):
-        """Ensure status is valid on creation."""
-        allowed_statuses = [
-            ItineraryTransactionStatus.PENDING,
-            ItineraryTransactionStatus.ACTIVE,
-        ]
-        if value not in allowed_statuses:
-            raise serializers.ValidationError(
-                f"Initial status must be one of: {', '.join(allowed_statuses)}"
-            )
+    def validate_board(self, value):
+        """Validate that the board exists and is active."""
+        if not value.is_active:
+            raise serializers.ValidationError("Itinerary board tidak aktif.")
+        if not value.is_public:
+            raise serializers.ValidationError("Itinerary board tidak tersedia untuk publik.")
         return value
 
 
@@ -423,34 +415,40 @@ class ItineraryTransactionListSerializer(serializers.ModelSerializer):
     
     customer_email = serializers.EmailField(source='customer.email', read_only=True)
     board_title = serializers.CharField(source='board.title', read_only=True)
-    supplier_name = serializers.CharField(source='supplier.company_name', read_only=True, allow_null=True)
+    supplier_name = serializers.CharField(source='board.supplier.company_name', read_only=True, allow_null=True)
     is_access_valid = serializers.SerializerMethodField()
     
     class Meta:
         model = ItineraryTransaction
         fields = [
             'id',
+            'board',
             'board_title',
             'customer_email',
             'supplier_name',
             'status',
             'access_duration_days',
+            'activated_at',
             'expires_at',
-            'booking_reference',
+            'transaction_number',
             'is_access_valid',
             'created_at',
+            'amount',
         ]
         read_only_fields = [
             'id',
+            'board',
             'board_title',
             'customer_email',
             'supplier_name',
+            'transaction_number',
             'is_access_valid',
             'created_at',
+            'activated_at',
+            'expires_at',
+            'amount',
         ]
     
     def get_is_access_valid(self, obj):
         """Check if customer currently has valid access."""
         return obj.is_access_valid()
-
-        return value

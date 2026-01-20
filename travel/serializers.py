@@ -544,6 +544,7 @@ class TourPackageListSerializer(serializers.ModelSerializer):
     supplier_name = serializers.CharField(source="supplier.company_name", read_only=True)
     duration_display = serializers.CharField(read_only=True)
     main_image_url = serializers.SerializerMethodField()
+    currency = CurrencySerializer(read_only=True)
     
     class Meta:
         model = TourPackage
@@ -560,6 +561,7 @@ class TourPackageListSerializer(serializers.ModelSerializer):
             "is_active",
             "supplier_name",
             "main_image_url",
+            "currency",
             "created_at",
         ]
     
@@ -714,6 +716,13 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
         queryset=ResellerGroup.objects.filter(is_active=True),
         # Suppliers can now modify reseller groups
     )
+    currency_id = serializers.PrimaryKeyRelatedField(
+        source='currency',
+        queryset=Currency.objects.filter(is_active=True),
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
     
     class Meta:
         model = TourPackage
@@ -736,6 +745,7 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
             "base_price",
             "visa_price",
             "tipping_price",
+            "currency_id",
             "itinerary_pdf",
             "is_active",
             "is_flexible",

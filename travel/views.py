@@ -80,10 +80,10 @@ class IsCustomer(permissions.BasePermission):
 class CurrencyViewSet(viewsets.ReadOnlyModelViewSet):
     """
     ViewSet for viewing available currencies.
-    Read-only access for all authenticated users.
+    Read-only access for all users (authenticated and non-authenticated).
     """
     
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
     queryset = Currency.objects.filter(is_active=True).order_by("code")
     serializer_class = CurrencySerializer
     filterset_fields = ["code", "is_active"]

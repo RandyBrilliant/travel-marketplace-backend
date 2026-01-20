@@ -13,6 +13,9 @@ from .views import (
     SupplierItineraryCardChecklistViewSet,
     ResellerItineraryBoardListView,
     ResellerItineraryBoardDetailView,
+    CustomerItineraryTransactionViewSet,
+    SupplierItineraryTransactionViewSet,
+    AdminItineraryTransactionViewSet,
 )
 
 router = DefaultRouter()
@@ -21,11 +24,14 @@ router.register(r'suppliers/me/columns', SupplierItineraryColumnViewSet, basenam
 router.register(r'suppliers/me/cards', SupplierItineraryCardViewSet, basename='supplier-itinerary-card')
 router.register(r'suppliers/me/attachments', SupplierItineraryCardAttachmentViewSet, basename='supplier-itinerary-attachment')
 router.register(r'suppliers/me/checklists', SupplierItineraryCardChecklistViewSet, basename='supplier-itinerary-checklist')
+router.register(r'suppliers/me/transactions', SupplierItineraryTransactionViewSet, basename='supplier-itinerary-transaction')
 router.register(r'admin/boards', AdminItineraryBoardViewSet, basename='admin-itinerary-board')
 router.register(r'admin/columns', AdminItineraryColumnViewSet, basename='admin-itinerary-column')
 router.register(r'admin/cards', AdminItineraryCardViewSet, basename='admin-itinerary-card')
 router.register(r'admin/attachments', AdminItineraryCardAttachmentViewSet, basename='admin-itinerary-attachment')
 router.register(r'admin/checklists', AdminItineraryCardChecklistViewSet, basename='admin-itinerary-checklist')
+router.register(r'admin/transactions', AdminItineraryTransactionViewSet, basename='admin-itinerary-transaction')
+router.register(r'customers/me/transactions', CustomerItineraryTransactionViewSet, basename='customer-itinerary-transaction')
 
 urlpatterns = [
     # Router endpoints

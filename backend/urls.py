@@ -182,7 +182,7 @@ api_v1_patterns = [
     path("tours/", PublicTourPackageListView.as_view(), name="public-tour-list"),
     path("tours/<int:pk>/", PublicTourPackageDetailView.as_view(), name="public-tour-detail"),
     # Itinerary endpoints
-    path("", include("itinerary.urls")),
+    path("itinerary/", include("itinerary.urls")),
 ]
 
 urlpatterns = [

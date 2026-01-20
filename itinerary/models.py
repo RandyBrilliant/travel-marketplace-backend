@@ -470,12 +470,16 @@ class ItineraryTransaction(models.Model):
         return f'IT-{current_year}-{next_number:06d}'
     
     def save(self, *args, **kwargs):
-        """Generate transaction_number and set expires_at when status changes to ACTIVE."""
+        """Generate transaction_number, set amount from board, and set expires_at when status changes to ACTIVE."""
         from django.utils import timezone
         
         # Generate transaction number if not set
         if not self.transaction_number:
             self.transaction_number = self.generate_transaction_number()
+        
+        # Auto-set amount from board price if not set
+        if self.amount == 0 and self.board:
+            self.amount = self.board.price
         
         if self.status == ItineraryTransactionStatus.ACTIVE and not self.activated_at:
             self.activated_at = timezone.now()

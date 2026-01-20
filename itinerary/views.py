@@ -482,11 +482,12 @@ class ResellerItineraryBoardListView(APIView):
     
     def get(self, request):
         """Get list of public itinerary boards."""
-        # Only return public boards
+        # Only return public and active boards
         queryset = ItineraryBoard.objects.filter(
-            is_public=True
+            is_public=True,
+            is_active=True
         ).select_related(
-            'supplier'
+            'supplier', 'currency'
         ).prefetch_related(
             'columns',
         ).order_by('-created_at')
@@ -536,9 +537,10 @@ class ResellerItineraryBoardDetailView(APIView):
             if pk:
                 board = ItineraryBoard.objects.filter(
                     pk=pk,
-                    is_public=True
+                    is_public=True,
+                    is_active=True
                 ).select_related(
-                    'supplier'
+                    'supplier', 'currency'
                 ).prefetch_related(
                     'columns',
                     'columns__cards',
@@ -548,9 +550,10 @@ class ResellerItineraryBoardDetailView(APIView):
             elif slug:
                 board = ItineraryBoard.objects.filter(
                     slug=slug,
-                    is_public=True
+                    is_public=True,
+                    is_active=True
                 ).select_related(
-                    'supplier'
+                    'supplier', 'currency'
                 ).prefetch_related(
                     'columns',
                     'columns__cards',
@@ -608,7 +611,7 @@ class CustomerItineraryTransactionViewSet(viewsets.ModelViewSet):
             queryset = ItineraryTransaction.objects.filter(
                 customer=self.request.user
             ).select_related(
-                "board", "customer", "supplier", "supplier__user"
+                "board", "board__supplier", "board__supplier__user", "customer"
             ).order_by("-created_at")
             
             return queryset
@@ -696,5 +699,111 @@ class CustomerItineraryTransactionViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response(
                 {"detail": f"Error extending access: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+
+class SupplierItineraryTransactionViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for suppliers to view and manage transactions for their itinerary boards.
+    Suppliers can view, update transaction status, and activate transactions.
+    """
+    
+    permission_classes = [IsSupplier]
+    queryset = ItineraryTransaction.objects.all()
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ["status", "board"]
+    search_fields = ["customer__email", "customer__full_name", "board__title", "transaction_number"]
+    ordering_fields = ["created_at", "expires_at", "activated_at"]
+    ordering = ["-created_at"]
+    
+    def get_queryset(self):
+        """Return only transactions for boards owned by the authenticated supplier."""
+        if not self.request.user.is_authenticated:
+            return ItineraryTransaction.objects.none()
+        
+        try:
+            from account.models import SupplierProfile
+            supplier_profile = SupplierProfile.objects.get(user=self.request.user)
+            return ItineraryTransaction.objects.filter(
+                board__supplier=supplier_profile
+            ).select_related(
+                "board", "board__supplier", "board__supplier__user", "customer"
+            ).order_by("-created_at")
+        except Exception:
+            return ItineraryTransaction.objects.none()
+    
+    def get_serializer_class(self):
+        """Use different serializers for list vs detail."""
+        if self.action == "list":
+            return ItineraryTransactionListSerializer
+        return ItineraryTransactionSerializer
+    
+    @action(detail=True, methods=["patch"], url_path="activate")
+    def activate_transaction(self, request, pk=None):
+        """Activate a pending itinerary transaction."""
+        transaction = self.get_object()
+        
+        if transaction.status != ItineraryTransactionStatus.PENDING:
+            return Response(
+                {"detail": f"Transaction is already {transaction.status}. Cannot activate."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            transaction.activate()
+            serializer = self.get_serializer(transaction)
+            return Response(serializer.data)
+        except Exception as e:
+            return Response(
+                {"detail": f"Error activating transaction: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+
+class AdminItineraryTransactionViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for admin to view and manage all itinerary transactions.
+    Admin can view all transactions, filter by status, and manage transaction lifecycle.
+    """
+    
+    permission_classes = [IsAdminUser]
+    queryset = ItineraryTransaction.objects.all()
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ["status", "board", "board__supplier"]
+    search_fields = ["customer__email", "customer__full_name", "board__title", "transaction_number"]
+    ordering_fields = ["created_at", "expires_at", "activated_at", "amount"]
+    ordering = ["-created_at"]
+    
+    def get_queryset(self):
+        """Return all transactions with optimized queries."""
+        return ItineraryTransaction.objects.select_related(
+            "board", "board__supplier", "board__supplier__user", "customer"
+        ).order_by("-created_at")
+    
+    def get_serializer_class(self):
+        """Use different serializers for list vs detail."""
+        if self.action == "list":
+            return ItineraryTransactionListSerializer
+        return ItineraryTransactionSerializer
+    
+    @action(detail=True, methods=["patch"], url_path="activate")
+    def activate_transaction(self, request, pk=None):
+        """Activate a pending itinerary transaction."""
+        transaction = self.get_object()
+        
+        if transaction.status != ItineraryTransactionStatus.PENDING:
+            return Response(
+                {"detail": f"Transaction is already {transaction.status}. Cannot activate."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            transaction.activate()
+            serializer = self.get_serializer(transaction)
+            return Response(serializer.data)
+        except Exception as e:
+            return Response(
+                {"detail": f"Error activating transaction: {str(e)}"},
                 status=status.HTTP_400_BAD_REQUEST
             )
