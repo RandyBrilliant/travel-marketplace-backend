@@ -222,7 +222,7 @@ class SeatSlotSerializer(serializers.ModelSerializer):
     """Serializer for seat slots within a tour date with passenger details."""
     
     status_display = serializers.CharField(source="get_status_display", read_only=True)
-    booking_id = serializers.IntegerField(source="booking.id", read_only=True, allow_null=True)
+    booking_number = serializers.CharField(source="booking.booking_number", read_only=True, allow_null=True)
     passport_url = serializers.SerializerMethodField()
     
     class Meta:
@@ -232,7 +232,7 @@ class SeatSlotSerializer(serializers.ModelSerializer):
             "seat_number",
             "status",
             "status_display",
-            "booking_id",
+            "booking_number",
             "passenger_name",
             "passport",
             "passport_url",
@@ -241,7 +241,7 @@ class SeatSlotSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "status_display", "booking_id", "passport_url", "created_at", "updated_at"]
+        read_only_fields = ["id", "status_display", "booking_number", "passport_url", "created_at", "updated_at"]
     
     def get_passport_url(self, obj):
         """Return absolute URL for passport image if exists."""
@@ -1024,7 +1024,7 @@ class ResellerTourCommissionSerializer(serializers.ModelSerializer):
 class ResellerGroupSerializer(serializers.ModelSerializer):
     """Serializer for reseller groups."""
     
-    created_by_name = serializers.CharField(source="created_by.email", read_only=True)
+    created_by_name = serializers.SerializerMethodField(read_only=True)
     reseller_count = serializers.IntegerField(source="resellers.count", read_only=True)
     tour_count = serializers.IntegerField(source="tour_packages.count", read_only=True)
     reseller_ids = serializers.PrimaryKeyRelatedField(
@@ -1051,6 +1051,28 @@ class ResellerGroupSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "created_by", "created_by_name", "created_at", "updated_at"]
+    
+    def get_created_by_name(self, obj):
+        """Get created_by name from their profile (ResellerProfile or SupplierProfile)."""
+        if not obj.created_by:
+            return ""
+        
+        # Try to get name from reseller profile
+        try:
+            reseller_profile = obj.created_by.reseller_profile
+            return reseller_profile.full_name
+        except:
+            pass
+        
+        # Try to get name from supplier profile
+        try:
+            supplier_profile = obj.created_by.supplier_profile
+            return supplier_profile.contact_person
+        except:
+            pass
+        
+        # Fallback to email
+        return obj.created_by.email
     
     def to_representation(self, instance):
         """Include reseller details in read operations."""
@@ -1913,7 +1935,7 @@ class ResellerCommissionSerializer(serializers.ModelSerializer):
 class PaymentDetailSerializer(serializers.ModelSerializer):
     """Serializer for payment records with booking details (used in admin views)."""
     
-    booking_id = serializers.IntegerField(source="booking.id", read_only=True)
+    booking_number = serializers.CharField(source="booking.booking_number", read_only=True)
     booking_total_amount = serializers.IntegerField(source="booking.total_amount", read_only=True)
     reseller_name = serializers.CharField(source="booking.reseller.full_name", read_only=True)
     
@@ -1922,7 +1944,7 @@ class PaymentDetailSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "booking",
-            "booking_id",
+            "booking_number",
             "reseller_name",
             "booking_total_amount",
             "amount",
@@ -1936,7 +1958,7 @@ class PaymentDetailSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "id",
-            "booking_id",
+            "booking_number",
             "reseller_name",
             "booking_total_amount",
             "status",

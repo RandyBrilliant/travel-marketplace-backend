@@ -94,8 +94,8 @@ class CurrencyViewSet(viewsets.ReadOnlyModelViewSet):
 
 class AdminCurrencyViewSet(viewsets.ModelViewSet):
     """
-    ViewSet for admin to manage currencies (CRUD).
-    Admin-only access for full management.
+    ViewSet for admin to manage currencies (Create, Read, Update).
+    Admin-only access. Delete functionality is disabled.
     """
     
     permission_classes = [permissions.IsAdminUser]
@@ -105,6 +105,13 @@ class AdminCurrencyViewSet(viewsets.ModelViewSet):
     search_fields = ["code", "name", "symbol"]
     ordering_fields = ["code", "name", "is_active"]
     ordering = ["code"]
+    
+    def destroy(self, request, *args, **kwargs):
+        """Disable delete functionality for currencies."""
+        return Response(
+            {"detail": "Deleting currencies is not allowed."},
+            status=status.HTTP_403_FORBIDDEN
+        )
 
 
 class SupplierTourPackageViewSet(viewsets.ModelViewSet):

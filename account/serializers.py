@@ -78,6 +78,8 @@ class SupplierProfileSerializer(serializers.ModelSerializer):
     approval_status = serializers.CharField(read_only=True)
     approved_at = serializers.DateTimeField(read_only=True)
     rejection_reason = serializers.CharField(read_only=True)
+    tour_package_count = serializers.SerializerMethodField(read_only=True)
+    itinerary_board_count = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = SupplierProfile
@@ -97,14 +99,24 @@ class SupplierProfileSerializer(serializers.ModelSerializer):
             "bank_name",
             "bank_account_name",
             "bank_account_number",
+            "tour_package_count",
+            "itinerary_board_count",
             "created_at",
             "updated_at",
         ]
         read_only_fields = [
             "id", "user", "email", "email_verified", "approval_status",
-            "approved_at", "rejection_reason",
+            "approved_at", "rejection_reason", "tour_package_count", "itinerary_board_count",
             "created_at", "updated_at"
         ]
+    
+    def get_tour_package_count(self, obj):
+        """Get total number of tour packages for this supplier."""
+        return obj.packages.count()
+    
+    def get_itinerary_board_count(self, obj):
+        """Get total number of itinerary boards for this supplier."""
+        return obj.itinerary_boards.count()
 
 
 class ResellerProfileSerializer(serializers.ModelSerializer):
