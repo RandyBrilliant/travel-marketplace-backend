@@ -348,6 +348,8 @@ class AdminSupplierProfileSerializer(BaseAdminProfileSerializer, SupplierProfile
         required=False,
         allow_null=True,
     )
+    # Override email field from BaseAdminProfileSerializer to make it read-only in responses
+    email = serializers.EmailField(source="user.email", read_only=True)
 
     class Meta(SupplierProfileSerializer.Meta):
         fields = SupplierProfileSerializer.Meta.fields + [
@@ -367,6 +369,8 @@ class AdminResellerProfileSerializer(BaseAdminProfileSerializer, ResellerProfile
         required=False,
         allow_null=True,
     )
+    # Override email field from BaseAdminProfileSerializer to make it read-only in responses
+    email = serializers.EmailField(source="user.email", read_only=True)
 
     class Meta(ResellerProfileSerializer.Meta):
         fields = ResellerProfileSerializer.Meta.fields + ["user_data", "password"]
@@ -405,6 +409,9 @@ class AdminCustomerProfileSerializer(BaseAdminProfileSerializer, CustomerProfile
         required=False,
         allow_null=True,
     )
+    # Override email field from BaseAdminProfileSerializer to make it read-only in responses
+    # while still allowing it to be used for user creation/updates
+    email = serializers.EmailField(source="user.email", read_only=True)
 
     class Meta(CustomerProfileSerializer.Meta):
         fields = CustomerProfileSerializer.Meta.fields + ["user_data", "password"]

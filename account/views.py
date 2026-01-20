@@ -1079,7 +1079,7 @@ class ApproveRejectSupplierView(APIView):
 class ActivateDeactivateAccountView(APIView):
     """
     API endpoint for admin to activate or deactivate a user account.
-    Works for all user types (STAFF, SUPPLIER, RESELLER).
+    Works for all user types (CUSTOMER, STAFF, SUPPLIER, RESELLER).
     Accepts profile_type and profile_id to identify which profile to update.
     """
     from account.authentication import CookieJWTAuthentication
@@ -1089,14 +1089,6 @@ class ActivateDeactivateAccountView(APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def post(self, request, profile_type, profile_id):
-        """
-        Activate or deactivate a user account.
-        
-        Request body:
-        {
-            "is_active": true/false
-        }
-        """
         is_active = request.data.get('is_active')
         
         if is_active is None:
@@ -1113,7 +1105,15 @@ class ActivateDeactivateAccountView(APIView):
 
         try:
             # Get the profile based on type
-            if profile_type == 'staff':
+            if profile_type == 'customers':
+                try:
+                    profile = CustomerProfile.objects.select_related('user').get(pk=profile_id)
+                except CustomerProfile.DoesNotExist:
+                    return Response(
+                        {'detail': 'Customer profile not found.'},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+            elif profile_type == 'staff':
                 try:
                     profile = StaffProfile.objects.select_related('user').get(pk=profile_id)
                 except StaffProfile.DoesNotExist:
@@ -1139,7 +1139,7 @@ class ActivateDeactivateAccountView(APIView):
                     )
             else:
                 return Response(
-                    {'detail': f'Invalid profile type: {profile_type}. Must be one of: staff, supplier, reseller.'},
+                    {'detail': f'Invalid profile type: {profile_type}. Must be one of: customers, staff, supplier, reseller.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             

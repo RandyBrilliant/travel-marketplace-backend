@@ -42,12 +42,6 @@ class ItineraryBoard(models.Model):
         help_text=_("Unique token for sharing (auto-generated)")
     )
     
-    # Permissions
-    allow_editing = models.BooleanField(
-        default=False,
-        help_text=_("Allow public editing (or read-only for public, edit for owners)")
-    )
-    
     # Pricing
     price = models.IntegerField(
         validators=[MinValueValidator(0)],
