@@ -579,8 +579,7 @@ class PublicTourPackageListView(APIView):
         if search:
             queryset = queryset.filter(
                 models.Q(name__icontains=search) |
-                models.Q(country__icontains=search) |
-                models.Q(itinerary__icontains=search)
+                models.Q(country__icontains=search)
             )
         
         # Filter by month/year (format: YYYY-MM)
