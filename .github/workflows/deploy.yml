@@ -19,7 +19,9 @@ jobs:
           SSH_KEY: ${{ secrets.DO_SSH_PRIVATE_KEY }}
         run: |
           mkdir -p ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/github_deploy
+          cat > ~/.ssh/github_deploy << 'KEYEOF'
+          ${{ secrets.DO_SSH_PRIVATE_KEY }}
+          KEYEOF
           chmod 600 ~/.ssh/github_deploy
           ssh-keyscan -H ${{ secrets.DO_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
       
