@@ -20,6 +20,7 @@ from account.views import (
     AdminResellerProfileViewSet,
     AdminStaffProfileViewSet,
     AdminCustomerProfileViewSet,
+    AdminContactMessageViewSet,
     CurrentUserView,
     LogoutView,
     ChangePasswordView,
@@ -33,6 +34,7 @@ from account.views import (
     RegisterResellerView,
     RegisterSupplierView,
     RegisterCustomerView,
+    ContactMessageView,
 )
 from travel.views import (
     SupplierTourPackageViewSet,
@@ -106,6 +108,10 @@ router.register(
 router.register(
     r"admin/customers", AdminCustomerProfileViewSet, basename="admin-customer-profile"
 )
+# Admin-only endpoints for managing contact messages
+router.register(
+    r"admin/contact-messages", AdminContactMessageViewSet, basename="admin-contact-message"
+)
 # Admin-only endpoints for managing reseller tour commissions
 router.register(
     r"admin/reseller-tour-commissions",
@@ -155,6 +161,8 @@ api_v1_patterns = [
     path("register/reseller/", RegisterResellerView.as_view(), name="register-reseller"),
     path("register/supplier/", RegisterSupplierView.as_view(), name="register-supplier"),
     path("register/customer/", RegisterCustomerView.as_view(), name="register-customer"),
+    # Public contact form endpoint
+    path("contact/", ContactMessageView.as_view(), name="contact-message"),
     # Password change endpoint (works for all user types)
     path("change-password/", ChangePasswordView.as_view(), name="change-password"),
     # Email verification endpoints

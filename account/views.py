@@ -16,6 +16,7 @@ from account.models import (
     ResellerProfile,
     StaffProfile,
     CustomerProfile,
+    ContactMessage,
     UserRole,
 )
 from account.serializers import (
@@ -28,6 +29,7 @@ from account.serializers import (
     AdminStaffProfileSerializer,
     AdminCustomerProfileSerializer,
     ChangePasswordSerializer,
+    ContactMessageSerializer,
 )
 
 
@@ -538,6 +540,74 @@ class AdminCustomerProfileViewSet(BaseAdminProfileViewSet):
 
     def get_user_role(self):
         return UserRole.CUSTOMER
+
+
+# ==================== ADMIN CONTACT MESSAGE ENDPOINTS ====================
+
+class AdminContactMessageViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Admin-only read/delete endpoints for managing contact form submissions.
+    Allows admins to view, search, filter, and delete contact messages.
+    """
+    queryset = ContactMessage.objects.all().order_by("-created_at")
+    serializer_class = ContactMessageSerializer
+    permission_classes = [permissions.IsAdminUser]
+    filterset_fields = ["subject", "created_at"]
+    search_fields = ["name", "email", "message"]
+    ordering_fields = ["created_at", "name", "email"]
+    ordering = ["-created_at"]
+
+    def list(self, request, *args, **kwargs):
+        """
+        List all contact messages with pagination.
+        Supports filtering by subject and date, plus search by name/email/message.
+        """
+        return super().list(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Allow admins to delete contact messages.
+        """
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=False, methods=["get"], url_path="stats")
+    def get_stats(self, request):
+        """
+        Get statistics about contact messages.
+        Returns counts by subject and total message count.
+        """
+        try:
+            from django.db.models import Count
+            
+            total_messages = ContactMessage.objects.count()
+            messages_by_subject = ContactMessage.objects.values('subject').annotate(
+                count=Count('id')
+            ).order_by('-count')
+            
+            # Convert subject codes to display names
+            subject_stats = []
+            for item in messages_by_subject:
+                subject_obj = ContactMessage._meta.get_field('subject')
+                display_name = dict(subject_obj.choices).get(item['subject'], item['subject'])
+                subject_stats.append({
+                    'subject': item['subject'],
+                    'subject_display': display_name,
+                    'count': item['count']
+                })
+            
+            return Response({
+                'total_messages': total_messages,
+                'messages_by_subject': subject_stats,
+            })
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error getting contact message stats: {str(e)}", exc_info=True)
+            
+            return Response(
+                {"detail": f"Error getting statistics: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 # ==================== USER INFO ENDPOINT ====================
@@ -1699,3 +1769,56 @@ class RegisterCustomerView(APIView):
                 {'detail': f'An error occurred during customer registration: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class ContactMessageView(APIView):
+    """
+    Public API endpoint for contact form submissions.
+    No authentication required - anyone can submit a contact message.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        """
+        Handle contact form submission.
+        
+        Request body:
+        {
+            "name": "John Doe",
+            "email": "john@example.com",
+            "phone": "+62811234567" (optional),
+            "subject": "general|supplier|reseller|billing|other",
+            "message": "Detailed message here..."
+        }
+        """
+        serializer = ContactMessageSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            try:
+                # Save the contact message
+                contact_message = serializer.save()
+                
+                # TODO: Send email notification to admin
+                # TODO: Send confirmation email to user
+                
+                return Response(
+                    {
+                        'detail': 'Pesan Anda telah diterima. Tim kami akan menghubungi Anda dalam 24 jam.',
+                        'id': contact_message.id,
+                    },
+                    status=status.HTTP_201_CREATED
+                )
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to save contact message: {str(e)}", exc_info=True)
+                
+                return Response(
+                    {'detail': f'Gagal mengirim pesan: {str(e)}'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+        
+        return Response(
+            serializer.errors,
+            status=status.HTTP_400_BAD_REQUEST
+        )

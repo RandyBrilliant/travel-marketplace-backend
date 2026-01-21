@@ -6,6 +6,7 @@ from .models import (
     ResellerProfile,
     StaffProfile,
     CustomerProfile,
+    ContactMessage,
 )
 
 # Register your models here.
@@ -213,3 +214,46 @@ class CustomerProfileAdmin(admin.ModelAdmin):
             )
         return "No photo"
     photo_preview.short_description = "Photo Preview"
+
+
+@admin.register(ContactMessage)
+class ContactMessageAdmin(admin.ModelAdmin):
+    list_display = ('id', 'name', 'email', 'get_subject_display', 'created_at', 'has_phone')
+    list_filter = ('subject', 'created_at')
+    search_fields = ('name', 'email', 'message')
+    readonly_fields = ('id', 'created_at', 'updated_at', 'message_display')
+    ordering = ('-created_at',)
+    
+    fieldsets = (
+        ('Contact Information', {
+            'fields': ('id', 'name', 'email', 'phone')
+        }),
+        ('Message', {
+            'fields': ('subject', 'message_display')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at')
+        }),
+    )
+    
+    def has_phone(self, obj):
+        """Display if contact has provided phone number."""
+        return bool(obj.phone)
+    has_phone.short_description = "Has Phone"
+    has_phone.boolean = True
+    
+    def message_display(self, obj):
+        """Display message in a more readable format."""
+        return format_html(
+            '<div style="white-space: pre-wrap; word-wrap: break-word; max-width: 500px;">{}</div>',
+            obj.message
+        )
+    message_display.short_description = "Message"
+    
+    def has_add_permission(self, request):
+        """Prevent adding contact messages through admin (they come from API)."""
+        return False
+    
+    def has_change_permission(self, request, obj=None):
+        """Prevent editing contact messages."""
+        return False

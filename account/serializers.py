@@ -11,6 +11,7 @@ from account.models import (
     ResellerProfile,
     StaffProfile,
     CustomerProfile,
+    ContactMessage,
     UserRole,
 )
 
@@ -429,3 +430,40 @@ class AdminCustomerProfileSerializer(BaseAdminProfileSerializer, CustomerProfile
         fields = CustomerProfileSerializer.Meta.fields + ["user_data", "password"]
         read_only_fields = ["id", "user", "email", "created_at", "updated_at"]
 
+
+class ContactMessageSerializer(serializers.ModelSerializer):
+    """Serializer for contact form submissions."""
+    
+    class Meta:
+        model = ContactMessage
+        fields = ["id", "name", "email", "phone", "subject", "message", "created_at"]
+        read_only_fields = ["id", "created_at"]
+
+    def validate_email(self, value):
+        """Validate email is properly formatted."""
+        if not value:
+            raise serializers.ValidationError("Email is required.")
+        return value
+
+    def validate_name(self, value):
+        """Validate name is not empty."""
+        if not value or not value.strip():
+            raise serializers.ValidationError("Name is required.")
+        return value.strip()
+
+    def validate_message(self, value):
+        """Validate message has minimum length."""
+        if not value or not value.strip():
+            raise serializers.ValidationError("Message is required.")
+        if len(value.strip()) < 10:
+            raise serializers.ValidationError("Message must be at least 10 characters long.")
+        return value.strip()
+
+    def validate_phone(self, value):
+        """Validate phone number if provided."""
+        if value and len(value.strip()) > 0:
+            # Remove spaces and special characters for validation
+            cleaned = ''.join(c for c in value if c.isdigit() or c in '+-')
+            if len(cleaned) < 7:
+                raise serializers.ValidationError("Phone number must be at least 7 digits.")
+        return value

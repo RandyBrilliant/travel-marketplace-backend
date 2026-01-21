@@ -619,3 +619,56 @@ class CustomerProfile(models.Model):
 
     def __str__(self) -> str:
         return f"{self.full_name} ({self.user.email})"
+
+
+class ContactMessage(models.Model):
+    """Model to store contact form submissions from website visitors."""
+    
+    class SubjectChoices(models.TextChoices):
+        GENERAL = "general", _("Pertanyaan Umum")
+        SUPPLIER = "supplier", _("Dukungan Supplier")
+        RESELLER = "reseller", _("Dukungan Reseller")
+        BILLING = "billing", _("Pertanyaan Tagihan")
+        OTHER = "other", _("Lainnya")
+
+    name = models.CharField(
+        max_length=255,
+        verbose_name="Full Name",
+        help_text=_("Name of the person submitting the contact form.")
+    )
+    email = models.EmailField(
+        verbose_name="Email Address",
+        help_text=_("Email address of the person submitting the form.")
+    )
+    phone = models.CharField(
+        max_length=20,
+        blank=True,
+        null=True,
+        verbose_name="Phone Number",
+        help_text=_("Optional phone number for callback.")
+    )
+    subject = models.CharField(
+        max_length=20,
+        choices=SubjectChoices.choices,
+        verbose_name="Subject",
+        help_text=_("Category of the inquiry.")
+    )
+    message = models.TextField(
+        verbose_name="Message",
+        help_text=_("Detailed message from the user.")
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    class Meta:
+        verbose_name = "Contact Message"
+        verbose_name_plural = "Contact Messages"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["-created_at"]),
+            models.Index(fields=["email"]),
+            models.Index(fields=["subject"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"Contact from {self.name} ({self.email}) - {self.get_subject_display()}"
