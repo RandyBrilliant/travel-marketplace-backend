@@ -1,0 +1,37 @@
+name: Deploy to DigitalOcean
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # Allows manual triggering
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Deploy to DigitalOcean Droplet
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DO_HOST }}
+          username: ${{ secrets.DO_USERNAME }}
+          key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.DO_SSH_PORT }}
+          script: |
+            cd ${{ secrets.DO_PROJECT_PATH }}
+            git pull origin main
+            cd deploy
+            chmod +x update-auto.sh
+            bash update-auto.sh
+      
+      - name: Deployment Status
+        if: success()
+        run: echo "✅ Deployment completed successfully!"
+      
+      - name: Deployment Failed
+        if: failure()
+        run: echo "❌ Deployment failed. Check the logs above."
