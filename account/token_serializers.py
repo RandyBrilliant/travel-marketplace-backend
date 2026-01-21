@@ -61,7 +61,6 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                 if profile.photo:
                     photo_url = profile.photo.url
         except Exception:
-            # If anything goes wrong, just skip to avoid breaking auth
             pass
         
         return full_name or user.email, photo_url
