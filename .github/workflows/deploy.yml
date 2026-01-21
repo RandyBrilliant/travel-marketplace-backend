@@ -14,19 +14,24 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
+      - name: Setup SSH
+        env:
+          SSH_KEY: ${{ secrets.DO_SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.DO_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+      
       - name: Deploy to DigitalOcean Droplet
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.DO_HOST }}
-          username: ${{ secrets.DO_USERNAME }}
-          key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
-          port: ${{ secrets.DO_SSH_PORT }}
-          script: |
-            cd ${{ secrets.DO_PROJECT_PATH }}
-            git pull origin main
-            cd deploy
-            chmod +x update-auto.sh
-            bash update-auto.sh
+        run: |
+          ssh -i ~/.ssh/id_rsa -p ${{ secrets.DO_SSH_PORT }} ${{ secrets.DO_USERNAME }}@${{ secrets.DO_HOST }} << 'EOF'
+          cd ${{ secrets.DO_PROJECT_PATH }}
+          git pull origin main
+          cd deploy
+          chmod +x update-auto.sh
+          bash update-auto.sh
+          EOF
       
       - name: Deployment Status
         if: success()
