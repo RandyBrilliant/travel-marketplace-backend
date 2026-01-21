@@ -15,13 +15,9 @@ jobs:
         uses: actions/checkout@v4
       
       - name: Setup SSH
-        env:
-          SSH_KEY: ${{ secrets.DO_SSH_PRIVATE_KEY }}
         run: |
           mkdir -p ~/.ssh
-          cat > ~/.ssh/github_deploy << 'KEYEOF'
-          ${{ secrets.DO_SSH_PRIVATE_KEY }}
-          KEYEOF
+          echo "${{ secrets.DO_SSH_PRIVATE_KEY }}" | base64 -d > ~/.ssh/github_deploy
           chmod 600 ~/.ssh/github_deploy
           ssh-keyscan -H ${{ secrets.DO_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
       
