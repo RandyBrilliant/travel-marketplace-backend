@@ -351,6 +351,17 @@ class TourDate(models.Model):
         null=True,
         blank=True,
     )
+    departure_city = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        help_text=_("City where the tour departs from (e.g., Jakarta, Medan, Surabaya)."),
+    )
+    notes = models.TextField(
+        blank=True,
+        default="",
+        help_text=_("Optional notes or additional information for this tour date."),
+    )
     is_high_season = models.BooleanField(
         default=False,
         help_text=_("Mark if this date is considered high season."),
@@ -361,7 +372,7 @@ class TourDate(models.Model):
     )
 
     class Meta:
-        unique_together = ("package", "departure_date", "has_shopping_stop")
+        unique_together = ("package", "departure_date", "has_shopping_stop", "departure_city")
         ordering = ["departure_date"]
         verbose_name = "Tour Date"
         verbose_name_plural = "Tour Dates"
@@ -407,12 +418,13 @@ class TourDate(models.Model):
                 'price': 'Harga tidak boleh negatif.'
             })
         
-        # Check for duplicate combination of package, departure_date, and has_shopping_stop
+        # Check for duplicate combination of package, departure_date, has_shopping_stop, and departure_city
         if self.package and self.departure_date:
             existing = TourDate.objects.filter(
                 package=self.package,
                 departure_date=self.departure_date,
-                has_shopping_stop=self.has_shopping_stop
+                has_shopping_stop=self.has_shopping_stop,
+                departure_city=self.departure_city or ""
             )
             # Exclude current instance if updating
             if self.pk:
@@ -420,9 +432,10 @@ class TourDate(models.Model):
             
             if existing.exists():
                 variant_text = "dengan shopping stop" if self.has_shopping_stop else "tanpa shopping stop"
+                city_text = f" dari {self.departure_city}" if self.departure_city else ""
                 raise ValidationError({
-                    '__all__': f'Tanggal keberangkatan {variant_text} untuk paket ini sudah ada. '
-                              f'Untuk tanggal yang sama, Anda dapat membuat varian dengan opsi shopping stop yang berbeda.'
+                    '__all__': f'Tanggal keberangkatan {variant_text}{city_text} untuk paket ini sudah ada. '
+                              f'Untuk tanggal yang sama, Anda dapat membuat varian dengan kota keberangkatan atau opsi shopping stop yang berbeda.'
                 })
     
     def save(self, *args, **kwargs):
