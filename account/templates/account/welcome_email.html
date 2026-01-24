@@ -157,7 +157,7 @@
 <body>
     <div class="email-wrapper">
         <div class="header">
-            <div class="logo">DCNetwork</div>
+            <div class="logo">DC Network</div>
             <div class="tagline">Travel Marketplace</div>
         </div>
         
@@ -167,7 +167,7 @@
             </div>
             
             <div class="message">
-                Selamat datang di DCNetwork! Kami senang Anda bergabung dengan komunitas marketplace travel kami. Akun Anda telah berhasil dibuat dan Anda siap untuk memulai perjalanan Anda bersama kami.
+                Selamat datang di DC Network! Kami senang Anda bergabung dengan komunitas marketplace travel kami. Akun Anda telah berhasil dibuat dan Anda siap untuk memulai perjalanan Anda bersama kami.
             </div>
             
             {% if user.role == 'SUPPLIER' %}
@@ -175,6 +175,10 @@
                 <div class="welcome-badge-title">Anda terdaftar sebagai Supplier!</div>
                 <div class="welcome-badge-text">Mulai daftarkan paket tur menakjubkan Anda dan jangkau ribuan pelancong di seluruh dunia.</div>
             </div>
+            {% elif user.role == 'CUSTOMER' %}
+            <div class="welcome-badge">
+                <div class="welcome-badge-title">Anda terdaftar sebagai Customer!</div>
+                <div class="welcome-badge-text">Jelajahi berbagai paket tur menarik dan mulailah merencanakan petualangan Anda berikutnya bersama kami.</div>
             {% elif user.role == 'RESELLER' %}
             <div class="welcome-badge">
                 <div class="welcome-badge-title">Anda terdaftar sebagai Reseller!</div>
@@ -194,6 +198,10 @@
                 <div class="feature-item">Menetapkan harga dan ketersediaan</div>
                 <div class="feature-item">Melacak pemesanan dan mengelola tanggal</div>
                 <div class="feature-item">Mengunggah foto dan itinerari terperinci</div>
+                {% elif user.role == 'CUSTOMER' %}
+                <div class="feature-item">Menjelajahi berbagai paket tur</div>
+                <div class="feature-item">Memesan tur dengan mudah</div>
+                <div class="feature-item">Mengelola pemesanan Anda</div>
                 {% elif user.role == 'RESELLER' %}
                 <div class="feature-item">Menjelajahi paket tur yang tersedia</div>
                 <div class="feature-item">Memesan tur untuk pelanggan Anda</div>
@@ -210,6 +218,8 @@
             <div class="button-container">
                 {% if user.role == 'SUPPLIER' %}
                 <a href="{{ FRONTEND_URL }}/supplier" class="button">Buka Dashboard</a>
+                {% elif user.role == 'CUSTOMER' %}
+                <a href="{{ FRONTEND_URL }}/tours/search" class="button">Jelajahi Paket Tur</a>
                 {% elif user.role == 'RESELLER' %}
                 <a href="{{ FRONTEND_URL }}/profile" class="button">Buka Profil</a>
                 {% else %}

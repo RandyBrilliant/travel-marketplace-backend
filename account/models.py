@@ -4,6 +4,7 @@ from django.contrib.auth.models import AbstractUser
 from django.core.validators import MinValueValidator
 from django.utils.translation import gettext_lazy as _
 
+from travel.models import WithdrawalRequest, WithdrawalRequestStatus, ResellerCommission, BookingStatus
 from .managers import CustomUserManager
 
 
@@ -12,6 +13,21 @@ class UserRole(models.TextChoices):
     RESELLER = "RESELLER", _("Reseller")
     STAFF = "STAFF", _("Admin staff")
     CUSTOMER = "CUSTOMER", _("Customer")
+
+
+class SupplierApprovalStatus(models.TextChoices):
+    """Approval status for supplier accounts."""
+    PENDING = "PENDING", _("Pending Approval")
+    APPROVED = "APPROVED", _("Approved")
+    REJECTED = "REJECTED", _("Rejected")
+
+
+class SubjectChoices(models.TextChoices):
+    GENERAL = "general", _("Pertanyaan Umum")
+    SUPPLIER = "supplier", _("Dukungan Supplier")
+    RESELLER = "reseller", _("Dukungan Reseller")
+    BILLING = "billing", _("Pertanyaan Tagihan")
+    OTHER = "other", _("Lainnya")
 
 
 class CustomUser(AbstractUser):
@@ -99,20 +115,6 @@ class CustomUser(AbstractUser):
         """
         return self.role == UserRole.STAFF
     
-    @property
-    def has_supplier_role(self) -> bool:
-        """
-        Check if user's primary role is SUPPLIER (for backward compatibility).
-        """
-        return self.role == UserRole.SUPPLIER
-    
-    @property
-    def has_reseller_role(self) -> bool:
-        """
-        Check if user's primary role is RESELLER (for backward compatibility).
-        """
-        return self.role == UserRole.RESELLER
-    
     def get_roles_display(self) -> str:
         """
         Get a human-readable string of all roles this user has.
@@ -140,13 +142,6 @@ class CustomUser(AbstractUser):
             models.Index(fields=["email_verified"]),
             models.Index(fields=["is_active", "role", "email_verified"]),
         ]
-
-
-class SupplierApprovalStatus(models.TextChoices):
-    """Approval status for supplier accounts."""
-    PENDING = "PENDING", _("Pending Approval")
-    APPROVED = "APPROVED", _("Approved")
-    REJECTED = "REJECTED", _("Rejected")
 
 
 class SupplierProfile(models.Model):
@@ -245,21 +240,6 @@ class SupplierProfile(models.Model):
 
     def __str__(self) -> str:
         return f"{self.company_name} ({self.user.email})"
-    
-    @property
-    def is_approved(self) -> bool:
-        """Check if supplier is approved."""
-        return self.approval_status == SupplierApprovalStatus.APPROVED
-    
-    @property
-    def is_pending(self) -> bool:
-        """Check if supplier is pending approval."""
-        return self.approval_status == SupplierApprovalStatus.PENDING
-    
-    @property
-    def is_rejected(self) -> bool:
-        """Check if supplier is rejected."""
-        return self.approval_status == SupplierApprovalStatus.REJECTED
 
 
 class ResellerProfile(models.Model):
@@ -272,7 +252,6 @@ class ResellerProfile(models.Model):
         "CustomUser",
         on_delete=models.CASCADE,
         related_name="reseller_profile",
-        # Removed limit_choices_to to allow users to have both supplier and reseller profiles
     )
     full_name = models.CharField(
         max_length=255,
@@ -404,8 +383,6 @@ class ResellerProfile(models.Model):
         Returns all downline members under this reseller (including all nested levels).
         This recursively traverses the tree by following the sponsor relationship.
         """
-        from django.db.models import Q
-        
         # Get all reseller IDs in the downline tree
         downline_ids = set()
         to_process = [self.pk]
@@ -433,7 +410,6 @@ class ResellerProfile(models.Model):
         Calculate total commission earned from all confirmed bookings.
         Only counts commissions from bookings with CONFIRMED status.
         """
-        from travel.models import ResellerCommission, BookingStatus
         
         return ResellerCommission.objects.filter(
             reseller=self,
@@ -449,8 +425,7 @@ class ResellerProfile(models.Model):
         - from_downline: Commission from downline bookings (level 1+)
         - pending_commission: Commission from bookings that are not yet confirmed
         """
-        from travel.models import ResellerCommission, BookingStatus
-        
+
         # Commission from own bookings (level 0) - confirmed
         from_booking = ResellerCommission.objects.filter(
             reseller=self,
@@ -487,8 +462,7 @@ class ResellerProfile(models.Model):
         """
         Calculate total amount already withdrawn (approved or completed withdrawals).
         """
-        from travel.models import WithdrawalRequest, WithdrawalRequestStatus
-        
+
         return WithdrawalRequest.objects.filter(
             reseller=self,
             status__in=[WithdrawalRequestStatus.APPROVED, WithdrawalRequestStatus.COMPLETED]
@@ -500,7 +474,6 @@ class ResellerProfile(models.Model):
         """
         Calculate total amount in pending withdrawal requests.
         """
-        from travel.models import WithdrawalRequest, WithdrawalRequestStatus
         
         return WithdrawalRequest.objects.filter(
             reseller=self,
@@ -623,13 +596,6 @@ class CustomerProfile(models.Model):
 
 class ContactMessage(models.Model):
     """Model to store contact form submissions from website visitors."""
-    
-    class SubjectChoices(models.TextChoices):
-        GENERAL = "general", _("Pertanyaan Umum")
-        SUPPLIER = "supplier", _("Dukungan Supplier")
-        RESELLER = "reseller", _("Dukungan Reseller")
-        BILLING = "billing", _("Pertanyaan Tagihan")
-        OTHER = "other", _("Lainnya")
 
     name = models.CharField(
         max_length=255,
