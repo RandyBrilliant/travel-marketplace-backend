@@ -14,6 +14,7 @@ from .views import (
     ResellerItineraryBoardListView,
     ResellerItineraryBoardDetailView,
     CustomerItineraryTransactionViewSet,
+    ResellerItineraryTransactionViewSet,
     SupplierItineraryTransactionViewSet,
     AdminItineraryTransactionViewSet,
 )
@@ -32,6 +33,7 @@ router.register(r'admin/attachments', AdminItineraryCardAttachmentViewSet, basen
 router.register(r'admin/checklists', AdminItineraryCardChecklistViewSet, basename='admin-itinerary-checklist')
 router.register(r'admin/transactions', AdminItineraryTransactionViewSet, basename='admin-itinerary-transaction')
 router.register(r'customers/me/transactions', CustomerItineraryTransactionViewSet, basename='customer-itinerary-transaction')
+router.register(r'resellers/me/itinerary-transactions', ResellerItineraryTransactionViewSet, basename='reseller-itinerary-transaction')
 
 urlpatterns = [
     # Router endpoints

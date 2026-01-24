@@ -257,6 +257,7 @@ class TourDateSerializer(serializers.ModelSerializer):
     available_seats_count = serializers.IntegerField(read_only=True)
     booked_seats_count = serializers.IntegerField(read_only=True)
     seat_slots = serializers.SerializerMethodField()
+    is_past = serializers.SerializerMethodField()
     
     class Meta:
         model = TourDate
@@ -274,8 +275,9 @@ class TourDateSerializer(serializers.ModelSerializer):
             "available_seats_count",
             "booked_seats_count",
             "seat_slots",
+            "is_past",
         ]
-        read_only_fields = ["id", "remaining_seats", "available_seats_count", "booked_seats_count", "seat_slots"]
+        read_only_fields = ["id", "remaining_seats", "available_seats_count", "booked_seats_count", "seat_slots", "is_past"]
     
     def validate_departure_date(self, value):
         """Validate departure date is in the future and not too far ahead."""
@@ -430,6 +432,12 @@ class TourDateSerializer(serializers.ModelSerializer):
         
         slots = sorted(slots, key=lambda x: (len(x.seat_number), x.seat_number))
         return SeatSlotSerializer(slots, many=True, context=self.context).data
+    
+    def get_is_past(self, obj):
+        """Check if the tour date is in the past."""
+        from django.utils import timezone
+        today = timezone.now().date()
+        return obj.departure_date < today
 
 
 class TourPackageSerializer(serializers.ModelSerializer):
@@ -594,7 +602,6 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
     
     supplier_name = serializers.CharField(source="supplier.company_name", read_only=True)
     duration_display = serializers.CharField(read_only=True)
-    group_size_display = serializers.CharField(read_only=True)
     itinerary_pdf_url = serializers.SerializerMethodField()
     images = TourImageSerializer(many=True, read_only=True)
     dates = serializers.SerializerMethodField()
@@ -613,7 +620,6 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
             "nights",
             "duration_display",
             "max_group_size",
-            "group_size_display",
             "tour_type",
             "highlights",
             "inclusions",
@@ -637,7 +643,6 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
             "id",
             "slug",
             "duration_display",
-            "group_size_display",
             "itinerary_pdf_url",
             "created_at",
             "currency",
@@ -651,23 +656,27 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
         return None
     
     def get_dates(self, obj):
-        """Return available tour dates (only future dates with available seats or configured seats)."""
+        """Return all tour dates (past and future) so the UI can display them with appropriate styling."""
         from django.utils import timezone
+        from datetime import timedelta
         
         # Note: seat_slots are already prefetched in the view with booking relationship
         # Don't prefetch again here to avoid "lookup was already seen" error
         today = timezone.now().date()
-        future_dates = obj.dates.filter(
-            departure_date__gte=today
-        ).order_by("departure_date")[:20]  # Fetch more to account for filtering
         
-        # Show ALL dates (including fully booked) so the UI can display them with appropriate styling
+        # Get dates from 30 days ago to show recent past dates
+        start_date = today - timedelta(days=30)
+        all_dates = obj.dates.filter(
+            departure_date__gte=start_date
+        ).order_by("departure_date")[:20]
+        
+        # Show ALL dates (including past and fully booked) so the UI can display them with appropriate styling
         dates_to_show = []
-        for date in future_dates:
-            # Show all dates with total_seats > 0 (regardless of availability)
+        for date in all_dates:
+            # Show all dates with total_seats > 0 (regardless of availability or past/future)
             if date.total_seats > 0:
                 dates_to_show.append(date)
-            if len(dates_to_show) >= 10:
+            if len(dates_to_show) >= 15:
                 break
         
         return TourDateSerializer(dates_to_show, many=True, context=self.context).data

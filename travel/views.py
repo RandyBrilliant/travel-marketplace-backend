@@ -633,13 +633,13 @@ class PublicTourPackageDetailView(APIView):
     
     permission_classes = [IsAuthenticatedOrReadOnly]
     
-    def get(self, request, pk):
-        """Get tour package detail by ID."""
+    def get(self, request, slug):
+        """Get tour package detail by slug."""
         from django.http import Http404
         import logging
         logger = logging.getLogger(__name__)
         
-        logger.debug(f"[Tour Detail] Getting tour {pk} for user {request.user} (authenticated={request.user.is_authenticated})")
+        logger.debug(f"[Tour Detail] Getting tour {slug} for user {request.user} (authenticated={request.user.is_authenticated})")
         
         try:
             tour = TourPackage.objects.filter(
@@ -658,7 +658,7 @@ class PublicTourPackageDetailView(APIView):
                         )
                     ).order_by("departure_date")
                 )
-            ).get(pk=pk)
+            ).get(slug=slug)
         except TourPackage.DoesNotExist:
             raise Http404("Paket tur tidak ditemukan")
         

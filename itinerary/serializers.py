@@ -11,6 +11,33 @@ from .models import (
 )
 
 
+class ItineraryTransactionPaymentUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for updating payment information on itinerary transactions."""
+    
+    class Meta:
+        model = ItineraryTransaction
+        fields = [
+            'payment_amount',
+            'payment_transfer_date',
+            'payment_proof_image',
+        ]
+    
+    def update(self, instance, validated_data):
+        """Update payment information and set payment status to PENDING."""
+        instance.payment_amount = validated_data.get('payment_amount', instance.payment_amount)
+        instance.payment_transfer_date = validated_data.get('payment_transfer_date', instance.payment_transfer_date)
+        
+        # Handle image upload
+        if 'payment_proof_image' in validated_data:
+            instance.payment_proof_image = validated_data['payment_proof_image']
+        
+        # Set payment status to PENDING when payment is uploaded
+        instance.payment_status = 'PENDING'
+        instance.save()
+        
+        return instance
+
+
 class ItineraryCardChecklistSerializer(serializers.ModelSerializer):
     """Serializer for card checklists."""
     
@@ -342,8 +369,10 @@ class ItineraryTransactionSerializer(serializers.ModelSerializer):
     
     customer_email = serializers.EmailField(source='customer.email', read_only=True)
     board_title = serializers.CharField(source='board.title', read_only=True)
+    board_slug = serializers.CharField(source='board.slug', read_only=True)
     supplier_name = serializers.CharField(source='board.supplier.company_name', read_only=True, allow_null=True)
     is_access_valid = serializers.SerializerMethodField()
+    payment_reviewed_by_email = serializers.EmailField(source='payment_reviewed_by.email', read_only=True, allow_null=True)
     
     class Meta:
         model = ItineraryTransaction
@@ -351,6 +380,7 @@ class ItineraryTransactionSerializer(serializers.ModelSerializer):
             'id',
             'board',
             'board_title',
+            'board_slug',
             'customer',
             'customer_email',
             'supplier_name',
@@ -365,10 +395,19 @@ class ItineraryTransactionSerializer(serializers.ModelSerializer):
             'external_reference',
             'notes',
             'is_access_valid',
+            # Payment fields
+            'payment_amount',
+            'payment_transfer_date',
+            'payment_proof_image',
+            'payment_status',
+            'payment_reviewed_by',
+            'payment_reviewed_by_email',
+            'payment_reviewed_at',
         ]
         read_only_fields = [
             'id',
             'board_title',
+            'board_slug',
             'customer_email',
             'supplier_name',
             'amount',
@@ -378,6 +417,9 @@ class ItineraryTransactionSerializer(serializers.ModelSerializer):
             'completed_at',
             'transaction_number',
             'is_access_valid',
+            'payment_reviewed_by',
+            'payment_reviewed_by_email',
+            'payment_reviewed_at',
         ]
     
     def get_is_access_valid(self, obj):
@@ -395,16 +437,45 @@ class ItineraryTransactionCreateSerializer(serializers.ModelSerializer):
             'board',
             'access_duration_days',
             'notes',
+            'created_at',
+            'transaction_number',
+            'status',
+            'amount',
         ]
-        read_only_fields = ['id']
+        read_only_fields = [
+            'id',
+            'created_at',
+            'transaction_number',
+            'status',
+            'amount',
+        ]
+
+
+class ItineraryTransactionPaymentUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for updating payment information on itinerary transactions."""
     
-    def validate_board(self, value):
-        """Validate that the board exists and is active."""
-        if not value.is_active:
-            raise serializers.ValidationError("Itinerary board tidak aktif.")
-        if not value.is_public:
-            raise serializers.ValidationError("Itinerary board tidak tersedia untuk publik.")
-        return value
+    class Meta:
+        model = ItineraryTransaction
+        fields = [
+            'payment_amount',
+            'payment_transfer_date',
+            'payment_proof_image',
+        ]
+    
+    def update(self, instance, validated_data):
+        """Update payment information and set payment status to PENDING."""
+        instance.payment_amount = validated_data.get('payment_amount', instance.payment_amount)
+        instance.payment_transfer_date = validated_data.get('payment_transfer_date', instance.payment_transfer_date)
+        
+        # Handle image upload
+        if 'payment_proof_image' in validated_data:
+            instance.payment_proof_image = validated_data['payment_proof_image']
+        
+        # Set payment status to PENDING when payment is uploaded
+        instance.payment_status = 'PENDING'
+        instance.save()
+        
+        return instance
 
 
 class ItineraryTransactionListSerializer(serializers.ModelSerializer):
@@ -431,6 +502,9 @@ class ItineraryTransactionListSerializer(serializers.ModelSerializer):
             'is_access_valid',
             'created_at',
             'amount',
+            # Payment fields
+            'payment_amount',
+            'payment_status',
         ]
         read_only_fields = [
             'id',
@@ -444,6 +518,8 @@ class ItineraryTransactionListSerializer(serializers.ModelSerializer):
             'activated_at',
             'expires_at',
             'amount',
+            'payment_amount',
+            'payment_status',
         ]
     
     def get_is_access_valid(self, obj):

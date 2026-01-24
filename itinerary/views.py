@@ -33,6 +33,7 @@ from .serializers import (
     ItineraryTransactionSerializer,
     ItineraryTransactionCreateSerializer,
     ItineraryTransactionListSerializer,
+    ItineraryTransactionPaymentUpdateSerializer,
 )
 from account.models import ResellerProfile, CustomerProfile
 
@@ -576,15 +577,15 @@ class ResellerItineraryBoardDetailView(APIView):
 class IsCustomer(permissions.BasePermission):
     """
     Permission check for customer role.
-    Checks if user has customer profile.
+    Allows both CUSTOMER and RESELLER roles to purchase itinerary access.
     """
     
     def has_permission(self, request, view):
-        return (
-            request.user
-            and request.user.is_authenticated
-            and request.user.is_customer
-        )
+        if not (request.user and request.user.is_authenticated):
+            return False
+        
+        # Allow both customers and resellers to purchase itinerary access
+        return request.user.is_customer or request.user.is_reseller
 
 
 class CustomerItineraryTransactionViewSet(viewsets.ModelViewSet):
@@ -602,21 +603,18 @@ class CustomerItineraryTransactionViewSet(viewsets.ModelViewSet):
     ordering = ["-created_at"]
     
     def get_queryset(self):
-        """Return only transactions belonging to the authenticated customer."""
+        """Return only transactions belonging to the authenticated user (customer or reseller)."""
         if not self.request.user.is_authenticated:
             return ItineraryTransaction.objects.none()
         
-        try:
-            customer_profile = CustomerProfile.objects.get(user=self.request.user)
-            queryset = ItineraryTransaction.objects.filter(
-                customer=self.request.user
-            ).select_related(
-                "board", "board__supplier", "board__supplier__user", "customer"
-            ).order_by("-created_at")
-            
-            return queryset
-        except CustomerProfile.DoesNotExist:
-            return ItineraryTransaction.objects.none()
+        # Return transactions for the current user (works for both customers and resellers)
+        queryset = ItineraryTransaction.objects.filter(
+            customer=self.request.user
+        ).select_related(
+            "board", "board__supplier", "board__supplier__user", "customer"
+        ).order_by("-created_at")
+        
+        return queryset
     
     def get_serializer_class(self):
         """Use different serializers for list vs detail/create."""
@@ -627,15 +625,10 @@ class CustomerItineraryTransactionViewSet(viewsets.ModelViewSet):
         return ItineraryTransactionSerializer
     
     def perform_create(self, serializer):
-        """Create transaction for current customer."""
-        try:
-            customer_profile = CustomerProfile.objects.get(user=self.request.user)
-            # Set the customer to the current user
-            serializer.save(customer=self.request.user)
-        except CustomerProfile.DoesNotExist:
-            raise ValidationError(
-                {"detail": "Customer profile not found. Please complete your profile first."}
-            )
+        """Create transaction for current customer or reseller."""
+        # No need to check for customer profile
+        # Both customers and resellers can purchase itinerary access
+        serializer.save(customer=self.request.user)
     
     @action(detail=True, methods=["patch"], url_path="activate")
     def activate_transaction(self, request, pk=None):
@@ -701,6 +694,99 @@ class CustomerItineraryTransactionViewSet(viewsets.ModelViewSet):
                 {"detail": f"Error extending access: {str(e)}"},
                 status=status.HTTP_400_BAD_REQUEST
             )
+    
+    @action(detail=True, methods=["patch"], url_path="payment")
+    def update_payment(self, request, pk=None):
+        """
+        Upload/update payment proof for an itinerary transaction.
+        
+        Request body (multipart/form-data):
+        {
+            "payment_amount": 100000,
+            "payment_transfer_date": "2026-01-24",
+            "payment_proof_image": <file>
+        }
+        """
+        transaction = self.get_object()
+        serializer = ItineraryTransactionPaymentUpdateSerializer(
+            transaction, data=request.data, partial=True
+        )
+        
+        if serializer.is_valid():
+            serializer.save()
+            # Return the full transaction data
+            full_serializer = ItineraryTransactionSerializer(transaction)
+            return Response(full_serializer.data)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ResellerItineraryTransactionViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for resellers to purchase and manage itinerary access.
+    Resellers can create transactions on behalf of their customers.
+    """
+    
+    permission_classes = [IsReseller]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ["status", "board"]
+    search_fields = ["board__title", "transaction_number"]
+    ordering_fields = ["created_at", "expires_at"]
+    ordering = ["-created_at"]
+    
+    def get_queryset(self):
+        """Return only transactions created by the authenticated reseller."""
+        if not self.request.user.is_authenticated:
+            return ItineraryTransaction.objects.none()
+        
+        try:
+            # Since resellers can create transactions, filter by customer being the reseller's user
+            queryset = ItineraryTransaction.objects.filter(
+                customer=self.request.user
+            ).select_related(
+                "board", "board__supplier", "board__supplier__user", "customer"
+            ).order_by("-created_at")
+            
+            return queryset
+        except Exception:
+            return ItineraryTransaction.objects.none()
+    
+    def get_serializer_class(self):
+        """Use different serializers for list vs detail/create."""
+        if self.action == "list":
+            return ItineraryTransactionListSerializer
+        if self.action == "create":
+            return ItineraryTransactionCreateSerializer
+        return ItineraryTransactionSerializer
+    
+    def perform_create(self, serializer):
+        """Create transaction for reseller's customer."""
+        serializer.save(customer=self.request.user)
+    
+    @action(detail=True, methods=["patch"], url_path="payment")
+    def update_payment(self, request, pk=None):
+        """
+        Upload/update payment proof for an itinerary transaction.
+        
+        Request body (multipart/form-data):
+        {
+            "payment_amount": 100000,
+            "payment_transfer_date": "2026-01-24",
+            "payment_proof_image": <file>
+        }
+        """
+        transaction = self.get_object()
+        serializer = ItineraryTransactionPaymentUpdateSerializer(
+            transaction, data=request.data, partial=True
+        )
+        
+        if serializer.is_valid():
+            serializer.save()
+            # Return the full transaction data
+            full_serializer = ItineraryTransactionSerializer(transaction)
+            return Response(full_serializer.data)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class SupplierItineraryTransactionViewSet(viewsets.ModelViewSet):
@@ -757,6 +843,76 @@ class SupplierItineraryTransactionViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response(
                 {"detail": f"Error activating transaction: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    
+    @action(detail=True, methods=["patch"], url_path="approve-payment")
+    def approve_payment(self, request, pk=None):
+        """
+        Approve the payment for an itinerary transaction.
+        Only suppliers can approve payments for their boards.
+        """
+        transaction = self.get_object()
+        
+        if not transaction.payment_status:
+            return Response(
+                {"detail": "Belum ada pembayaran yang diunggah untuk transaksi ini."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if transaction.payment_status == "APPROVED":
+            return Response(
+                {"detail": "Pembayaran sudah disetujui."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            from django.utils import timezone
+            transaction.payment_status = "APPROVED"
+            transaction.payment_reviewed_by = request.user
+            transaction.payment_reviewed_at = timezone.now()
+            transaction.save()
+            
+            serializer = self.get_serializer(transaction)
+            return Response(serializer.data)
+        except Exception as e:
+            return Response(
+                {"detail": f"Error approving payment: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    
+    @action(detail=True, methods=["patch"], url_path="reject-payment")
+    def reject_payment(self, request, pk=None):
+        """
+        Reject the payment for an itinerary transaction.
+        Only suppliers can reject payments for their boards.
+        """
+        transaction = self.get_object()
+        
+        if not transaction.payment_status:
+            return Response(
+                {"detail": "Belum ada pembayaran yang diunggah untuk transaksi ini."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if transaction.payment_status == "REJECTED":
+            return Response(
+                {"detail": "Pembayaran sudah ditolak."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            from django.utils import timezone
+            transaction.payment_status = "REJECTED"
+            transaction.payment_reviewed_by = request.user
+            transaction.payment_reviewed_at = timezone.now()
+            transaction.save()
+            
+            serializer = self.get_serializer(transaction)
+            return Response(serializer.data)
+        except Exception as e:
+            return Response(
+                {"detail": f"Error rejecting payment: {str(e)}"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 

@@ -188,7 +188,7 @@ api_v1_patterns = [
     path("suppliers/me/reports/commission-payout/", supplier_commission_report_view, name="supplier-commission-payout-report"),
     # Public tour endpoints
     path("tours/", PublicTourPackageListView.as_view(), name="public-tour-list"),
-    path("tours/<int:pk>/", PublicTourPackageDetailView.as_view(), name="public-tour-detail"),
+    path("tours/<str:slug>/", PublicTourPackageDetailView.as_view(), name="public-tour-detail"),
     # Itinerary endpoints
     path("itinerary/", include("itinerary.urls")),
 ]

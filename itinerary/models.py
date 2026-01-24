@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
+from django.utils import timezone
 from datetime import timedelta
 
 
@@ -415,6 +416,50 @@ class ItineraryTransaction(models.Model):
         help_text=_("Additional notes about this transaction."),
     )
 
+    # Payment fields (similar to Booking Payment model)
+    payment_amount = models.IntegerField(
+        validators=[MinValueValidator(0)],
+        null=True,
+        blank=True,
+        help_text=_("Payment amount uploaded by customer/reseller in IDR."),
+    )
+    payment_transfer_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text=_("Date when the transfer was made. Cannot be in the future."),
+    )
+    payment_proof_image = models.ImageField(
+        upload_to="itinerary_payments/proof/",
+        blank=True,
+        null=True,
+        help_text=_("Upload of the bank transfer slip or screenshot."),
+    )
+    payment_status = models.CharField(
+        max_length=20,
+        choices=[
+            ("PENDING", "Pending"),
+            ("APPROVED", "Approved"),
+            ("REJECTED", "Rejected"),
+        ],
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text=_("Status of the payment (null if no payment uploaded yet)."),
+    )
+    payment_reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="itinerary_payments_reviewed",
+        help_text=_("Admin who reviewed the payment."),
+    )
+    payment_reviewed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=_("When the payment was reviewed."),
+    )
+
     class Meta:
         verbose_name = "Itinerary Transaction"
         verbose_name_plural = "Itinerary Transactions"
@@ -427,6 +472,7 @@ class ItineraryTransaction(models.Model):
             models.Index(fields=["status", "expires_at"]),
             models.Index(fields=["status", "created_at"]),
             models.Index(fields=["created_at"]),
+            models.Index(fields=["payment_status"]),
         ]
 
     def __str__(self) -> str:
@@ -464,8 +510,16 @@ class ItineraryTransaction(models.Model):
         return f'IT-{current_year}-{next_number:06d}'
     
     def save(self, *args, **kwargs):
-        """Generate transaction_number, set amount from board, and set expires_at when status changes to ACTIVE."""
+        """Generate transaction_number, set amount from board, validate payment date, and set expires_at when status changes to ACTIVE."""
         from django.utils import timezone
+        
+        # Validate payment transfer date is not in the future
+        if self.payment_transfer_date:
+            today = timezone.now().date()
+            if self.payment_transfer_date > today:
+                raise ValidationError({
+                    'payment_transfer_date': 'Tanggal transfer tidak boleh di masa depan.'
+                })
         
         # Generate transaction number if not set
         if not self.transaction_number:
