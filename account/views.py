@@ -444,7 +444,7 @@ class AdminSupplierProfileViewSet(BaseAdminProfileViewSet):
 class AdminResellerProfileViewSet(BaseAdminProfileViewSet):
     """Admin-only CRUD (except delete) for managing all reseller profiles."""
 
-    queryset = ResellerProfile.objects.select_related("user", "sponsor", "group_root").order_by("-created_at")
+    queryset = ResellerProfile.objects.select_related("user").order_by("-created_at")
     serializer_class = AdminResellerProfileSerializer
     filterset_fields = ["user__is_active"]
     search_fields = [
@@ -454,6 +454,13 @@ class AdminResellerProfileViewSet(BaseAdminProfileViewSet):
         "bank_account_name",
         "bank_account_number",
     ]
+
+    def get_serializer_class(self):
+        """Use optimized list serializer for list action."""
+        if self.action == 'list':
+            from .serializers import AdminResellerProfileListSerializer
+            return AdminResellerProfileListSerializer
+        return super().get_serializer_class()
 
     def list(self, request, *args, **kwargs):
         """
@@ -674,6 +681,8 @@ class CurrentUserView(APIView):
             'has_supplier_profile': user.is_supplier,
             'has_reseller_profile': user.is_reseller,
             'roles_display': user.get_roles_display(),
+            # Commission calculation info for resellers
+            'has_sponsor': reseller_profile.sponsor is not None if reseller_profile else None,
         })
 
 

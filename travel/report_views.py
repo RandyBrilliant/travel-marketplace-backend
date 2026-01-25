@@ -405,6 +405,173 @@ def supplier_sales_report_view(request):
             status=http_status.HTTP_400_BAD_REQUEST
         )
 
+# ==================== ITINERARY TRANSACTION REPORTS ====================
+
+@api_view(['GET'])
+@permission_classes([IsStaff])
+def admin_itinerary_transaction_report(request):
+    """
+    Admin itinerary transaction report endpoint.
+    Returns comprehensive itinerary transaction statistics for the specified date range.
+    """
+    try:
+        from itinerary.models import ItineraryTransaction, ItineraryTransactionStatus
+        
+        start_date, end_date = parse_date_range(request)
+        
+        # Create datetime boundaries for filtering
+        start_datetime = timezone.make_aware(datetime.combine(start_date, datetime.min.time()))
+        end_datetime = timezone.make_aware(datetime.combine(end_date, datetime.max.time()))
+        
+        # Get all itinerary transactions in date range
+        transactions_queryset = ItineraryTransaction.objects.filter(
+            created_at__gte=start_datetime,
+            created_at__lte=end_datetime
+        ).select_related("board", "board__supplier", "customer")
+        
+        # Basic statistics
+        total_transactions = transactions_queryset.count()
+        pending_transactions = transactions_queryset.filter(status=ItineraryTransactionStatus.PENDING).count()
+        active_transactions = transactions_queryset.filter(status=ItineraryTransactionStatus.ACTIVE).count()
+        expired_transactions = transactions_queryset.filter(status=ItineraryTransactionStatus.EXPIRED).count()
+        
+        # Revenue calculation
+        total_revenue = transactions_queryset.filter(
+            status=ItineraryTransactionStatus.ACTIVE
+        ).aggregate(total=Sum('amount'))['total'] or 0
+        
+        # Payment statistics
+        transactions_with_payment = transactions_queryset.exclude(payment_status__isnull=True).count()
+        approved_payments = transactions_queryset.filter(payment_status="APPROVED").count()
+        pending_payments = transactions_queryset.filter(payment_status="PENDING").count()
+        rejected_payments = transactions_queryset.filter(payment_status="REJECTED").count()
+        
+        # Top performing boards
+        top_boards = transactions_queryset.values(
+            'board__title', 'board__supplier__company_name'
+        ).annotate(
+            transaction_count=Count('id'),
+            total_revenue=Sum('amount')
+        ).order_by('-transaction_count')[:10]
+        
+        return Response({
+            "period": {
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat()
+            },
+            "overview": {
+                "total_transactions": total_transactions,
+                "pending_transactions": pending_transactions,
+                "active_transactions": active_transactions,
+                "expired_transactions": expired_transactions,
+                "total_revenue": float(total_revenue)
+            },
+            "payments": {
+                "transactions_with_payment": transactions_with_payment,
+                "approved_payments": approved_payments,
+                "pending_payments": pending_payments,
+                "rejected_payments": rejected_payments
+            },
+            "top_boards": list(top_boards)
+        })
+        
+    except ValueError as e:
+        return Response(
+            {"error": str(e)},
+            status=http_status.HTTP_400_BAD_REQUEST
+        )
+    except Exception as e:
+        return Response(
+            {"error": str(e)},
+            status=http_status.HTTP_400_BAD_REQUEST
+        )
+
+
+@api_view(['GET'])
+@permission_classes([IsSupplier])
+def supplier_itinerary_transaction_report(request):
+    """
+    Supplier itinerary transaction report endpoint.
+    Returns itinerary transaction statistics for the supplier's boards in the specified date range.
+    """
+    try:
+        from itinerary.models import ItineraryTransaction, ItineraryTransactionStatus
+        
+        supplier_profile = SupplierProfile.objects.get(user=request.user)
+        start_date, end_date = parse_date_range(request)
+        
+        # Create datetime boundaries for filtering
+        start_datetime = timezone.make_aware(datetime.combine(start_date, datetime.min.time()))
+        end_datetime = timezone.make_aware(datetime.combine(end_date, datetime.max.time()))
+        
+        # Get itinerary transactions for supplier's boards in date range
+        transactions_queryset = ItineraryTransaction.objects.filter(
+            board__supplier=supplier_profile,
+            created_at__gte=start_datetime,
+            created_at__lte=end_datetime
+        ).select_related("board", "customer")
+        
+        # Basic statistics
+        total_transactions = transactions_queryset.count()
+        pending_transactions = transactions_queryset.filter(status=ItineraryTransactionStatus.PENDING).count()
+        active_transactions = transactions_queryset.filter(status=ItineraryTransactionStatus.ACTIVE).count()
+        expired_transactions = transactions_queryset.filter(status=ItineraryTransactionStatus.EXPIRED).count()
+        
+        # Revenue calculation
+        total_revenue = transactions_queryset.filter(
+            status=ItineraryTransactionStatus.ACTIVE
+        ).aggregate(total=Sum('amount'))['total'] or 0
+        
+        # Payment statistics
+        transactions_with_payment = transactions_queryset.exclude(payment_status__isnull=True).count()
+        approved_payments = transactions_queryset.filter(payment_status="APPROVED").count()
+        pending_payments = transactions_queryset.filter(payment_status="PENDING").count()
+        rejected_payments = transactions_queryset.filter(payment_status="REJECTED").count()
+        
+        # Board performance
+        board_performance = transactions_queryset.values(
+            'board__title', 'board__slug'
+        ).annotate(
+            transaction_count=Count('id'),
+            total_revenue=Sum('amount')
+        ).order_by('-transaction_count')
+        
+        return Response({
+            "period": {
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat()
+            },
+            "overview": {
+                "total_transactions": total_transactions,
+                "pending_transactions": pending_transactions,
+                "active_transactions": active_transactions,
+                "expired_transactions": expired_transactions,
+                "total_revenue": float(total_revenue)
+            },
+            "payments": {
+                "transactions_with_payment": transactions_with_payment,
+                "approved_payments": approved_payments,
+                "pending_payments": pending_payments,
+                "rejected_payments": rejected_payments
+            },
+            "top_boards": list(board_performance)
+        })
+        
+    except SupplierProfile.DoesNotExist:
+        return Response(
+            {"error": "Supplier profile not found"},
+            status=http_status.HTTP_404_NOT_FOUND
+        )
+    except ValueError as e:
+        return Response(
+            {"error": str(e)},
+            status=http_status.HTTP_400_BAD_REQUEST
+        )
+    except Exception as e:
+        return Response(
+            {"error": str(e)},
+            status=http_status.HTTP_400_BAD_REQUEST
+        )
 
 @api_view(['GET'])
 @permission_classes([IsSupplier])

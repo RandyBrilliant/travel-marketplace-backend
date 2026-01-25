@@ -32,8 +32,7 @@ router.register(r'admin/cards', AdminItineraryCardViewSet, basename='admin-itine
 router.register(r'admin/attachments', AdminItineraryCardAttachmentViewSet, basename='admin-itinerary-attachment')
 router.register(r'admin/checklists', AdminItineraryCardChecklistViewSet, basename='admin-itinerary-checklist')
 router.register(r'admin/transactions', AdminItineraryTransactionViewSet, basename='admin-itinerary-transaction')
-router.register(r'customers/me/transactions', CustomerItineraryTransactionViewSet, basename='customer-itinerary-transaction')
-router.register(r'resellers/me/itinerary-transactions', ResellerItineraryTransactionViewSet, basename='reseller-itinerary-transaction')
+# Note: Customer and Reseller transaction endpoints are registered in main backend/urls.py
 
 urlpatterns = [
     # Router endpoints

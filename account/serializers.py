@@ -228,6 +228,16 @@ class ResellerProfileSerializer(serializers.ModelSerializer):
         sponsor_referral_code = validated_data.pop("sponsor_referral_code", None)
         sponsor = validated_data.get("sponsor")
         
+        # Sponsor referral code is required for all new resellers
+        # Exception: Allow admins to create resellers without sponsors (for root resellers)
+        request = self.context.get('request')
+        is_admin = request and request.user and request.user.is_staff
+        
+        if not sponsor_referral_code and not sponsor and not is_admin:
+            raise serializers.ValidationError(
+                {"sponsor_referral_code": "Kode referral sponsor wajib diisi untuk mendaftar sebagai reseller."}
+            )
+        
         if sponsor_referral_code:
             # Normalize referral code for lookup (uppercase and strip whitespace)
             normalized_code = sponsor_referral_code.upper().strip()
@@ -396,6 +406,29 @@ class AdminResellerProfileSerializer(BaseAdminProfileSerializer, ResellerProfile
             "created_at",
             "updated_at",
         ]
+
+
+class AdminResellerProfileListSerializer(serializers.ModelSerializer):
+    """Optimized list serializer for admin reseller list - excludes heavy fields."""
+    
+    user_data = UserSerializer(source="user", read_only=True)
+    email = serializers.EmailField(source="user.email", read_only=True)
+    
+    class Meta:
+        model = ResellerProfile
+        fields = [
+            "id",
+            "user",
+            "email",
+            "user_data",
+            "full_name",
+            "contact_phone",
+            "referral_code",
+            "photo",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "user", "email", "referral_code", "created_at", "updated_at"]
 
 
 class AdminStaffProfileSerializer(BaseAdminProfileSerializer, StaffProfileSerializer):

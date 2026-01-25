@@ -885,17 +885,8 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
 
 
 class AdminTourPackageSerializer(serializers.ModelSerializer):
-    """Serializer for admin to create/update tour packages with commission fields."""
+    """Serializer for admin to view tour packages with all details."""
     
-    supplier = serializers.PrimaryKeyRelatedField(
-        queryset=SupplierProfile.objects.all(),
-        required=True
-    )
-    reseller_groups = ResellerGroupListField(
-        many=True,
-        queryset=ResellerGroup.objects.filter(is_active=True),
-        required=False,
-    )
     reseller_groups_detail = serializers.SerializerMethodField()
     supplier_name = serializers.CharField(source="supplier.company_name", read_only=True)
     images = TourImageSerializer(many=True, read_only=True)
@@ -947,66 +938,51 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
             "reseller_groups_detail",
             "images",
             "dates",
-            # Commission fields (editable for admin)
             "commission",
-            # Timestamps
             "created_at",
             "updated_at",
         ]
         read_only_fields = [
             "id",
-            "slug",
+            "supplier",
             "supplier_name",
+            "name",
+            "slug",
+            "itinerary",
+            "country",
+            "days",
+            "nights",
             "duration_display",
+            "max_group_size",
             "group_size_display",
+            "tour_type",
+            "highlights",
+            "inclusions",
+            "exclusions",
+            "cancellation_policy",
+            "important_notes",
+            "base_price",
+            "visa_price",
+            "tipping_price",
+            "itinerary_pdf",
+            "is_flexible",
+            "reseller_groups",
             "reseller_groups_detail",
             "images",
             "dates",
+            "commission",
             "created_at",
             "updated_at",
         ]
+
+
+class AdminTourPackageToggleSerializer(serializers.ModelSerializer):
+    """Serializer for admin to toggle tour package is_active status only."""
     
-    def validate(self, attrs):
-        """Validate that nights is not greater than days."""
-        days = attrs.get('days')
-        nights = attrs.get('nights')
-        
-        # If updating, get existing values if not provided
-        if self.instance:
-            days = days if days is not None else self.instance.days
-            nights = nights if nights is not None else self.instance.nights
-        
-        if days is not None and nights is not None:
-            if nights > days:
-                raise serializers.ValidationError({
-                    'nights': f'Jumlah malam ({nights}) tidak boleh lebih besar dari jumlah hari ({days}).'
-                })
-        
-        return attrs
-    
-    def validate_slug(self, value):
-        """Auto-generate slug from name if not provided."""
-        if not value and self.initial_data.get("name"):
-            value = TourPackageSerializer._generate_unique_slug(self.initial_data["name"], self.instance)
-        return value
-    
-    def update(self, instance, validated_data):
-        """Update tour package, handling reseller_groups for partial updates."""
-        # For ManyToMany fields, only update if explicitly provided in the request
-        reseller_groups = validated_data.pop("reseller_groups", None)
-        
-        # Update other fields
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-        instance.save()
-        
-        # Only update reseller_groups if it was provided in the request
-        if reseller_groups is not None:
-            instance.reseller_groups.set(reseller_groups)
-        # If reseller_groups is not in validated_data, it means it wasn't in the request
-        # so we leave it unchanged (don't call .set())
-        
-        return instance
+    class Meta:
+        model = TourPackage
+        fields = ["id", "slug", "is_active"]
+        read_only_fields = ["id", "slug"]
 
 
 class ResellerTourCommissionSerializer(serializers.ModelSerializer):

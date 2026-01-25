@@ -17,6 +17,7 @@ from .serializers import (
     TourPackageListSerializer,
     TourPackageCreateUpdateSerializer,
     AdminTourPackageSerializer,
+    AdminTourPackageToggleSerializer,
     TourDateSerializer,
     TourImageSerializer,
     TourImageCreateUpdateSerializer,
@@ -744,14 +745,16 @@ class AdminResellerGroupViewSet(viewsets.ModelViewSet):
         serializer.save(created_by=self.request.user)
 
 
-class AdminTourPackageViewSet(viewsets.ModelViewSet):
+class AdminTourPackageViewSet(viewsets.ReadOnlyModelViewSet):
     """
-    ViewSet for admin to view and manage all tour packages.
-    Admin can view, edit, and manage commission settings for all tours.
+    ViewSet for admin to view all tour packages and toggle is_active status.
+    Admin can only view tours and activate/deactivate them.
     """
     
     permission_classes = [IsAdminUser]
     queryset = TourPackage.objects.all()
+    lookup_field = 'slug'
+    http_method_names = ['get', 'patch', 'head', 'options']  # Only allow GET and PATCH
     
     def get_queryset(self):
         """
@@ -813,26 +816,31 @@ class AdminTourPackageViewSet(viewsets.ModelViewSet):
         """Use different serializers for list vs detail."""
         if self.action == "list":
             return TourPackageListSerializer
-        elif self.action in ["create", "update", "partial_update"]:
-            # For admin, use AdminTourPackageSerializer to allow editing commission fields
-            return AdminTourPackageSerializer
+        elif self.action == "partial_update":
+            return AdminTourPackageToggleSerializer
         return AdminTourPackageSerializer
     
-    def perform_create(self, serializer):
-        """Admin can create tours and assign to any supplier."""
-        # Supplier must be provided in the request data
-        supplier_id = self.request.data.get("supplier")
-        if not supplier_id:
-            raise ValidationError({"supplier": ["Field ini wajib diisi."]})
+    def partial_update(self, request, *args, **kwargs):
+        """Only allow updating is_active field."""
+        # Get the instance
+        instance = self.get_object()
         
-        try:
-            supplier = SupplierProfile.objects.get(pk=supplier_id)
-            serializer.save(supplier=supplier)
-        except SupplierProfile.DoesNotExist:
-            raise ValidationError({"supplier": ["Profil supplier tidak ditemukan."]})
+        # Filter request data to only allow is_active
+        allowed_fields = {'is_active'}
+        filtered_data = {k: v for k, v in request.data.items() if k in allowed_fields}
+        
+        if not filtered_data:
+            raise ValidationError({"detail": "Only 'is_active' field can be updated."})
+        
+        # Use the toggle serializer
+        serializer = self.get_serializer(instance, data=filtered_data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        
+        return Response(serializer.data)
     
     @action(detail=True, methods=["get", "post"], url_path="dates")
-    def manage_dates(self, request, pk=None):
+    def manage_dates(self, request, slug=None):
         """
         Manage tour dates for a package (Admin view).
         
@@ -848,7 +856,7 @@ class AdminTourPackageViewSet(viewsets.ModelViewSet):
         # Get tour package directly to avoid queryset ordering conflicts
         # The ordering parameter is for TourDate, not TourPackage
         try:
-            tour_package = TourPackage.objects.select_related("supplier", "supplier__user").get(pk=pk)
+            tour_package = TourPackage.objects.select_related("supplier", "supplier__user").get(slug=slug)
         except TourPackage.DoesNotExist:
             from rest_framework.exceptions import NotFound
             raise NotFound("Tour package not found.")
@@ -1090,8 +1098,8 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"], url_path="revenue-chart")
     def revenue_chart(self, request):
         """
-        Get revenue chart data grouped by date for supplier's bookings.
-        Returns daily revenue for the specified period.
+        Get revenue chart data grouped by date for supplier's bookings and itinerary transactions.
+        Returns daily combined revenue for the specified period.
         """
         from django.db.models.functions import TruncDate
         from django.db.models import Q
@@ -1099,6 +1107,7 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
         from django.utils import timezone
         from datetime import timedelta
         from collections import defaultdict
+        from itinerary.models import ItineraryTransaction, ItineraryTransactionStatus
         
         if not request.user.is_authenticated:
             return Response(
@@ -1149,11 +1158,26 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
             booking_total=F('tour_date__price') * F('seat_count') + F('platform_fee')
         )
         
-        # Group revenue by date
+        # Get active itinerary transactions in the date range for this supplier
+        itinerary_transactions = ItineraryTransaction.objects.filter(
+            board__supplier=supplier_profile,
+            created_at__gte=start_bound,
+            created_at__lte=end_bound,
+            status=ItineraryTransactionStatus.ACTIVE
+        ).select_related("board")
+        
+        # Group revenue by date (combining bookings and itinerary transactions)
         revenue_by_date = defaultdict(int)
+        
+        # Add booking revenue
         for booking in bookings:
             date_str = booking.created_at.date().isoformat()
             revenue_by_date[date_str] += booking.booking_total
+        
+        # Add itinerary transaction revenue
+        for transaction in itinerary_transactions:
+            date_str = transaction.created_at.date().isoformat()
+            revenue_by_date[date_str] += transaction.amount
         
         # Create list of all dates in range and fill with revenue data
         chart_data = []
@@ -1858,8 +1882,8 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"], url_path="revenue-chart")
     def revenue_chart(self, request):
         """
-        Get revenue chart data grouped by date.
-        Returns daily revenue for the specified period.
+        Get revenue chart data grouped by date for all bookings and itinerary transactions.
+        Returns daily combined revenue for the specified period.
         """
         from django.db.models.functions import TruncDate
         from django.db.models import Q
@@ -1867,6 +1891,7 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
         from django.utils import timezone
         from datetime import timedelta
         from collections import defaultdict
+        from itinerary.models import ItineraryTransaction, ItineraryTransactionStatus
         
         # Get time range parameter (default 90 days)
         time_range = request.query_params.get("range", "90d")
@@ -1902,11 +1927,25 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
             booking_total=F('tour_date__price') * F('seat_count') + F('platform_fee')
         )
         
-        # Group revenue by date
+        # Get active itinerary transactions in the date range
+        itinerary_transactions = ItineraryTransaction.objects.filter(
+            created_at__gte=start_bound,
+            created_at__lte=end_bound,
+            status=ItineraryTransactionStatus.ACTIVE
+        ).select_related("board")
+        
+        # Group revenue by date (combining bookings and itinerary transactions)
         revenue_by_date = defaultdict(int)
+        
+        # Add booking revenue
         for booking in bookings:
             date_str = booking.created_at.date().isoformat()
             revenue_by_date[date_str] += booking.booking_total
+        
+        # Add itinerary transaction revenue
+        for transaction in itinerary_transactions:
+            date_str = transaction.created_at.date().isoformat()
+            revenue_by_date[date_str] += transaction.amount
         
         # Create list of all dates in range and fill with revenue data
         chart_data = []

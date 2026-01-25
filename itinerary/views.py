@@ -282,6 +282,7 @@ class AdminItineraryBoardViewSet(viewsets.ModelViewSet):
     search_fields = ["title", "description", "slug", "supplier__company_name"]
     ordering_fields = ["created_at", "updated_at", "title", "price"]
     ordering = ["-created_at"]
+    lookup_field = 'slug'
     
     def get_queryset(self):
         """Return all boards with optimized queries."""
@@ -916,6 +917,66 @@ class SupplierItineraryTransactionViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+    @action(detail=False, methods=["get"], url_path="dashboard-stats")
+    def dashboard_stats(self, request):
+        """
+        Get dashboard statistics for supplier's itinerary transactions.
+        Returns aggregated statistics for the supplier's itinerary transactions.
+        """
+        from django.db.models import Count, Q, Sum
+        from django.utils import timezone
+        from datetime import timedelta
+        from account.models import SupplierProfile
+        
+        if not request.user.is_authenticated:
+            return Response(
+                {"detail": "Autentikasi diperlukan."},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        try:
+            supplier_profile = SupplierProfile.objects.get(user=request.user)
+        except SupplierProfile.DoesNotExist:
+            return Response(
+                {"detail": "Profil supplier tidak ditemukan."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Get transactions for itinerary boards owned by this supplier
+        transactions_queryset = ItineraryTransaction.objects.filter(
+            board__supplier=supplier_profile
+        ).select_related("board", "customer")
+        
+        # Total Transactions
+        total_transactions = transactions_queryset.count()
+        
+        # Transactions by Status
+        pending_transactions = transactions_queryset.filter(status=ItineraryTransactionStatus.PENDING).count()
+        active_transactions = transactions_queryset.filter(status=ItineraryTransactionStatus.ACTIVE).count()
+        expired_transactions = transactions_queryset.filter(status=ItineraryTransactionStatus.EXPIRED).count()
+        
+        # Total Revenue (sum of amounts from active transactions)
+        # Include all active transactions since payment approval happens after activation
+        revenue_result = transactions_queryset.filter(
+            status=ItineraryTransactionStatus.ACTIVE
+        ).aggregate(
+            total=Sum('amount')
+        )
+        total_revenue = revenue_result['total'] or 0
+        
+        # Recent transactions count (last 30 days) for trend calculation
+        thirty_days_ago = timezone.now() - timedelta(days=30)
+        recent_transactions = transactions_queryset.filter(created_at__gte=thirty_days_ago).count()
+        
+        return Response({
+            "total_transactions": total_transactions,
+            "pending_transactions": pending_transactions,
+            "active_transactions": active_transactions,
+            "expired_transactions": expired_transactions,
+            "total_revenue": total_revenue,
+            "recent_transactions": recent_transactions,
+        })
+
 
 class AdminItineraryTransactionViewSet(viewsets.ModelViewSet):
     """
@@ -963,3 +1024,124 @@ class AdminItineraryTransactionViewSet(viewsets.ModelViewSet):
                 {"detail": f"Error activating transaction: {str(e)}"},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+    @action(detail=True, methods=["patch"], url_path="approve-payment")
+    def approve_payment(self, request, pk=None):
+        """
+        Approve the payment for an itinerary transaction.
+        Admin can approve payments for any transaction.
+        """
+        transaction = self.get_object()
+        
+        if not transaction.payment_status:
+            return Response(
+                {"detail": "Belum ada pembayaran yang diunggah untuk transaksi ini."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if transaction.payment_status == "APPROVED":
+            return Response(
+                {"detail": "Pembayaran sudah disetujui."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            from django.utils import timezone
+            transaction.payment_status = "APPROVED"
+            transaction.payment_reviewed_by = request.user
+            transaction.payment_reviewed_at = timezone.now()
+            transaction.save()
+            
+            serializer = self.get_serializer(transaction)
+            return Response(serializer.data)
+        except Exception as e:
+            return Response(
+                {"detail": f"Error approving payment: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    
+    @action(detail=True, methods=["patch"], url_path="reject-payment")
+    def reject_payment(self, request, pk=None):
+        """
+        Reject the payment for an itinerary transaction.
+        Admin can reject payments for any transaction.
+        """
+        transaction = self.get_object()
+        
+        if not transaction.payment_status:
+            return Response(
+                {"detail": "Belum ada pembayaran yang diunggah untuk transaksi ini."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if transaction.payment_status == "REJECTED":
+            return Response(
+                {"detail": "Pembayaran sudah ditolak."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            from django.utils import timezone
+            transaction.payment_status = "REJECTED"
+            transaction.payment_reviewed_by = request.user
+            transaction.payment_reviewed_at = timezone.now()
+            transaction.save()
+            
+            serializer = self.get_serializer(transaction)
+            return Response(serializer.data)
+        except Exception as e:
+            return Response(
+                {"detail": f"Error rejecting payment: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    @action(detail=False, methods=["get"], url_path="dashboard-stats")
+    def dashboard_stats(self, request):
+        """
+        Get dashboard statistics for all itinerary transactions (admin view).
+        Returns aggregated statistics for all itinerary transactions in the system.
+        """
+        from django.db.models import Count, Q, Sum
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        # Get all itinerary transactions
+        transactions_queryset = ItineraryTransaction.objects.all().select_related(
+            "board", "board__supplier", "customer"
+        )
+        
+        # Total Transactions
+        total_transactions = transactions_queryset.count()
+        
+        # Transactions by Status
+        pending_transactions = transactions_queryset.filter(status=ItineraryTransactionStatus.PENDING).count()
+        active_transactions = transactions_queryset.filter(status=ItineraryTransactionStatus.ACTIVE).count()
+        expired_transactions = transactions_queryset.filter(status=ItineraryTransactionStatus.EXPIRED).count()
+        
+        # Total Revenue (sum of amounts from active transactions)
+        # Include all active transactions since payment approval happens after activation
+        revenue_result = transactions_queryset.filter(
+            status=ItineraryTransactionStatus.ACTIVE
+        ).aggregate(
+            total=Sum('amount')
+        )
+        total_revenue = revenue_result['total'] or 0
+        
+        # Recent transactions count (last 30 days) for trend calculation
+        thirty_days_ago = timezone.now() - timedelta(days=30)
+        recent_transactions = transactions_queryset.filter(created_at__gte=thirty_days_ago).count()
+        
+        # Additional admin-specific stats
+        total_boards = transactions_queryset.values('board').distinct().count()
+        total_suppliers = transactions_queryset.values('board__supplier').distinct().count()
+        
+        return Response({
+            "total_transactions": total_transactions,
+            "pending_transactions": pending_transactions,
+            "active_transactions": active_transactions,
+            "expired_transactions": expired_transactions,
+            "total_revenue": total_revenue,
+            "recent_transactions": recent_transactions,
+            "total_boards": total_boards,
+            "total_suppliers": total_suppliers,
+        })

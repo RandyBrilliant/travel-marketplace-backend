@@ -312,6 +312,16 @@ CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 # This will be required in Celery 6.0+
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 
+# Celery Beat Schedule for periodic tasks
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    'expire-old-itinerary-transactions': {
+        'task': 'itinerary.tasks.expire_old_itinerary_transactions',
+        'schedule': crontab(hour=0, minute=0),  # Run daily at midnight
+    },
+}
+
 # API Documentation (drf-spectacular)
 SPECTACULAR_SETTINGS = {
     'TITLE': 'DCNetwork API',

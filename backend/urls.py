@@ -55,7 +55,7 @@ from travel.views import (
     CurrencyViewSet,
     AdminCurrencyViewSet,
 )
-from itinerary.views import CustomerItineraryTransactionViewSet
+from itinerary.views import CustomerItineraryTransactionViewSet, ResellerItineraryTransactionViewSet
 from travel.report_views import (
     sales_report_view,
     pax_report_view,
@@ -65,6 +65,8 @@ from travel.report_views import (
     supplier_pax_report_view,
     supplier_total_amount_report_view,
     supplier_commission_report_view,
+    admin_itinerary_transaction_report,
+    supplier_itinerary_transaction_report,
 )
 
 router = DefaultRouter()
@@ -84,6 +86,8 @@ router.register(r"suppliers/me/reseller-groups", SupplierResellerGroupViewSet, b
 router.register(r"resellers/me/bookings", ResellerBookingViewSet, basename="reseller-booking")
 # Reseller withdrawal endpoints
 router.register(r"resellers/me/withdrawals", ResellerWithdrawalViewSet, basename="reseller-withdrawal")
+# Reseller itinerary transaction endpoints
+router.register(r"resellers/me/itinerary-transactions", ResellerItineraryTransactionViewSet, basename="reseller-itinerary-transaction")
 
 # Customer booking endpoints
 router.register(r"customers/me/bookings", CustomerBookingViewSet, basename="customer-booking")
@@ -181,11 +185,13 @@ api_v1_patterns = [
     path("admin/reports/pax/", pax_report_view, name="admin-pax-report"),
     path("admin/reports/total-amount/", total_amount_report_view, name="admin-total-amount-report"),
     path("admin/reports/commission-payout/", commission_payout_report_view, name="admin-commission-payout-report"),
+    path("admin/reports/itinerary-transactions/", admin_itinerary_transaction_report, name="admin-itinerary-transaction-report"),
     # Supplier report endpoints
     path("suppliers/me/reports/sales/", supplier_sales_report_view, name="supplier-sales-report"),
     path("suppliers/me/reports/pax/", supplier_pax_report_view, name="supplier-pax-report"),
     path("suppliers/me/reports/total-amount/", supplier_total_amount_report_view, name="supplier-total-amount-report"),
     path("suppliers/me/reports/commission-payout/", supplier_commission_report_view, name="supplier-commission-payout-report"),
+    path("suppliers/me/reports/itinerary-transactions/", supplier_itinerary_transaction_report, name="supplier-itinerary-transaction-report"),
     # Public tour endpoints
     path("tours/", PublicTourPackageListView.as_view(), name="public-tour-list"),
     path("tours/<str:slug>/", PublicTourPackageDetailView.as_view(), name="public-tour-detail"),

@@ -483,6 +483,7 @@ class ItineraryTransactionListSerializer(serializers.ModelSerializer):
     
     customer_email = serializers.EmailField(source='customer.email', read_only=True)
     board_title = serializers.CharField(source='board.title', read_only=True)
+    board_slug = serializers.CharField(source='board.slug', read_only=True)
     supplier_name = serializers.CharField(source='board.supplier.company_name', read_only=True, allow_null=True)
     is_access_valid = serializers.SerializerMethodField()
     
@@ -492,6 +493,7 @@ class ItineraryTransactionListSerializer(serializers.ModelSerializer):
             'id',
             'board',
             'board_title',
+            'board_slug',
             'customer_email',
             'supplier_name',
             'status',
@@ -510,6 +512,7 @@ class ItineraryTransactionListSerializer(serializers.ModelSerializer):
             'id',
             'board',
             'board_title',
+            'board_slug',
             'customer_email',
             'supplier_name',
             'transaction_number',
