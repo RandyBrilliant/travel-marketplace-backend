@@ -382,12 +382,17 @@ class ResellerProfile(models.Model):
         """
         Returns all downline members under this reseller (including all nested levels).
         This recursively traverses the tree by following the sponsor relationship.
+        Includes circular reference detection and depth limit for safety.
         """
         # Get all reseller IDs in the downline tree
         downline_ids = set()
         to_process = [self.pk]
+        visited = {self.pk}  # Track visited nodes to prevent circular references
+        max_depth = 100  # Safety limit to prevent infinite loops
+        iterations = 0
         
-        while to_process:
+        while to_process and iterations < max_depth:
+            iterations += 1
             # Get direct downlines of current batch
             current_id = to_process.pop(0)
             direct_downlines = type(self).objects.filter(
@@ -395,9 +400,18 @@ class ResellerProfile(models.Model):
             ).values_list('id', flat=True)
             
             for downline_id in direct_downlines:
-                if downline_id not in downline_ids:
+                if downline_id not in visited:
+                    visited.add(downline_id)
                     downline_ids.add(downline_id)
                     to_process.append(downline_id)
+        
+        if iterations >= max_depth:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"Maximum depth reached in all_downlines for reseller {self.pk}. "
+                "Possible circular reference or extremely deep hierarchy."
+            )
         
         # Return queryset of all downlines
         if downline_ids:

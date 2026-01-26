@@ -1151,23 +1151,34 @@ class ResellerCommission(models.Model):
     IMPORTANT: 
     - Level 0 (booking reseller): Commission is calculated as:
       1. Base commission = commission_per_seat × number_of_seats_in_booking
-      2. Upline deduction = 100,000 IDR (distributed to uplines)
-      3. Reseller keeps = base_commission - 100,000 IDR
-      Example: If base is 150,000 IDR, reseller keeps 50,000 IDR
+      2. Upline deduction PER SEAT:
+         * If commission_per_seat >= 100k: deduct 100k per seat
+         * If commission_per_seat < 100k: deduct 50% per seat
+      3. Total deduction = deduction_per_seat × number_of_passengers
+      4. Reseller keeps = base_commission - total_deduction
+      Example: 3 passengers at 150k/seat → base 450k, deduct 300k (100k×3), keeps 150k
       
-    - Level 1-3 (upline commissions): Fixed amounts deducted from booking reseller:
-      - Level 1: 50,000 IDR (50% of 100,000 deduction)
-      - Level 2: 25,000 IDR (25% of 100,000 deduction)
-      - Level 3: 25,000 IDR (25% of 100,000 deduction)
+    - Level 1-3 (upline commissions): Distributed from total deduction:
+      - Level 1: 50% of total deduction
+      - Level 2: 25% of total deduction
+      - Level 3: 25% of total deduction
     - Level 4 and above: No commission (0 IDR)
 
-    Example when A makes a booking earning 150,000 IDR base commission:
+    Example 1 (1 passenger, 150k/seat):
     - A (Level 0): Gets 50,000 IDR (150,000 - 100,000 deduction)
-    - B (Level 1): Gets 50,000 IDR (A's sponsor) - from deduction
-    - C (Level 2): Gets 25,000 IDR (B's sponsor) - from deduction
-    - D (Level 3): Gets 25,000 IDR (C's sponsor) - from deduction
-    - E (Level 4): Gets nothing (D's sponsor)
-    Total distributed: 50k + 50k + 25k + 25k = 150,000 IDR (matches base)
+    - B (Level 1): Gets 50,000 IDR (50% of 100k)
+    - C (Level 2): Gets 25,000 IDR (25% of 100k)
+    - D (Level 3): Gets 25,000 IDR (25% of 100k)
+    - E (Level 4): Gets nothing
+    Total: 150,000 IDR
+    
+    Example 2 (3 passengers, 150k/seat):
+    - A (Level 0): Gets 150,000 IDR (450,000 - 300,000 deduction)
+    - B (Level 1): Gets 150,000 IDR (50% of 300k)
+    - C (Level 2): Gets 75,000 IDR (25% of 300k)
+    - D (Level 3): Gets 75,000 IDR (25% of 300k)
+    - E (Level 4): Gets nothing
+    Total: 450,000 IDR
     """
 
     booking = models.ForeignKey(
@@ -1188,8 +1199,8 @@ class ResellerCommission(models.Model):
         validators=[MinValueValidator(1)],
         help_text=_(
             "Total commission amount in IDR. "
-            "For Level 0: (commission_per_seat × number_of_seats) - 100,000 IDR upline deduction. "
-            "For Levels 1-3: fixed amount from deduction (Level 1: 50k, Level 2-3: 25k). "
+            "For Level 0: (commission_per_seat × seats) - (deduction_per_seat × seats). "
+            "For Levels 1-3: percentage of total deduction (Level 1: 50%, Level 2-3: 25%). "
             "Must be at least 1 IDR."
         )
     )
