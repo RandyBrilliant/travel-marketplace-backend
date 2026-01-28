@@ -18,6 +18,9 @@ class ItineraryBoardAdmin(admin.ModelAdmin):
         ('Supplier & Board Information', {
             'fields': ('supplier', 'title', 'description', 'slug')
         }),
+        ('Media', {
+            'fields': ('package_image', 'video_link')
+        }),
         ('Pricing', {
             'fields': ('price', 'currency')
         }),

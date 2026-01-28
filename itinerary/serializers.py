@@ -168,6 +168,7 @@ class ItineraryBoardListSerializer(serializers.ModelSerializer):
     
     supplier_name = serializers.CharField(source='supplier.company_name', read_only=True)
     columns_count = serializers.IntegerField(source='columns.count', read_only=True)
+    package_image_url = serializers.SerializerMethodField()
     
     class Meta:
         model = ItineraryBoard
@@ -182,12 +183,23 @@ class ItineraryBoardListSerializer(serializers.ModelSerializer):
             'supplier_name',
             'price',
             'currency',
+            'package_image_url',
+            'video_link',
             'is_active',
             'created_at',
             'updated_at',
             'columns_count',
         ]
         read_only_fields = ['id', 'slug', 'share_token', 'created_at', 'updated_at']
+    
+    def get_package_image_url(self, obj):
+        """Get the full URL for the package image."""
+        if obj.package_image:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.package_image.url)
+            return obj.package_image.url
+        return None
 
 
 class ItineraryBoardDetailSerializer(serializers.ModelSerializer):
@@ -196,6 +208,7 @@ class ItineraryBoardDetailSerializer(serializers.ModelSerializer):
     columns = ItineraryColumnSerializer(many=True, read_only=True)
     columns_count = serializers.IntegerField(source='columns.count', read_only=True)
     supplier_name = serializers.CharField(source='supplier.company_name', read_only=True)
+    package_image_url = serializers.SerializerMethodField()
     
     class Meta:
         model = ItineraryBoard
@@ -210,6 +223,8 @@ class ItineraryBoardDetailSerializer(serializers.ModelSerializer):
             'supplier_name',
             'price',
             'currency',
+            'package_image_url',
+            'video_link',
             'is_active',
             'created_at',
             'updated_at',
@@ -217,6 +232,15 @@ class ItineraryBoardDetailSerializer(serializers.ModelSerializer):
             'columns_count',
         ]
         read_only_fields = ['id', 'slug', 'share_token', 'created_at', 'updated_at']
+    
+    def get_package_image_url(self, obj):
+        """Get the full URL for the package image."""
+        if obj.package_image:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.package_image.url)
+            return obj.package_image.url
+        return None
 
 
 class ItineraryBoardCreateUpdateSerializer(serializers.ModelSerializer):
@@ -231,6 +255,8 @@ class ItineraryBoardCreateUpdateSerializer(serializers.ModelSerializer):
             'is_public',
             'price',
             'currency',
+            'package_image',
+            'video_link',
             'is_active',
             'slug',
             'share_token',

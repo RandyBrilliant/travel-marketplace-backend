@@ -60,6 +60,20 @@ class ItineraryBoard(models.Model):
         help_text=_("Currency used for pricing. If null, IDR is assumed."),
     )
     
+    # Media
+    package_image = models.ImageField(
+        upload_to="itinerary_boards/packages/",
+        null=True,
+        blank=True,
+        help_text=_("Package image to be displayed on itinerary detail page."),
+    )
+    
+    video_link = models.URLField(
+        max_length=500,
+        blank=True,
+        help_text=_("Link to YouTube or Instagram video/short to be shown on frontend."),
+    )
+    
     # Status
     is_active = models.BooleanField(
         default=True,

@@ -3,7 +3,7 @@ Django signals for automatically optimizing profile photos to WebP format.
 """
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-from .models import SupplierProfile, ResellerProfile, StaffProfile
+from .models import SupplierProfile, ResellerProfile, StaffProfile, CustomerProfile
 from travel.utils import optimize_image_to_webp
 
 
@@ -54,4 +54,11 @@ def optimize_reseller_photo(sender, instance, created, **kwargs):
 def optimize_staff_photo(sender, instance, created, **kwargs):
     """Optimize photo when StaffProfile is saved."""
     _optimize_image_field(instance, 'photo')
+
+
+@receiver(post_save, sender=CustomerProfile)
+def optimize_customer_photo(sender, instance, created, **kwargs):
+    """Optimize photo when CustomerProfile is saved."""
+    _optimize_image_field(instance, 'photo')
+
 

@@ -3,7 +3,7 @@ Django signals for automatically optimizing itinerary card cover images to WebP 
 """
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-from .models import ItineraryCard
+from .models import ItineraryCard, ItineraryBoard
 from travel.utils import optimize_image_to_webp
 
 
@@ -43,3 +43,8 @@ def optimize_card_cover_image(sender, instance, created, **kwargs):
     """Optimize cover image when ItineraryCard is saved."""
     _optimize_image_field(instance, 'cover_image')
 
+
+@receiver(post_save, sender=ItineraryBoard)
+def optimize_board_package_image(sender, instance, created, **kwargs):
+    """Optimize package image when ItineraryBoard is saved."""
+    _optimize_image_field(instance, 'package_image')
