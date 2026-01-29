@@ -10,6 +10,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, Sp
 import backend.admin_config  # noqa
 
 from backend.health import health_check
+from backend.media_views import MediaUploadView
 from account.token_views import CustomTokenObtainPairView
 from account.views import (
     SupplierProfileViewSet,
@@ -159,6 +160,7 @@ api_v1_patterns = [
     path("", include(router.urls)),
     path("token/", CustomTokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("token/refresh/", CustomTokenRefreshView.as_view(), name="token_refresh"),
+    path("media/upload/", MediaUploadView.as_view(), name="media_upload"),
     path("token/logout/", LogoutView.as_view(), name="token_logout"),
     path("token/me/", CurrentUserView.as_view(), name="token_me"),
     # Public registration endpoints

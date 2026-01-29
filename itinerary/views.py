@@ -1050,7 +1050,7 @@ class AdminItineraryTransactionViewSet(viewsets.ModelViewSet):
     queryset = ItineraryTransaction.objects.all()
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ["status", "board", "board__supplier"]
-    search_fields = ["customer__email", "customer__full_name", "board__title", "transaction_number"]
+    search_fields = ["customer__email", "customer__customer_profile__full_name", "board__title", "transaction_number"]
     ordering_fields = ["created_at", "expires_at", "activated_at", "amount"]
     ordering = ["-created_at"]
     

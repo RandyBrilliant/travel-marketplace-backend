@@ -1826,6 +1826,13 @@ class BookingSerializer(serializers.ModelSerializer):
     payment_proof_image = serializers.SerializerMethodField()
     payment_id = serializers.SerializerMethodField()
     
+    # Supplier information including bank details
+    supplier_name = serializers.CharField(source="tour_date.package.supplier.company_name", read_only=True)
+    supplier_id = serializers.IntegerField(source="tour_date.package.supplier.id", read_only=True)
+    supplier_bank_name = serializers.CharField(source="tour_date.package.supplier.bank_name", read_only=True, allow_null=True)
+    supplier_bank_account_name = serializers.CharField(source="tour_date.package.supplier.bank_account_name", read_only=True, allow_null=True)
+    supplier_bank_account_number = serializers.CharField(source="tour_date.package.supplier.bank_account_number", read_only=True, allow_null=True)
+    
     reseller_commission = serializers.SerializerMethodField()
     
     def get_payment_status(self, obj):
@@ -1895,6 +1902,11 @@ class BookingSerializer(serializers.ModelSerializer):
             "payment_transfer_date",
             "payment_proof_image",
             "payment_id",
+            "supplier_name",
+            "supplier_id",
+            "supplier_bank_name",
+            "supplier_bank_account_name",
+            "supplier_bank_account_number",
             "reseller_commission",
             "created_at",
             "updated_at",

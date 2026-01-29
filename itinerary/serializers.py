@@ -394,9 +394,14 @@ class ItineraryTransactionSerializer(serializers.ModelSerializer):
     """Serializer for itinerary transactions."""
     
     customer_email = serializers.EmailField(source='customer.email', read_only=True)
+    customer_full_name = serializers.CharField(source='customer.customer_profile.full_name', read_only=True, allow_null=True)
+    customer_phone = serializers.CharField(source='customer.customer_profile.contact_phone', read_only=True, allow_null=True)
     board_title = serializers.CharField(source='board.title', read_only=True)
     board_slug = serializers.CharField(source='board.slug', read_only=True)
     supplier_name = serializers.CharField(source='board.supplier.company_name', read_only=True, allow_null=True)
+    supplier_bank_name = serializers.CharField(source='board.supplier.bank_name', read_only=True, allow_null=True)
+    supplier_bank_account_name = serializers.CharField(source='board.supplier.bank_account_name', read_only=True, allow_null=True)
+    supplier_bank_account_number = serializers.CharField(source='board.supplier.bank_account_number', read_only=True, allow_null=True)
     is_access_valid = serializers.SerializerMethodField()
     payment_reviewed_by_email = serializers.EmailField(source='payment_reviewed_by.email', read_only=True, allow_null=True)
     
@@ -409,7 +414,12 @@ class ItineraryTransactionSerializer(serializers.ModelSerializer):
             'board_slug',
             'customer',
             'customer_email',
+            'customer_full_name',
+            'customer_phone',
             'supplier_name',
+            'supplier_bank_name',
+            'supplier_bank_account_name',
+            'supplier_bank_account_number',
             'status',
             'amount',
             'departure_date',
@@ -436,6 +446,8 @@ class ItineraryTransactionSerializer(serializers.ModelSerializer):
             'board_title',
             'board_slug',
             'customer_email',
+            'customer_full_name',
+            'customer_phone',
             'supplier_name',
             'amount',
             'created_at',
@@ -523,6 +535,8 @@ class ItineraryTransactionListSerializer(serializers.ModelSerializer):
     """Serializer for listing itinerary transactions."""
     
     customer_email = serializers.EmailField(source='customer.email', read_only=True)
+    customer_full_name = serializers.CharField(source='customer.customer_profile.full_name', read_only=True, allow_null=True)
+    customer_phone = serializers.CharField(source='customer.customer_profile.contact_phone', read_only=True, allow_null=True)
     board_title = serializers.CharField(source='board.title', read_only=True)
     board_slug = serializers.CharField(source='board.slug', read_only=True)
     supplier_name = serializers.CharField(source='board.supplier.company_name', read_only=True, allow_null=True)
@@ -536,6 +550,8 @@ class ItineraryTransactionListSerializer(serializers.ModelSerializer):
             'board_title',
             'board_slug',
             'customer_email',
+            'customer_full_name',
+            'customer_phone',
             'supplier_name',
             'status',
             'departure_date',
@@ -556,6 +572,8 @@ class ItineraryTransactionListSerializer(serializers.ModelSerializer):
             'board_title',
             'board_slug',
             'customer_email',
+            'customer_full_name',
+            'customer_phone',
             'supplier_name',
             'transaction_number',
             'is_access_valid',
