@@ -412,7 +412,8 @@ class ItineraryTransactionSerializer(serializers.ModelSerializer):
             'supplier_name',
             'status',
             'amount',
-            'access_duration_days',
+            'departure_date',
+            'arrival_date',
             'created_at',
             'activated_at',
             'expires_at',
@@ -461,7 +462,8 @@ class ItineraryTransactionCreateSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'board',
-            'access_duration_days',
+            'departure_date',
+            'arrival_date',
             'notes',
             'created_at',
             'transaction_number',
@@ -475,6 +477,19 @@ class ItineraryTransactionCreateSerializer(serializers.ModelSerializer):
             'status',
             'amount',
         ]
+    
+    def validate(self, data):
+        """Validate that departure_date is before arrival_date."""
+        departure_date = data.get('departure_date')
+        arrival_date = data.get('arrival_date')
+        
+        if departure_date and arrival_date:
+            if departure_date > arrival_date:
+                raise serializers.ValidationError({
+                    'arrival_date': 'Tanggal kembali harus setelah tanggal keberangkatan.'
+                })
+        
+        return data
 
 
 class ItineraryTransactionPaymentUpdateSerializer(serializers.ModelSerializer):
@@ -523,7 +538,8 @@ class ItineraryTransactionListSerializer(serializers.ModelSerializer):
             'customer_email',
             'supplier_name',
             'status',
-            'access_duration_days',
+            'departure_date',
+            'arrival_date',
             'activated_at',
             'expires_at',
             'transaction_number',

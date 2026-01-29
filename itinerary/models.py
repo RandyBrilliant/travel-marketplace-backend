@@ -383,11 +383,16 @@ class ItineraryTransaction(models.Model):
         default=0,
     )
 
-    # Access duration
-    access_duration_days = models.PositiveIntegerField(
-        default=30,
-        validators=[MinValueValidator(1)],
-        help_text=_("Number of days the customer has access to the itinerary."),
+    # Travel dates (determines access period)
+    departure_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text=_("Departure date of the trip. Access starts from this date."),
+    )
+    arrival_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text=_("Arrival/return date of the trip. Access expires 2 days after this date."),
     )
     
     # Timestamps
@@ -545,7 +550,15 @@ class ItineraryTransaction(models.Model):
         
         if self.status == ItineraryTransactionStatus.ACTIVE and not self.activated_at:
             self.activated_at = timezone.now()
-            self.expires_at = self.activated_at + timedelta(days=self.access_duration_days)
+            # Calculate expires_at based on arrival_date + 2 days
+            if self.arrival_date:
+                # Expires at end of day (arrival_date + 2 days)
+                from datetime import datetime, time
+                expiry_date = self.arrival_date + timedelta(days=2)
+                self.expires_at = timezone.make_aware(datetime.combine(expiry_date, time(23, 59, 59)))
+            else:
+                # Fallback: if no arrival_date, set 30 days from activation
+                self.expires_at = self.activated_at + timedelta(days=30)
         
         if self.status in (ItineraryTransactionStatus.CANCELLED, ItineraryTransactionStatus.COMPLETED):
             if not self.completed_at:
@@ -555,9 +568,13 @@ class ItineraryTransaction(models.Model):
 
     def is_access_valid(self) -> bool:
         """Check if customer currently has valid access."""
+        from django.utils import timezone
+        
         if self.status != ItineraryTransactionStatus.ACTIVE:
             return False
         
+        # Check expiry date (arrival_date + 2 days)
+        # Access starts when payment is validated, not from departure_date
         if self.expires_at and self.expires_at < timezone.now():
             return False
         
@@ -566,11 +583,18 @@ class ItineraryTransaction(models.Model):
     def activate(self):
         """Activate the transaction and set expiry date."""
         from django.utils import timezone
+        from datetime import datetime, time
         
         if self.status == ItineraryTransactionStatus.PENDING:
             self.status = ItineraryTransactionStatus.ACTIVE
             self.activated_at = timezone.now()
-            self.expires_at = self.activated_at + timedelta(days=self.access_duration_days)
+            # Calculate expires_at based on arrival_date + 2 days
+            if self.arrival_date:
+                expiry_date = self.arrival_date + timedelta(days=2)
+                self.expires_at = timezone.make_aware(datetime.combine(expiry_date, time(23, 59, 59)))
+            else:
+                # Fallback: if no arrival_date, set 30 days from activation
+                self.expires_at = self.activated_at + timedelta(days=30)
             self.save()
 
     def extend_access(self, additional_days: int):

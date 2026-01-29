@@ -5,6 +5,7 @@ from .models import (
     ItineraryCard,
     ItineraryCardAttachment,
     ItineraryCardChecklist,
+    ItineraryTransaction,
 )
 
 
@@ -69,4 +70,42 @@ class ItineraryCardChecklistAdmin(admin.ModelAdmin):
     def items_count(self, obj):
         return len(obj.items)
     items_count.short_description = 'Items'
+
+
+@admin.register(ItineraryTransaction)
+class ItineraryTransactionAdmin(admin.ModelAdmin):
+    list_display = ['transaction_number', 'board', 'customer', 'amount', 'status', 'departure_date', 'arrival_date', 'payment_status', 'created_at']
+    list_filter = ['status', 'payment_status', 'created_at', 'activated_at']
+    search_fields = ['transaction_number', 'board__title', 'customer__email', 'customer__full_name']
+    readonly_fields = ['transaction_number', 'created_at', 'updated_at', 'activated_at', 'payment_reviewed_at', 'payment_reviewed_by']
+    date_hierarchy = 'created_at'
+    
+    fieldsets = (
+        ('Transaction Information', {
+            'fields': ('transaction_number', 'board', 'customer', 'status')
+        }),
+        ('Travel Dates', {
+            'fields': ('departure_date', 'arrival_date', 'expires_at')
+        }),
+        ('Pricing', {
+            'fields': ('amount', 'currency')
+        }),
+        ('Payment Information', {
+            'fields': ('payment_amount', 'payment_transfer_date', 'payment_proof_image', 'payment_status', 'payment_reviewed_at', 'payment_reviewed_by')
+        }),
+        ('Activation', {
+            'fields': ('activated_at',)
+        }),
+        ('Additional Info', {
+            'fields': ('notes',)
+        }),
+        ('Metadata', {
+            'fields': ('created_at', 'updated_at')
+        }),
+    )
+    
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related('board', 'customer', 'payment_reviewed_by')
+
 

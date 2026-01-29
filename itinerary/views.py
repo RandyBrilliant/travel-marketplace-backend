@@ -589,6 +589,68 @@ class IsCustomer(permissions.BasePermission):
         return request.user.is_customer or request.user.is_reseller
 
 
+class CustomerItineraryBoardDetailView(APIView):
+    """
+    View for customers to access itinerary boards they have purchased.
+    Requires an active transaction to view the board content.
+    """
+    
+    permission_classes = [IsCustomer]
+    
+    def get(self, request, pk=None, slug=None):
+        """Get board detail by ID or slug if customer has active access."""
+        try:
+            # Find the board
+            if pk:
+                board = ItineraryBoard.objects.filter(
+                    pk=pk,
+                    is_active=True
+                ).select_related(
+                    'supplier', 'currency'
+                ).prefetch_related(
+                    'columns',
+                    'columns__cards',
+                    'columns__cards__attachments',
+                    'columns__cards__checklists',
+                ).get()
+            elif slug:
+                board = ItineraryBoard.objects.filter(
+                    slug=slug,
+                    is_active=True
+                ).select_related(
+                    'supplier', 'currency'
+                ).prefetch_related(
+                    'columns',
+                    'columns__cards',
+                    'columns__cards__attachments',
+                    'columns__cards__checklists',
+                ).get()
+            else:
+                raise Http404("ID board atau slug wajib diisi.")
+        except ItineraryBoard.DoesNotExist:
+            raise Http404("Board tidak ditemukan.")
+        
+        # Check if customer has an active transaction for this board
+        has_access = ItineraryTransaction.objects.filter(
+            customer=request.user,
+            board=board,
+            status='ACTIVE'
+        ).exists()
+        
+        if not has_access:
+            return Response(
+                {"detail": "Anda tidak memiliki akses ke itinerary ini. Silakan beli akses terlebih dahulu."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        serializer = ItineraryBoardDetailSerializer(
+            board,
+            context={'request': request}
+        )
+        
+        return Response(serializer.data)
+
+
 class CustomerItineraryTransactionViewSet(viewsets.ModelViewSet):
     """
     ViewSet for customers to purchase and manage itinerary access.

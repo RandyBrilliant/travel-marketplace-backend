@@ -55,7 +55,7 @@ from travel.views import (
     CurrencyViewSet,
     AdminCurrencyViewSet,
 )
-from itinerary.views import CustomerItineraryTransactionViewSet, ResellerItineraryTransactionViewSet
+from itinerary.views import CustomerItineraryTransactionViewSet, ResellerItineraryTransactionViewSet, CustomerItineraryBoardDetailView
 from travel.report_views import (
     sales_report_view,
     pax_report_view,
@@ -195,6 +195,9 @@ api_v1_patterns = [
     # Public tour endpoints
     path("tours/", PublicTourPackageListView.as_view(), name="public-tour-list"),
     path("tours/<str:slug>/", PublicTourPackageDetailView.as_view(), name="public-tour-detail"),
+    # Customer itinerary board endpoints (requires active transaction)
+    path("customers/me/itinerary-boards/<int:pk>/", CustomerItineraryBoardDetailView.as_view(), name="customer-itinerary-board-detail"),
+    path("customers/me/itinerary-boards/slug/<str:slug>/", CustomerItineraryBoardDetailView.as_view(), name="customer-itinerary-board-detail-slug"),
     # Itinerary endpoints
     path("itinerary/", include("itinerary.urls")),
 ]

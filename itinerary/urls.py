@@ -13,6 +13,7 @@ from .views import (
     SupplierItineraryCardChecklistViewSet,
     ResellerItineraryBoardListView,
     ResellerItineraryBoardDetailView,
+    CustomerItineraryBoardDetailView,
     CustomerItineraryTransactionViewSet,
     ResellerItineraryTransactionViewSet,
     SupplierItineraryTransactionViewSet,
@@ -46,4 +47,7 @@ urlpatterns = [
     path('resellers/me/itinerary-boards/', ResellerItineraryBoardListView.as_view(), name='reseller-itinerary-board-list'),
     path('resellers/me/itinerary-boards/<int:pk>/', ResellerItineraryBoardDetailView.as_view(), name='reseller-itinerary-board-detail'),
     path('resellers/me/itinerary-boards/slug/<str:slug>/', ResellerItineraryBoardDetailView.as_view(), name='reseller-itinerary-board-detail-slug'),
+    # Customer endpoints (requires active transaction)
+    path('customers/me/itinerary-boards/<int:pk>/', CustomerItineraryBoardDetailView.as_view(), name='customer-itinerary-board-detail'),
+    path('customers/me/itinerary-boards/slug/<str:slug>/', CustomerItineraryBoardDetailView.as_view(), name='customer-itinerary-board-detail-slug'),
 ]
