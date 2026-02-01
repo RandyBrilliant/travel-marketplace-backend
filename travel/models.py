@@ -342,8 +342,8 @@ class TourDate(models.Model):
         default=0,
     )
     total_seats = models.PositiveIntegerField(
-        validators=[MinValueValidator(1)],
-        help_text=_("Total number of seats available. Must be at least 1.")
+        validators=[MinValueValidator(0)],
+        help_text=_("Total number of seats available. Can be 0 for manually booked tours.")
     )
     airline = models.CharField(
         max_length=255,
@@ -388,8 +388,8 @@ class TourDate(models.Model):
                 name='tour_date_price_non_negative'
             ),
             models.CheckConstraint(
-                check=models.Q(total_seats__gte=1),
-                name='tour_date_seats_positive'
+                check=models.Q(total_seats__gte=0),
+                name='tour_date_seats_non_negative'
             ),
         ]
     

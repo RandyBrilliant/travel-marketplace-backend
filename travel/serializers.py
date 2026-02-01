@@ -304,9 +304,9 @@ class TourDateSerializer(serializers.ModelSerializer):
         return value
     
     def validate_total_seats(self, value):
-        """Validate total seats is at least 1 and not less than booked seats."""
-        if value is not None and value < 1:
-            raise serializers.ValidationError("Total kursi harus minimal 1.")
+        """Validate total seats is at least 0 and not less than booked seats."""
+        if value is not None and value < 0:
+            raise serializers.ValidationError("Total kursi tidak boleh negatif.")
         
         # If updating, check that new total_seats is not less than booked seats
         if self.instance and value is not None:
@@ -670,12 +670,12 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
             departure_date__gte=start_date
         ).order_by("departure_date")[:20]
         
-        # Show ALL dates (including past and fully booked) so the UI can display them with appropriate styling
+        # Show ALL dates (including past, fully booked, and manually booked with 0 seats)
+        # so the UI can display them with appropriate styling
         dates_to_show = []
         for date in all_dates:
-            # Show all dates with total_seats > 0 (regardless of availability or past/future)
-            if date.total_seats > 0:
-                dates_to_show.append(date)
+            # Show all dates (including those with 0 seats for manually booked tours)
+            dates_to_show.append(date)
             if len(dates_to_show) >= 15:
                 break
         
