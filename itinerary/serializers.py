@@ -292,6 +292,20 @@ class ItineraryColumnCreateUpdateSerializer(serializers.ModelSerializer):
 class ItineraryCardCreateUpdateSerializer(serializers.ModelSerializer):
     """Serializer for creating and updating cards."""
     
+    def update(self, instance, validated_data):
+        """Handle cover_image deletion when empty string is sent."""
+        # Check request data directly for empty string (FormData sends empty strings differently)
+        request = self.context.get('request')
+        if request and hasattr(request, 'data'):
+            cover_image_in_request = request.data.get('cover_image')
+            # If empty string is sent, it means delete the image
+            if cover_image_in_request == "":
+                instance.cover_image = None
+                # Remove from validated_data to avoid setting it again
+                validated_data.pop('cover_image', None)
+        
+        return super().update(instance, validated_data)
+    
     class Meta:
         model = ItineraryCard
         fields = [
