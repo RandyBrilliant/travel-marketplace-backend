@@ -33,6 +33,123 @@ class PaymentStatus(models.TextChoices):
     REJECTED = "REJECTED", _("Rejected")
 
 
+class PromoDiscountType(models.TextChoices):
+    """Discount type for promo codes."""
+    PERCENTAGE = "PERCENTAGE", _("Percentage")
+    FIXED_AMOUNT = "FIXED_AMOUNT", _("Fixed Amount")
+
+
+class PromoApplicableTo(models.TextChoices):
+    """Where promo code can be applied."""
+    TOUR = "TOUR", _("Tour Booking")
+    ITINERARY = "ITINERARY", _("Itinerary Purchase")
+    BOTH = "BOTH", _("Both Tour and Itinerary")
+
+
+class PromoCode(models.Model):
+    """
+    Promo/discount code for tour bookings and itinerary purchases.
+    """
+    code = models.CharField(
+        max_length=50,
+        unique=True,
+        db_index=True,
+        help_text=_("Promo code (e.g. WELCOME10). Case-insensitive lookup."),
+    )
+    description = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text=_("Short description shown to users."),
+    )
+    discount_type = models.CharField(
+        max_length=20,
+        choices=PromoDiscountType.choices,
+        help_text=_("Percentage or fixed amount discount."),
+    )
+    discount_value = models.PositiveIntegerField(
+        help_text=_("For PERCENTAGE: 1-100. For FIXED_AMOUNT: amount in IDR."),
+    )
+    min_purchase_amount = models.PositiveIntegerField(
+        default=0,
+        help_text=_("Minimum purchase amount in IDR to use this promo."),
+    )
+    max_uses = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text=_("Max total uses across all users. Null = unlimited."),
+    )
+    times_used = models.PositiveIntegerField(
+        default=0,
+        help_text=_("Number of times this promo has been used."),
+    )
+    valid_from = models.DateTimeField(
+        help_text=_("Start of validity period."),
+    )
+    valid_until = models.DateTimeField(
+        help_text=_("End of validity period."),
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text=_("Whether this promo is active."),
+    )
+    applicable_to = models.CharField(
+        max_length=20,
+        choices=PromoApplicableTo.choices,
+        default=PromoApplicableTo.BOTH,
+        help_text=_("Where this promo can be applied."),
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _("Promo Code")
+        verbose_name_plural = _("Promo Codes")
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["code"]),
+            models.Index(fields=["is_active"]),
+            models.Index(fields=["valid_from", "valid_until"]),
+        ]
+
+    def __str__(self):
+        return f"{self.code} ({self.get_discount_type_display()})"
+
+    def calculate_discount(self, amount: int) -> int:
+        """Calculate discount amount for given purchase amount."""
+        if amount < self.min_purchase_amount:
+            return 0
+        if self.discount_type == PromoDiscountType.PERCENTAGE:
+            return min(
+                int(amount * self.discount_value / 100),
+                amount  # cap at purchase amount
+            )
+        return min(self.discount_value, amount)
+
+    def is_valid_for_amount(self, amount: int, applicable_type: str):
+        """
+        Check if promo is valid for amount and type.
+        Returns (is_valid, message).
+        """
+        from django.utils import timezone
+        now = timezone.now()
+        if not self.is_active:
+            return False, "Kode promo tidak aktif."
+        if now < self.valid_from:
+            return False, "Kode promo belum berlaku."
+        if now > self.valid_until:
+            return False, "Kode promo sudah kadaluarsa."
+        if amount < self.min_purchase_amount:
+            return False, f"Minimal pembelian {self.min_purchase_amount:,} IDR."
+        if self.max_uses is not None and self.times_used >= self.max_uses:
+            return False, "Kode promo sudah mencapai batas penggunaan."
+        if self.applicable_to != PromoApplicableTo.BOTH:
+            if self.applicable_to == PromoApplicableTo.TOUR and applicable_type != "TOUR":
+                return False, "Kode promo hanya berlaku untuk pemesanan tur."
+            if self.applicable_to == PromoApplicableTo.ITINERARY and applicable_type != "ITINERARY":
+                return False, "Kode promo hanya berlaku untuk pembelian virtual guiding."
+        return True, ""
+
+
 class Currency(models.Model):
     """
     Currency model to support multiple currencies for tour packages.
@@ -849,7 +966,16 @@ class Booking(models.Model):
         help_text=_("Total booking amount in IDR (Indonesian Rupiah)."),
         default=0,
     )
-
+    promo_code = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text=_("Promo code used for this booking (if any)."),
+    )
+    promo_discount_amount = models.IntegerField(
+        validators=[MinValueValidator(0)],
+        default=0,
+        help_text=_("Discount amount from promo in IDR."),
+    )
 
     notes = models.TextField(blank=True)
     

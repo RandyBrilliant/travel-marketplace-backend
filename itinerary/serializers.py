@@ -446,6 +446,8 @@ class ItineraryTransactionSerializer(serializers.ModelSerializer):
             'external_reference',
             'notes',
             'is_access_valid',
+            'promo_code',
+            'promo_discount_amount',
             # Payment fields
             'payment_amount',
             'payment_transfer_date',
@@ -483,6 +485,8 @@ class ItineraryTransactionSerializer(serializers.ModelSerializer):
 class ItineraryTransactionCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating itinerary transactions."""
     
+    promo_code = serializers.CharField(required=False, allow_blank=True, max_length=50)
+
     class Meta:
         model = ItineraryTransaction
         fields = [
@@ -491,6 +495,7 @@ class ItineraryTransactionCreateSerializer(serializers.ModelSerializer):
             'departure_date',
             'arrival_date',
             'notes',
+            'promo_code',
             'created_at',
             'transaction_number',
             'status',
@@ -503,19 +508,62 @@ class ItineraryTransactionCreateSerializer(serializers.ModelSerializer):
             'status',
             'amount',
         ]
-    
+
     def validate(self, data):
-        """Validate that departure_date is before arrival_date."""
+        """Validate that departure_date is before arrival_date and promo if provided."""
         departure_date = data.get('departure_date')
         arrival_date = data.get('arrival_date')
-        
+
         if departure_date and arrival_date:
             if departure_date > arrival_date:
                 raise serializers.ValidationError({
                     'arrival_date': 'Tanggal kembali harus setelah tanggal keberangkatan.'
                 })
-        
+
+        # Validate promo code if provided
+        promo_code = data.get('promo_code', '').strip()
+        board = data.get('board')
+        if board and promo_code:
+            from travel.models import PromoCode
+            amount = board.price
+            try:
+                promo = PromoCode.objects.get(code__iexact=promo_code)
+                is_valid, msg = promo.is_valid_for_amount(amount, "ITINERARY")
+                if not is_valid:
+                    raise serializers.ValidationError({'promo_code': msg})
+                data['_promo'] = promo
+                data['_promo_discount_amount'] = promo.calculate_discount(amount)
+                data['promo_code'] = promo.code
+            except PromoCode.DoesNotExist:
+                raise serializers.ValidationError({'promo_code': 'Kode promo tidak valid.'})
+        else:
+            data['_promo'] = None
+            data['_promo_discount_amount'] = 0
+
         return data
+
+    def create(self, validated_data):
+        """Create transaction with promo support."""
+        from travel.models import PromoCode
+        from django.db.models import F
+
+        promo = validated_data.pop('_promo', None)
+        promo_discount_amount = validated_data.pop('_promo_discount_amount', 0)
+        promo_code_str = validated_data.pop('promo_code', '')
+
+        board = validated_data['board']
+        amount = board.price - promo_discount_amount if promo_discount_amount > 0 else board.price
+
+        validated_data['amount'] = amount
+        validated_data['promo_code'] = promo_code_str if promo else ''
+        validated_data['promo_discount_amount'] = promo_discount_amount
+
+        transaction = super().create(validated_data)
+
+        if promo and promo_discount_amount > 0:
+            PromoCode.objects.filter(pk=promo.pk).update(times_used=F('times_used') + 1)
+
+        return transaction
 
 
 class ItineraryTransactionPaymentUpdateSerializer(serializers.ModelSerializer):
@@ -576,6 +624,8 @@ class ItineraryTransactionListSerializer(serializers.ModelSerializer):
             'is_access_valid',
             'created_at',
             'amount',
+            'promo_code',
+            'promo_discount_amount',
             # Payment fields
             'payment_amount',
             'payment_status',

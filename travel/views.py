@@ -11,7 +11,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 
 from rest_framework.permissions import IsAdminUser, IsAuthenticatedOrReadOnly
 from account.models import UserRole, SupplierProfile, ResellerProfile, CustomerProfile
-from .models import TourPackage, TourDate, TourImage, ResellerTourCommission, ResellerGroup, Booking, BookingStatus, SeatSlotStatus, PaymentStatus, SeatSlot, WithdrawalRequest, WithdrawalRequestStatus, ResellerCommission, Currency
+from .models import TourPackage, TourDate, TourImage, ResellerTourCommission, ResellerGroup, Booking, BookingStatus, SeatSlotStatus, PaymentStatus, SeatSlot, WithdrawalRequest, WithdrawalRequestStatus, ResellerCommission, Currency, PromoCode
 from .serializers import (
     TourPackageSerializer,
     TourPackageListSerializer,
@@ -28,6 +28,8 @@ from .serializers import (
     PublicTourPackageDetailSerializer,
     ResellerCommissionSerializer,
     CurrencySerializer,
+    PromoCodeSerializer,
+    PromoValidationSerializer,
 )
 
 
@@ -113,6 +115,109 @@ class AdminCurrencyViewSet(viewsets.ModelViewSet):
             {"detail": "Deleting currencies is not allowed."},
             status=status.HTTP_403_FORBIDDEN
         )
+
+
+class AdminPromoCodeViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for admin to manage promo codes (Create, Read, Update, Delete).
+    Admin-only access.
+    """
+    permission_classes = [permissions.IsAdminUser]
+    queryset = PromoCode.objects.all().order_by("-created_at")
+    serializer_class = PromoCodeSerializer
+    filterset_fields = ["is_active", "discount_type", "applicable_to"]
+    search_fields = ["code", "description"]
+    ordering_fields = ["code", "created_at", "valid_from", "valid_until", "times_used"]
+    ordering = ["-created_at"]
+
+
+class PromoValidateView(APIView):
+    """
+    Validate promo code for a given amount and type.
+    Returns whether the promo is valid and the discount amount.
+    Requires authentication.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = PromoValidationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        code = serializer.validated_data["code"].strip()
+        amount = serializer.validated_data["amount"]
+        applicable_type = serializer.validated_data["type"]
+
+        if not code:
+            return Response(
+                {"valid": False, "message": "Kode promo wajib diisi."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            promo = PromoCode.objects.get(code__iexact=code)
+        except PromoCode.DoesNotExist:
+            return Response({
+                "valid": False,
+                "message": "Kode promo tidak valid.",
+            })
+
+        is_valid, msg = promo.is_valid_for_amount(amount, applicable_type)
+        if not is_valid:
+            return Response({
+                "valid": False,
+                "message": msg,
+            })
+
+        discount_amount = promo.calculate_discount(amount)
+        final_amount = max(0, amount - discount_amount)
+
+        return Response({
+            "valid": True,
+            "discount_amount": discount_amount,
+            "original_amount": amount,
+            "final_amount": final_amount,
+            "message": f"Potongan {discount_amount:,} IDR diterapkan." if discount_amount else "Kode promo valid.",
+        })
+
+
+class PromoListForCheckoutView(APIView):
+    """
+    List all active promo codes for checkout modal.
+    Returns promos with validation status for the given amount and type.
+    Requires authentication.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        amount = int(request.query_params.get("amount", 0))
+        applicable_type = request.query_params.get("type", "BOTH")
+
+        now = timezone.now()
+        promos = PromoCode.objects.filter(
+            is_active=True,
+            valid_from__lte=now,
+            valid_until__gte=now,
+        ).order_by("-created_at")
+
+        results = []
+        for promo in promos:
+            if promo.applicable_to != "BOTH" and promo.applicable_to != applicable_type:
+                continue
+            is_valid, msg = promo.is_valid_for_amount(amount, applicable_type)
+            discount_amount = promo.calculate_discount(amount) if is_valid else 0
+            results.append({
+                "id": promo.id,
+                "code": promo.code,
+                "description": promo.description,
+                "discount_type": promo.discount_type,
+                "discount_value": promo.discount_value,
+                "min_purchase_amount": promo.min_purchase_amount,
+                "applicable_to": promo.applicable_to,
+                "can_use": is_valid,
+                "message": msg,
+                "discount_amount": discount_amount,
+            })
+
+        return Response({"results": results})
 
 
 class SupplierTourPackageViewSet(viewsets.ModelViewSet):

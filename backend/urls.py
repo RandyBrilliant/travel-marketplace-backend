@@ -55,6 +55,9 @@ from travel.views import (
     AdminWithdrawalViewSet,
     CurrencyViewSet,
     AdminCurrencyViewSet,
+    AdminPromoCodeViewSet,
+    PromoValidateView,
+    PromoListForCheckoutView,
 )
 from itinerary.views import CustomerItineraryTransactionViewSet, ResellerItineraryTransactionViewSet, CustomerItineraryBoardDetailView
 from travel.report_views import (
@@ -147,6 +150,12 @@ router.register(
     AdminWithdrawalViewSet,
     basename="admin-withdrawal",
 )
+# Admin-only endpoints for managing promo codes
+router.register(
+    r"admin/promo-codes",
+    AdminPromoCodeViewSet,
+    basename="admin-promo-code",
+)
 
 # API Documentation endpoints
 api_docs_patterns = [
@@ -194,6 +203,9 @@ api_v1_patterns = [
     path("suppliers/me/reports/total-amount/", supplier_total_amount_report_view, name="supplier-total-amount-report"),
     path("suppliers/me/reports/commission-payout/", supplier_commission_report_view, name="supplier-commission-payout-report"),
     path("suppliers/me/reports/itinerary-transactions/", supplier_itinerary_transaction_report, name="supplier-itinerary-transaction-report"),
+    # Promo code validation and list (authenticated)
+    path("promo-codes/validate/", PromoValidateView.as_view(), name="promo-validate"),
+    path("promo-codes/list-for-checkout/", PromoListForCheckoutView.as_view(), name="promo-list-for-checkout"),
     # Public tour endpoints
     path("tours/", PublicTourPackageListView.as_view(), name="public-tour-list"),
     path("tours/<str:slug>/", PublicTourPackageDetailView.as_view(), name="public-tour-detail"),

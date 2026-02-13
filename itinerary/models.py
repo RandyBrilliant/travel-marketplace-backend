@@ -382,6 +382,16 @@ class ItineraryTransaction(models.Model):
         help_text=_("Amount paid for this transaction in IDR (snapshot from board price)."),
         default=0,
     )
+    promo_code = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text=_("Promo code used for this transaction (if any)."),
+    )
+    promo_discount_amount = models.IntegerField(
+        validators=[MinValueValidator(0)],
+        default=0,
+        help_text=_("Discount amount from promo in IDR."),
+    )
 
     # Travel dates (determines access period)
     departure_date = models.DateField(

@@ -19,6 +19,7 @@ from .models import (
     WithdrawalRequest,
     WithdrawalRequestStatus,
     Currency,
+    PromoCode,
 )
 from .utils import optimize_image_to_webp
 from account.models import ResellerProfile, SupplierProfile
@@ -41,6 +42,37 @@ class CurrencySerializer(serializers.ModelSerializer):
         read_only_fields = [
             'id',
         ]
+
+
+class PromoCodeSerializer(serializers.ModelSerializer):
+    """Serializer for PromoCode admin CRUD."""
+    
+    class Meta:
+        model = PromoCode
+        fields = [
+            'id',
+            'code',
+            'description',
+            'discount_type',
+            'discount_value',
+            'min_purchase_amount',
+            'max_uses',
+            'times_used',
+            'valid_from',
+            'valid_until',
+            'is_active',
+            'applicable_to',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'times_used', 'created_at', 'updated_at']
+
+
+class PromoValidationSerializer(serializers.Serializer):
+    """Serializer for validating promo code."""
+    code = serializers.CharField(max_length=50)
+    amount = serializers.IntegerField(min_value=0)
+    type = serializers.ChoiceField(choices=['TOUR', 'ITINERARY'])
 
 
 class ResellerGroupListField(serializers.PrimaryKeyRelatedField):
@@ -1186,6 +1218,8 @@ class BookingListSerializer(serializers.ModelSerializer):
             "seats_booked",
             "platform_fee",
             "total_amount",
+            "promo_code",
+            "promo_discount_amount",
             "payment_status",
             "created_at",
             "updated_at",
@@ -1258,6 +1292,8 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         
         return value
     
+    promo_code = serializers.CharField(required=False, allow_blank=True, max_length=50)
+
     class Meta:
         model = Booking
         fields = [
@@ -1268,8 +1304,9 @@ class BookingCreateSerializer(serializers.ModelSerializer):
             "total_amount",
             "notes",
             "seat_slots",
+            "promo_code",
         ]
-    
+
     def to_internal_value(self, data):
         """
         Override to handle multipart/form-data with nested files.
@@ -1398,9 +1435,29 @@ class BookingCreateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     'seat_slots': 'Nomor kursi duplikat tidak diperbolehkan.'
                 })
-        
+
+        # Validate promo code if provided
+        promo_code = attrs.get('promo_code', '').strip()
+        total_amount = attrs.get('total_amount', 0)
+        if promo_code:
+            from .models import PromoCode
+            try:
+                promo = PromoCode.objects.get(code__iexact=promo_code)
+                is_valid, msg = promo.is_valid_for_amount(total_amount, "TOUR")
+                if not is_valid:
+                    raise serializers.ValidationError({'promo_code': msg})
+                discount = promo.calculate_discount(total_amount)
+                attrs['_promo'] = promo
+                attrs['_promo_discount_amount'] = discount
+                attrs['promo_code'] = promo.code
+            except PromoCode.DoesNotExist:
+                raise serializers.ValidationError({'promo_code': 'Kode promo tidak valid.'})
+        else:
+            attrs['_promo'] = None
+            attrs['_promo_discount_amount'] = 0
+
         return attrs
-    
+
     def create(self, validated_data):
         """Create booking and assign seat slots with passenger details.
         
@@ -1411,11 +1468,23 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         from .models import TourPackage, TourDate, SeatSlotStatus
         
         seat_slots_data = validated_data.pop('seat_slots')
-        
+
+        # Handle promo code
+        promo = validated_data.pop('_promo', None)
+        promo_discount_amount = validated_data.pop('_promo_discount_amount', 0)
+        promo_code_str = validated_data.pop('promo_code', '')
+        if promo and promo_discount_amount > 0:
+            validated_data['total_amount'] = validated_data['total_amount'] - promo_discount_amount
+            validated_data['promo_code'] = promo_code_str
+            validated_data['promo_discount_amount'] = promo_discount_amount
+        else:
+            validated_data['promo_code'] = ''
+            validated_data['promo_discount_amount'] = 0
+
         # Handle flexible packages: get or create TourDate
         tour_package = validated_data.pop('_tour_package', None)
         departure_date = validated_data.pop('_departure_date', None)
-        
+
         # Remove fields that are not part of the Booking model
         validated_data.pop('package_id', None)
         validated_data.pop('departure_date', None)
@@ -1545,9 +1614,14 @@ class BookingCreateSerializer(serializers.ModelSerializer):
             
             # Create commissions for reseller and upline
             self._create_commissions(booking)
-            
+
+            # Increment promo usage if used
+            if promo and promo_discount_amount > 0:
+                from django.db.models import F
+                PromoCode.objects.filter(pk=promo.pk).update(times_used=F('times_used') + 1)
+
             return booking
-    
+
     def _create_commissions(self, booking):
         """
         Create commission records for the booking reseller and their upline hierarchy.
@@ -1670,6 +1744,7 @@ class BookingCreateSerializer(serializers.ModelSerializer):
                         upline_deduction = deduction_per_seat * seats_count
                     else:
                         # No upline = no deduction, reseller gets full commission
+                        deduction_per_seat = 0
                         upline_deduction = 0
                         logger.info(
                             f"Reseller {booking_reseller.id} has no upline (group root), no deduction applied"
@@ -1894,6 +1969,8 @@ class BookingSerializer(serializers.ModelSerializer):
             "platform_fee",
             "subtotal",
             "total_amount",
+            "promo_code",
+            "promo_discount_amount",
             "notes",
             "seat_slots",
             "payments",

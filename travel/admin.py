@@ -10,6 +10,7 @@ from .models import (
     ResellerTourCommission,
     ResellerGroup,
     WithdrawalRequest,
+    PromoCode,
 )
 
 # Register your models here.
@@ -346,3 +347,12 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
         """Optimize queryset with select_related."""
         qs = super().get_queryset(request)
         return qs.select_related("reseller", "reseller__user", "approved_by")
+
+
+@admin.register(PromoCode)
+class PromoCodeAdmin(admin.ModelAdmin):
+    list_display = ["code", "discount_type", "discount_value", "min_purchase_amount", "times_used", "max_uses", "is_active", "applicable_to", "valid_from", "valid_until"]
+    list_filter = ["is_active", "discount_type", "applicable_to"]
+    search_fields = ["code", "description"]
+    readonly_fields = ["times_used", "created_at", "updated_at"]
+    date_hierarchy = "valid_from"
