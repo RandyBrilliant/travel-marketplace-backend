@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transaksi Itinerary Baru</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: #1e293b;
+            color: white;
+            padding: 30px 20px;
+            border-radius: 10px 10px 0 0;
+            text-align: center;
+        }
+        .content {
+            background: #f8f9fa;
+            padding: 30px 20px;
+            border-radius: 0 0 10px 10px;
+        }
+        .transaction-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .detail-label {
+            font-weight: bold;
+            color: #666;
+        }
+        .detail-value {
+            color: #333;
+            text-align: right;
+        }
+        .info-box {
+            background: #e0f2fe;
+            border-left: 4px solid #0284c7;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+        }
+        .button {
+            display: inline-block;
+            background: #1e293b;
+            color: white;
+            padding: 12px 30px;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔔 Transaksi Itinerary Baru</h1>
+        <p>Ada pembelian itinerary yang baru masuk</p>
+    </div>
+    
+    <div class="content">
+        <p>Halo Admin,</p>
+        
+        <p>Transaksi itinerary baru telah dibuat oleh <strong>{{ buyer_name }}</strong> ({{ buyer_type }}).</p>
+        
+        <div class="transaction-card">
+            <h2 style="margin-top: 0; color: #1e293b;">{{ itinerary_title }}</h2>
+            
+            <div class="detail-row">
+                <span class="detail-label">Nomor Transaksi:</span>
+                <span class="detail-value"><strong>{{ transaction_number }}</strong></span>
+            </div>
+            
+            <div class="detail-row">
+                <span class="detail-label">Pembeli:</span>
+                <span class="detail-value">{{ buyer_name }} ({{ buyer_type }})</span>
+            </div>
+            
+            <div class="detail-row">
+                <span class="detail-label">Email:</span>
+                <span class="detail-value">{{ buyer_email }}</span>
+            </div>
+            
+            <div class="detail-row">
+                <span class="detail-label">Pemilik Itinerary:</span>
+                <span class="detail-value">{{ supplier_name }}</span>
+            </div>
+            
+            <div class="detail-row">
+                <span class="detail-label">Tanggal Pembelian:</span>
+                <span class="detail-value">{{ purchase_date }}</span>
+            </div>
+            
+            <div class="detail-row">
+                <span class="detail-label">Status:</span>
+                <span class="detail-value" style="color: #16a34a; font-weight: bold;">{{ status }}</span>
+            </div>
+            
+            {% if promo_code %}
+            <div class="detail-row" style="color: #16a34a;">
+                <span class="detail-label">Kode Promo:</span>
+                <span class="detail-value">{{ promo_code }} (-{{ promo_discount_formatted }})</span>
+            </div>
+            {% endif %}
+            
+            <div class="detail-row" style="font-size: 18px; font-weight: bold;">
+                <span class="detail-label">Total:</span>
+                <span class="detail-value">{{ total_amount_formatted }}</span>
+            </div>
+            
+            <div class="detail-row" style="color: #2563EB;">
+                <span class="detail-label">Platform Fee:</span>
+                <span class="detail-value">{{ platform_fee_formatted }}</span>
+            </div>
+        </div>
+        
+        <div class="info-box">
+            <strong>ℹ️ Informasi Transaksi:</strong>
+            <ul style="margin: 10px 0;">
+                <li>Transaksi telah diproses secara otomatis</li>
+                <li>Pembeli dapat mengakses itinerary segera</li>
+                <li>Platform fee: {{ platform_fee_formatted }}</li>
+            </ul>
+        </div>
+        
+        <div style="text-align: center;">
+            <a href="{{ admin_url }}/itinerary-transactions/{{ transaction_id }}" class="button">Lihat Detail Transaksi</a>
+        </div>
+    </div>
+</body>
+</html>

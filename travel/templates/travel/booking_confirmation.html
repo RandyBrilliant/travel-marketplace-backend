@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Konfirmasi Pemesanan</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #2563EB 0%, #1d4ed8 100%);
+            color: white;
+            padding: 30px 20px;
+            border-radius: 10px 10px 0 0;
+            text-align: center;
+        }
+        .content {
+            background: #f8f9fa;
+            padding: 30px 20px;
+            border-radius: 0 0 10px 10px;
+        }
+        .booking-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .detail-label {
+            font-weight: bold;
+            color: #666;
+        }
+        .detail-value {
+            color: #333;
+            text-align: right;
+        }
+        .highlight {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+            border-left: 4px solid #2563EB;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 2px solid #e9ecef;
+            color: #666;
+            font-size: 14px;
+        }
+        .button {
+            display: inline-block;
+            background: #2563EB;
+            color: white;
+            padding: 12px 30px;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>✅ Pemesanan Berhasil!</h1>
+        <p>Terima kasih atas pemesanan Anda</p>
+    </div>
+    
+    <div class="content">
+        <p>Halo <strong>{{ customer_name }}</strong>,</p>
+        
+        <p>Pemesanan Anda telah kami terima dan sedang dalam proses konfirmasi. Berikut adalah detail pemesanan Anda:</p>
+        
+        <div class="booking-card">
+            <h2 style="margin-top: 0; color: #2563EB;">{{ tour_package_name }}</h2>
+            
+            <div class="detail-row">
+                <span class="detail-label">Nomor Pemesanan:</span>
+                <span class="detail-value"><strong>{{ booking_number }}</strong></span>
+            </div>
+            
+            <div class="detail-row">
+                <span class="detail-label">Tanggal Keberangkatan:</span>
+                <span class="detail-value">{{ departure_date }}</span>
+            </div>
+            
+            <div class="detail-row">
+                <span class="detail-label">Jumlah Kursi:</span>
+                <span class="detail-value">{{ seats_booked }} kursi</span>
+            </div>
+            
+            {% if promo_code %}
+            <div class="detail-row" style="color: #16a34a;">
+                <span class="detail-label">Kode Promo:</span>
+                <span class="detail-value">{{ promo_code }} (-{{ promo_discount_formatted }})</span>
+            </div>
+            {% endif %}
+            
+            <div class="detail-row" style="font-size: 18px; font-weight: bold; border-bottom: 2px solid #2563EB;">
+                <span class="detail-label">Total Pembayaran:</span>
+                <span class="detail-value" style="color: #2563EB;">{{ total_amount_formatted }}</span>
+            </div>
+        </div>
+        
+        <div class="highlight">
+            <strong>📋 Langkah Selanjutnya:</strong>
+            <ol style="margin: 10px 0; padding-left: 20px;">
+                <li>Tim kami akan menghubungi Anda dalam 1x24 jam untuk konfirmasi</li>
+                <li>Silakan siapkan dokumen yang diperlukan (paspor, visa jika diperlukan)</li>
+                <li>Tunggu konfirmasi pembayaran dari tim kami</li>
+            </ol>
+        </div>
+        
+        <div style="text-align: center;">
+            <a href="{{ site_url }}/bookings" class="button">Lihat Detail Pemesanan</a>
+        </div>
+        
+        <p style="margin-top: 30px;">Jika Anda memiliki pertanyaan, silakan hubungi kami melalui:</p>
+        <ul>
+            <li>Email: {{ support_email }}</li>
+            <li>WhatsApp: {{ support_phone }}</li>
+        </ul>
+        
+        <div class="footer">
+            <p><strong>{{ company_name }}</strong></p>
+            <p>{{ company_address }}</p>
+            <p>Email ini dikirim secara otomatis, mohon tidak membalas email ini.</p>
+        </div>
+    </div>
+</body>
+</html>

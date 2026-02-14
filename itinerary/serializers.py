@@ -521,14 +521,15 @@ class ItineraryTransactionCreateSerializer(serializers.ModelSerializer):
                 })
 
         # Validate promo code if provided
-        promo_code = data.get('promo_code', '').strip()
+        promo_code = data.get('promo_code', '').strip().upper()  # Normalize to uppercase
         board = data.get('board')
         if board and promo_code:
             from travel.models import PromoCode
             amount = board.price
             try:
                 promo = PromoCode.objects.get(code__iexact=promo_code)
-                is_valid, msg = promo.is_valid_for_amount(amount, "ITINERARY")
+                user = self.context.get('request').user if self.context.get('request') else None
+                is_valid, msg = promo.is_valid_for_amount(amount, "ITINERARY", user=user)
                 if not is_valid:
                     raise serializers.ValidationError({'promo_code': msg})
                 data['_promo'] = promo
@@ -560,8 +561,13 @@ class ItineraryTransactionCreateSerializer(serializers.ModelSerializer):
 
         transaction = super().create(validated_data)
 
+        # Increment promo usage counter with race condition protection
         if promo and promo_discount_amount > 0:
             PromoCode.objects.filter(pk=promo.pk).update(times_used=F('times_used') + 1)
+
+        # Send confirmation emails to all parties
+        from itinerary.tasks import send_itinerary_transaction_confirmation_emails
+        send_itinerary_transaction_confirmation_emails.delay(transaction.id)
 
         return transaction
 

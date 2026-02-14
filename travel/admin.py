@@ -351,8 +351,31 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
 
 @admin.register(PromoCode)
 class PromoCodeAdmin(admin.ModelAdmin):
-    list_display = ["code", "discount_type", "discount_value", "min_purchase_amount", "times_used", "max_uses", "is_active", "applicable_to", "valid_from", "valid_until"]
-    list_filter = ["is_active", "discount_type", "applicable_to"]
+    list_display = ["code", "discount_type", "discount_value", "min_purchase_amount", "times_used", "max_uses", "is_active", "is_user_specific", "applicable_to", "valid_from", "valid_until"]
+    list_filter = ["is_active", "discount_type", "applicable_to", "is_user_specific"]
     search_fields = ["code", "description"]
     readonly_fields = ["times_used", "created_at", "updated_at"]
+    filter_horizontal = ["allowed_users"]
     date_hierarchy = "valid_from"
+    fieldsets = (
+        ("Basic Information", {
+            "fields": ("code", "description", "is_active")
+        }),
+        ("Discount Settings", {
+            "fields": ("discount_type", "discount_value", "min_purchase_amount")
+        }),
+        ("Usage Limits", {
+            "fields": ("max_uses", "times_used")
+        }),
+        ("Validity Period", {
+            "fields": ("valid_from", "valid_until")
+        }),
+        ("Restrictions", {
+            "fields": ("applicable_to", "is_user_specific", "allowed_users"),
+            "description": "Set user-specific to restrict this promo to specific users only."
+        }),
+        ("Metadata", {
+            "fields": ("created_at", "updated_at"),
+            "classes": ("collapse",)
+        }),
+    )

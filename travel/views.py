@@ -142,7 +142,7 @@ class PromoValidateView(APIView):
     def post(self, request):
         serializer = PromoValidationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        code = serializer.validated_data["code"].strip()
+        code = serializer.validated_data["code"].strip().upper()  # Normalize to uppercase
         amount = serializer.validated_data["amount"]
         applicable_type = serializer.validated_data["type"]
 
@@ -160,7 +160,7 @@ class PromoValidateView(APIView):
                 "message": "Kode promo tidak valid.",
             })
 
-        is_valid, msg = promo.is_valid_for_amount(amount, applicable_type)
+        is_valid, msg = promo.is_valid_for_amount(amount, applicable_type, user=request.user)
         if not is_valid:
             return Response({
                 "valid": False,
@@ -202,7 +202,10 @@ class PromoListForCheckoutView(APIView):
         for promo in promos:
             if promo.applicable_to != "BOTH" and promo.applicable_to != applicable_type:
                 continue
-            is_valid, msg = promo.is_valid_for_amount(amount, applicable_type)
+            # Skip user-specific promos if user is not allowed
+            if promo.is_user_specific and not promo.allowed_users.filter(pk=request.user.pk).exists():
+                continue
+            is_valid, msg = promo.is_valid_for_amount(amount, applicable_type, user=request.user)
             discount_amount = promo.calculate_discount(amount) if is_valid else 0
             results.append({
                 "id": promo.id,
@@ -218,6 +221,86 @@ class PromoListForCheckoutView(APIView):
             })
 
         return Response({"results": results})
+
+
+class UserSearchForPromoView(APIView):
+    """
+    Search users for promo code assignment.
+    Returns users matching the search query.
+    Admin-only access.
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def get(self, request):
+        search_query = request.query_params.get("search", "").strip()
+        page = int(request.query_params.get("page", 1))
+        page_size = int(request.query_params.get("page_size", 50))
+        
+        # Import CustomUser model
+        from account.models import CustomUser
+        from django.db.models import Q
+        
+        # Build query - start with all users
+        query = CustomUser.objects.select_related(
+            'customer_profile',
+            'reseller_profile',
+            'supplier_profile',
+            'staff_profile'
+        ).all()
+        
+        if search_query:
+            # Search by email and related profile names
+            query = query.filter(
+                Q(email__icontains=search_query) |
+                Q(customer_profile__full_name__icontains=search_query) |
+                Q(reseller_profile__full_name__icontains=search_query) |
+                Q(supplier_profile__company_name__icontains=search_query) |
+                Q(supplier_profile__contact_person__icontains=search_query) |
+                Q(staff_profile__full_name__icontains=search_query)
+            ).distinct()
+        
+        # Order by email for consistent results
+        query = query.order_by('email')
+        
+        # Pagination
+        total_count = query.count()
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        users = query[start_idx:end_idx]
+        
+        # Build response
+        results = []
+        for user in users:
+            # Determine user role and display name
+            role = "USER"
+            display_name = user.email
+            
+            if user.is_staff:
+                role = "STAFF"
+                if hasattr(user, 'staff_profile') and user.staff_profile:
+                    display_name = f"{user.staff_profile.full_name} ({user.email})"
+            elif hasattr(user, 'supplier_profile') and user.supplier_profile:
+                role = "SUPPLIER"
+                display_name = f"{user.supplier_profile.company_name} ({user.email})"
+            elif hasattr(user, 'reseller_profile') and user.reseller_profile:
+                role = "RESELLER"
+                display_name = f"{user.reseller_profile.full_name} ({user.email})"
+            elif hasattr(user, 'customer_profile') and user.customer_profile:
+                role = "CUSTOMER"
+                display_name = f"{user.customer_profile.full_name} ({user.email})"
+            
+            results.append({
+                "id": user.id,
+                "email": display_name,  # Use display name instead of just email
+                "role": role,
+            })
+        
+        return Response({
+            "count": total_count,
+            "next": f"/admin/users/?search={search_query}&page={page + 1}&page_size={page_size}" if end_idx < total_count else None,
+            "previous": f"/admin/users/?search={search_query}&page={page - 1}&page_size={page_size}" if page > 1 else None,
+            "results": results,
+        })
 
 
 class SupplierTourPackageViewSet(viewsets.ModelViewSet):

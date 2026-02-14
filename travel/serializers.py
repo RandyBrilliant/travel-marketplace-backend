@@ -47,6 +47,14 @@ class CurrencySerializer(serializers.ModelSerializer):
 class PromoCodeSerializer(serializers.ModelSerializer):
     """Serializer for PromoCode admin CRUD."""
     
+    allowed_users_emails = serializers.SerializerMethodField(read_only=True)
+    
+    def get_allowed_users_emails(self, obj):
+        """Return list of allowed user emails."""
+        if obj.is_user_specific:
+            return list(obj.allowed_users.values_list('email', flat=True))
+        return []
+    
     class Meta:
         model = PromoCode
         fields = [
@@ -62,10 +70,13 @@ class PromoCodeSerializer(serializers.ModelSerializer):
             'valid_until',
             'is_active',
             'applicable_to',
+            'is_user_specific',
+            'allowed_users',
+            'allowed_users_emails',
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['id', 'times_used', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'times_used', 'created_at', 'updated_at', 'allowed_users_emails']
 
 
 class PromoValidationSerializer(serializers.Serializer):
@@ -1437,13 +1448,14 @@ class BookingCreateSerializer(serializers.ModelSerializer):
                 })
 
         # Validate promo code if provided
-        promo_code = attrs.get('promo_code', '').strip()
+        promo_code = attrs.get('promo_code', '').strip().upper()  # Normalize to uppercase
         total_amount = attrs.get('total_amount', 0)
         if promo_code:
             from .models import PromoCode
             try:
                 promo = PromoCode.objects.get(code__iexact=promo_code)
-                is_valid, msg = promo.is_valid_for_amount(total_amount, "TOUR")
+                user = self.context.get('request').user if self.context.get('request') else None
+                is_valid, msg = promo.is_valid_for_amount(total_amount, "TOUR", user=user)
                 if not is_valid:
                     raise serializers.ValidationError({'promo_code': msg})
                 discount = promo.calculate_discount(total_amount)
@@ -1619,6 +1631,10 @@ class BookingCreateSerializer(serializers.ModelSerializer):
             if promo and promo_discount_amount > 0:
                 from django.db.models import F
                 PromoCode.objects.filter(pk=promo.pk).update(times_used=F('times_used') + 1)
+
+            # Send confirmation emails to all parties
+            from travel.tasks import send_booking_confirmation_emails
+            send_booking_confirmation_emails.delay(booking.id)
 
             return booking
 

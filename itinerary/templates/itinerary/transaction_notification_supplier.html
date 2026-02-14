@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Penjualan Itinerary Baru</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
+            color: white;
+            padding: 30px 20px;
+            border-radius: 10px 10px 0 0;
+            text-align: center;
+        }
+        .content {
+            background: #f8f9fa;
+            padding: 30px 20px;
+            border-radius: 0 0 10px 10px;
+        }
+        .transaction-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .detail-label {
+            font-weight: bold;
+            color: #666;
+        }
+        .detail-value {
+            color: #333;
+            text-align: right;
+        }
+        .success-box {
+            background: #d1fae5;
+            border-left: 4px solid #16a34a;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+        }
+        .button {
+            display: inline-block;
+            background: #16a34a;
+            color: white;
+            padding: 12px 30px;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🎉 Itinerary Anda Terjual!</h1>
+        <p>{{ itinerary_title }}</p>
+    </div>
+    
+    <div class="content">
+        <p>Halo <strong>{{ supplier_name }}</strong>,</p>
+        
+        <p>Selamat! Itinerary Anda telah dibeli oleh customer. Berikut adalah detailnya:</p>
+        
+        <div class="transaction-card">
+            <h2 style="margin-top: 0; color: #16a34a;">Detail Transaksi</h2>
+            
+            <div class="detail-row">
+                <span class="detail-label">Nomor Transaksi:</span>
+                <span class="detail-value"><strong>{{ transaction_number }}</strong></span>
+            </div>
+            
+            <div class="detail-row">
+                <span class="detail-label">Itinerary:</span>
+                <span class="detail-value">{{ itinerary_title }}</span>
+            </div>
+            
+            <div class="detail-row">
+                <span class="detail-label">Dibeli oleh:</span>
+                <span class="detail-value">{{ buyer_name }}</span>
+            </div>
+            
+            <div class="detail-row">
+                <span class="detail-label">Email Pembeli:</span>
+                <span class="detail-value">{{ buyer_email }}</span>
+            </div>
+            
+            <div class="detail-row">
+                <span class="detail-label">Tanggal Pembelian:</span>
+                <span class="detail-value">{{ purchase_date }}</span>
+            </div>
+            
+            <div class="detail-row" style="font-size: 18px; font-weight: bold;">
+                <span class="detail-label">Harga Jual:</span>
+                <span class="detail-value">{{ total_amount_formatted }}</span>
+            </div>
+            
+            <div class="detail-row" style="font-size: 16px; color: #16a34a; font-weight: bold;">
+                <span class="detail-label">Pendapatan Anda:</span>
+                <span class="detail-value">{{ supplier_earnings_formatted }}</span>
+            </div>
+        </div>
+        
+        <div class="success-box">
+            <strong>💰 Informasi Pendapatan:</strong>
+            <p style="margin: 10px 0;">Platform fee: {{ platform_fee_formatted }}</p>
+            <p style="margin: 10px 0;">Pendapatan Anda setelah platform fee: <strong>{{ supplier_earnings_formatted }}</strong></p>
+            <p style="margin: 10px 0;">Pembeli sekarang dapat mengakses itinerary Anda.</p>
+        </div>
+        
+        <div style="text-align: center;">
+            <a href="{{ supplier_url }}/itinerary-transactions/{{ transaction_id }}" class="button">Lihat Detail Transaksi</a>
+        </div>
+        
+        <p style="margin-top: 30px;"><strong>Terima kasih</strong> telah menggunakan platform kami untuk berbagi itinerary Anda!</p>
+    </div>
+</body>
+</html>

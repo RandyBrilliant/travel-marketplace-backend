@@ -98,6 +98,16 @@ class PromoCode(models.Model):
         default=PromoApplicableTo.BOTH,
         help_text=_("Where this promo can be applied."),
     )
+    is_user_specific = models.BooleanField(
+        default=False,
+        help_text=_("If True, only specified users can use this promo."),
+    )
+    allowed_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name="allowed_promo_codes",
+        help_text=_("Users who can use this promo (only if is_user_specific=True)."),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -125,7 +135,7 @@ class PromoCode(models.Model):
             )
         return min(self.discount_value, amount)
 
-    def is_valid_for_amount(self, amount: int, applicable_type: str):
+    def is_valid_for_amount(self, amount: int, applicable_type: str, user=None):
         """
         Check if promo is valid for amount and type.
         Returns (is_valid, message).
@@ -147,6 +157,12 @@ class PromoCode(models.Model):
                 return False, "Kode promo hanya berlaku untuk pemesanan tur."
             if self.applicable_to == PromoApplicableTo.ITINERARY and applicable_type != "ITINERARY":
                 return False, "Kode promo hanya berlaku untuk pembelian virtual guiding."
+        # Check user-specific restriction
+        if self.is_user_specific:
+            if not user:
+                return False, "Kode promo ini memerlukan akun terdaftar."
+            if not self.allowed_users.filter(pk=user.pk).exists():
+                return False, "Anda tidak memiliki izin untuk menggunakan kode promo ini."
         return True, ""
 
 

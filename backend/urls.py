@@ -58,6 +58,7 @@ from travel.views import (
     AdminPromoCodeViewSet,
     PromoValidateView,
     PromoListForCheckoutView,
+    UserSearchForPromoView,
 )
 from itinerary.views import CustomerItineraryTransactionViewSet, ResellerItineraryTransactionViewSet, CustomerItineraryBoardDetailView
 from travel.report_views import (
@@ -206,6 +207,8 @@ api_v1_patterns = [
     # Promo code validation and list (authenticated)
     path("promo-codes/validate/", PromoValidateView.as_view(), name="promo-validate"),
     path("promo-codes/list-for-checkout/", PromoListForCheckoutView.as_view(), name="promo-list-for-checkout"),
+    # User search for promo code (admin only)
+    path("admin/users/", UserSearchForPromoView.as_view(), name="user-search-for-promo"),
     # Public tour endpoints
     path("tours/", PublicTourPackageListView.as_view(), name="public-tour-list"),
     path("tours/<str:slug>/", PublicTourPackageDetailView.as_view(), name="public-tour-detail"),
