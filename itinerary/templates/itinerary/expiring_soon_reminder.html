@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pengingat: Akses Itinerary Akan Berakhir</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            color: white;
+            padding: 30px 20px;
+            border-radius: 10px 10px 0 0;
+            text-align: center;
+        }
+        .content {
+            background: #f8f9fa;
+            padding: 30px 20px;
+            border-radius: 0 0 10px 10px;
+        }
+        .reminder-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .detail-label {
+            font-weight: bold;
+            color: #666;
+        }
+        .detail-value {
+            color: #333;
+            text-align: right;
+        }
+        .warning-box {
+            background: #fed7aa;
+            border-left: 4px solid #f59e0b;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        .info-box {
+            background: #e0e7ff;
+            border-left: 4px solid #6366f1;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        .button {
+            display: inline-block;
+            background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+            color: white;
+            padding: 15px 40px;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 20px 0;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        .countdown {
+            text-align: center;
+            background: #fef3c7;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            font-size: 24px;
+            font-weight: bold;
+            color: #d97706;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 2px solid #e9ecef;
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>⏰ Pengingat Penting!</h1>
+        <p>Akses Itinerary Anda Akan Berakhir</p>
+    </div>
+    
+    <div class="content">
+        <p>Halo <strong>{{ customer_name }}</strong>,</p>
+        
+        <p>Ini adalah pengingat bahwa akses Anda ke itinerary <strong>{{ itinerary_title }}</strong> akan segera berakhir.</p>
+        
+        <div class="countdown">
+            ⏱️ {{ days_remaining }} Hari Lagi
+        </div>
+        
+        <div class="reminder-card">
+            <h2 style="margin-top: 0; color: #f59e0b;">Detail Itinerary</h2>
+            
+            <div class="detail-row">
+                <span class="detail-label">Nomor Transaksi:</span>
+                <span class="detail-value"><strong>{{ transaction_number }}</strong></span>
+            </div>
+            
+            <div class="detail-row">
+                <span class="detail-label">Itinerary:</span>
+                <span class="detail-value">{{ itinerary_title }}</span>
+            </div>
+            
+            <div class="detail-row">
+                <span class="detail-label">Tanggal Keberangkatan:</span>
+                <span class="detail-value">{{ departure_date }}</span>
+            </div>
+            
+            <div class="detail-row">
+                <span class="detail-label">Tanggal Kedatangan:</span>
+                <span class="detail-value">{{ arrival_date }}</span>
+            </div>
+            
+            <div class="detail-row">
+                <span class="detail-label">Durasi:</span>
+                <span class="detail-value">{{ duration }}</span>
+            </div>
+            
+            <div class="detail-row" style="font-size: 18px; font-weight: bold; color: #dc2626;">
+                <span class="detail-label">Akses Berakhir Pada:</span>
+                <span class="detail-value">{{ expires_at }}</span>
+            </div>
+        </div>
+        
+        <div class="warning-box">
+            <strong>⚠️ Tindakan yang Disarankan:</strong>
+            <p style="margin: 10px 0;">Sebelum akses Anda berakhir, pastikan untuk:</p>
+            <ul style="margin: 10px 0;">
+                <li>Meninjau kembali seluruh detail itinerary</li>
+                <li>Menyimpan screenshot atau catatan penting</li>
+                <li>Mencatat semua informasi kontak yang diperlukan</li>
+                <li>Memastikan Anda memiliki semua detail perjalanan</li>
+            </ul>
+        </div>
+        
+        <div style="text-align: center;">
+            <a href="{{ itinerary_url }}" class="button">Akses Itinerary Sekarang</a>
+        </div>
+        
+        <div class="info-box">
+            <strong>📋 Yang Perlu Anda Simpan:</strong>
+            <ul style="margin: 10px 0;">
+                <li>Jadwal harian perjalanan</li>
+                <li>Detail destinasi dan aktivitas</li>
+                <li>Informasi akomodasi (nama hotel, alamat, nomor telepon)</li>
+                <li>Detail transportasi (nomor penerbangan, waktu keberangkatan)</li>
+                <li>Kontak emergency dan tour guide</li>
+                <li>Tips dan rekomendasi lokasi</li>
+            </ul>
+        </div>
+        
+        <p style="margin-top: 30px;">Jika Anda memiliki pertanyaan atau memerlukan bantuan, jangan ragu untuk menghubungi tim support kami.</p>
+        
+        <p>Selamat menikmati perjalanan Anda! 🎉</p>
+    </div>
+    
+    <div class="footer">
+        <p><strong>{{ company_name }}</strong></p>
+        <p>{{ company_address }}</p>
+        <p>Email: {{ support_email }} | Phone: {{ support_phone }}</p>
+        <p style="margin-top: 20px; font-size: 12px; color: #999;">
+            Email ini dikirim otomatis. Silakan jangan balas email ini.
+        </p>
+    </div>
+</body>
+</html>

@@ -1632,9 +1632,9 @@ class BookingCreateSerializer(serializers.ModelSerializer):
                 from django.db.models import F
                 PromoCode.objects.filter(pk=promo.pk).update(times_used=F('times_used') + 1)
 
-            # Send confirmation emails to all parties
-            from travel.tasks import send_booking_confirmation_emails
-            send_booking_confirmation_emails.delay(booking.id)
+            # Send creation emails to customer/reseller and supplier
+            from travel.tasks import send_booking_creation_emails
+            send_booking_creation_emails.delay(booking.id)
 
             return booking
 

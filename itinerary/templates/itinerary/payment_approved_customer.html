@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pembayaran Disetujui - Akses Itinerary Anda</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
+            color: white;
+            padding: 30px 20px;
+            border-radius: 10px 10px 0 0;
+            text-align: center;
+        }
+        .content {
+            background: #f8f9fa;
+            padding: 30px 20px;
+            border-radius: 0 0 10px 10px;
+        }
+        .success-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .detail-label {
+            font-weight: bold;
+            color: #666;
+        }
+        .detail-value {
+            color: #333;
+            text-align: right;
+        }
+        .highlight-box {
+            background: #d1fae5;
+            border-left: 4px solid #16a34a;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        .button {
+            display: inline-block;
+            background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+            color: white;
+            padding: 15px 40px;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 20px 0;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        .info-box {
+            background: #e0e7ff;
+            border-left: 4px solid #6366f1;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 2px solid #e9ecef;
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>✅ Pembayaran Disetujui!</h1>
+        <p>Itinerary Anda Siap Digunakan</p>
+    </div>
+    
+    <div class="content">
+        <p>Halo <strong>{{ customer_name }}</strong>,</p>
+        
+        <p>Selamat! Pembayaran Anda untuk transaksi <strong>{{ transaction_number }}</strong> telah disetujui.</p>
+        
+        <div class="success-card">
+            <h2 style="margin-top: 0; color: #16a34a;">Detail Pembayaran</h2>
+            
+            <div class="detail-row">
+                <span class="detail-label">Nomor Transaksi:</span>
+                <span class="detail-value"><strong>{{ transaction_number }}</strong></span>
+            </div>
+            
+            <div class="detail-row">
+                <span class="detail-label">Itinerary:</span>
+                <span class="detail-value">{{ itinerary_title }}</span>
+            </div>
+            
+            <div class="detail-row">
+                <span class="detail-label">Tanggal Keberangkatan:</span>
+                <span class="detail-value">{{ departure_date }}</span>
+            </div>
+            
+            <div class="detail-row">
+                <span class="detail-label">Tanggal Kedatangan:</span>
+                <span class="detail-value">{{ arrival_date }}</span>
+            </div>
+            
+            <div class="detail-row">
+                <span class="detail-label">Durasi:</span>
+                <span class="detail-value">{{ duration }}</span>
+            </div>
+            
+            <div class="detail-row" style="font-size: 18px; font-weight: bold; color: #16a34a;">
+                <span class="detail-label">Total Dibayar:</span>
+                <span class="detail-value">{{ total_amount_formatted }}</span>
+            </div>
+            
+            <div class="detail-row">
+                <span class="detail-label">Status:</span>
+                <span class="detail-value"><strong style="color: #16a34a;">AKTIF</strong></span>
+            </div>
+            
+            <div class="detail-row">
+                <span class="detail-label">Akses Berlaku Hingga:</span>
+                <span class="detail-value"><strong style="color: #dc2626;">{{ expires_at }}</strong></span>
+            </div>
+        </div>
+        
+        <div class="highlight-box">
+            <strong>🎉 Akses Itinerary Anda Sudah Aktif!</strong>
+            <p style="margin: 10px 0;">Anda sekarang dapat mengakses papan itinerary yang berisi detail lengkap perjalanan Anda, termasuk:</p>
+            <ul style="margin: 10px 0;">
+                <li>Jadwal harian perjalanan</li>
+                <li>Destinasi dan aktivitas</li>
+                <li>Informasi akomodasi dan transportasi</li>
+                <li>Tips dan rekomendasi perjalanan</li>
+            </ul>
+        </div>
+        
+        <div style="text-align: center;">
+            <a href="{{ itinerary_url }}" class="button">Akses Itinerary Saya</a>
+        </div>
+        
+        <div class="info-box">
+            <strong>📌 Informasi Penting:</strong>
+            <ul style="margin: 10px 0;">
+                <li>Akses itinerary Anda berlaku hingga <strong>{{ expires_at }}</strong></li>
+                <li>Simpan link itinerary untuk akses mudah</li>
+                <li>Anda akan menerima pengingat sebelum akses berakhir</li>
+                <li>Jika memerlukan bantuan, hubungi tim support kami</li>
+            </ul>
+        </div>
+        
+        <p style="margin-top: 30px;">Terima kasih atas kepercayaan Anda menggunakan layanan kami. Selamat menikmati perjalanan!</p>
+    </div>
+    
+    <div class="footer">
+        <p><strong>{{ company_name }}</strong></p>
+        <p>{{ company_address }}</p>
+        <p>Email: {{ support_email }} | Phone: {{ support_phone }}</p>
+        <p style="margin-top: 20px; font-size: 12px; color: #999;">
+            Email ini dikirim otomatis. Silakan jangan balas email ini.
+        </p>
+    </div>
+</body>
+</html>
