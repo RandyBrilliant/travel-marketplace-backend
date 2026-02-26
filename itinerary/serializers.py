@@ -564,6 +564,10 @@ class ItineraryTransactionCreateSerializer(serializers.ModelSerializer):
         # Increment promo usage counter with race condition protection
         if promo and promo_discount_amount > 0:
             PromoCode.objects.filter(pk=promo.pk).update(times_used=F('times_used') + 1)
+            # Record per-user usage for per-user limit enforcement
+            if transaction.customer_id:
+                from travel.models import PromoCodeUsage
+                PromoCodeUsage.objects.create(promo_code=promo, user_id=transaction.customer_id)
 
         # Send confirmation emails to all parties
         from itinerary.tasks import send_itinerary_transaction_confirmation_emails

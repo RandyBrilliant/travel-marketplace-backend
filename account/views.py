@@ -1269,7 +1269,7 @@ class RegisterResellerView(APIView):
             "email": "user@example.com",
             "password": "securepassword123",
             "full_name": "John Doe",
-            "contact_phone": "+6281234567890" (optional),
+            "contact_phone": "+6281234567890" (required),
             "address": "Address" (optional),
             "sponsor_referral_code": "ABC123" (required)
         }
@@ -1301,6 +1301,11 @@ class RegisterResellerView(APIView):
         if not full_name:
             return Response(
                 {'full_name': ['This field is required.']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if not contact_phone:
+            return Response(
+                {'contact_phone': ['This field is required.']},
                 status=status.HTTP_400_BAD_REQUEST
             )
         if not sponsor_referral_code:
@@ -1639,7 +1644,7 @@ class RegisterCustomerView(APIView):
             "email": "customer@example.com",
             "password": "securepassword123",
             "full_name": "Jane Doe",
-            "contact_phone": "+6281234567890" (optional),
+            "contact_phone": "+6281234567890" (required),
             "address": "Address" (optional)
         }
         """
@@ -1667,6 +1672,11 @@ class RegisterCustomerView(APIView):
         if not full_name:
             return Response(
                 {'full_name': ['This field is required.']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if not contact_phone:
+            return Response(
+                {'contact_phone': ['This field is required.']},
                 status=status.HTTP_400_BAD_REQUEST
             )
 

@@ -205,6 +205,9 @@ class PromoListForCheckoutView(APIView):
             # Skip user-specific promos if user is not allowed
             if promo.is_user_specific and not promo.allowed_users.filter(pk=request.user.pk).exists():
                 continue
+            # Skip customers-only promos for resellers
+            if promo.customers_only and getattr(request.user, 'role', None) == "RESELLER":
+                continue
             is_valid, msg = promo.is_valid_for_amount(amount, applicable_type, user=request.user)
             discount_amount = promo.calculate_discount(amount) if is_valid else 0
             results.append({

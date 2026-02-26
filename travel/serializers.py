@@ -65,6 +65,7 @@ class PromoCodeSerializer(serializers.ModelSerializer):
             'discount_value',
             'min_purchase_amount',
             'max_uses',
+            'max_uses_per_user',
             'times_used',
             'valid_from',
             'valid_until',
@@ -73,6 +74,7 @@ class PromoCodeSerializer(serializers.ModelSerializer):
             'is_user_specific',
             'allowed_users',
             'allowed_users_emails',
+            'customers_only',
             'created_at',
             'updated_at',
         ]
@@ -1631,6 +1633,10 @@ class BookingCreateSerializer(serializers.ModelSerializer):
             if promo and promo_discount_amount > 0:
                 from django.db.models import F
                 PromoCode.objects.filter(pk=promo.pk).update(times_used=F('times_used') + 1)
+                # Record per-user usage for per-user limit enforcement
+                if booking.booked_by:
+                    from .models import PromoCodeUsage
+                    PromoCodeUsage.objects.create(promo_code=promo, user=booking.booked_by)
 
             # Send creation emails to customer/reseller and supplier
             from travel.tasks import send_booking_creation_emails

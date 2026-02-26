@@ -78,6 +78,11 @@ class PromoCode(models.Model):
         blank=True,
         help_text=_("Max total uses across all users. Null = unlimited."),
     )
+    max_uses_per_user = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text=_("Max uses per individual user. Null = unlimited. Set to 1 for one-time-per-customer."),
+    )
     times_used = models.PositiveIntegerField(
         default=0,
         help_text=_("Number of times this promo has been used."),
@@ -107,6 +112,10 @@ class PromoCode(models.Model):
         blank=True,
         related_name="allowed_promo_codes",
         help_text=_("Users who can use this promo (only if is_user_specific=True)."),
+    )
+    customers_only = models.BooleanField(
+        default=False,
+        help_text=_("If True, resellers cannot use this promo. Only customers are allowed."),
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -163,7 +172,51 @@ class PromoCode(models.Model):
                 return False, "Kode promo ini memerlukan akun terdaftar."
             if not self.allowed_users.filter(pk=user.pk).exists():
                 return False, "Anda tidak memiliki izin untuk menggunakan kode promo ini."
+        # Check customers-only restriction
+        if self.customers_only and user:
+            if getattr(user, 'role', None) == "RESELLER":
+                return False, "Kode promo ini hanya berlaku untuk pelanggan, bukan reseller."
+        # Check per-user usage limit
+        if self.max_uses_per_user is not None and user:
+            user_usage_count = self.usage_records.filter(user=user).count()
+            if user_usage_count >= self.max_uses_per_user:
+                return False, "Anda sudah mencapai batas penggunaan kode promo ini."
         return True, ""
+
+
+class PromoCodeUsage(models.Model):
+    """
+    Tracks individual usage of a promo code by a specific user.
+    Used to enforce per-user usage limits (e.g., one-time-per-customer coupons).
+    """
+    promo_code = models.ForeignKey(
+        PromoCode,
+        on_delete=models.CASCADE,
+        related_name="usage_records",
+        help_text=_("The promo code that was used."),
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="promo_code_usages",
+        help_text=_("The user who used the promo code."),
+    )
+    used_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text=_("When the promo code was used."),
+    )
+
+    class Meta:
+        verbose_name = _("Promo Code Usage")
+        verbose_name_plural = _("Promo Code Usages")
+        ordering = ["-used_at"]
+        indexes = [
+            models.Index(fields=["promo_code", "user"]),
+            models.Index(fields=["user"]),
+        ]
+
+    def __str__(self):
+        return f"{self.promo_code.code} used by {self.user.email} at {self.used_at}"
 
 
 class Currency(models.Model):

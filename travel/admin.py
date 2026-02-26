@@ -11,6 +11,7 @@ from .models import (
     ResellerGroup,
     WithdrawalRequest,
     PromoCode,
+    PromoCodeUsage,
 )
 
 # Register your models here.
@@ -351,8 +352,8 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
 
 @admin.register(PromoCode)
 class PromoCodeAdmin(admin.ModelAdmin):
-    list_display = ["code", "discount_type", "discount_value", "min_purchase_amount", "times_used", "max_uses", "is_active", "is_user_specific", "applicable_to", "valid_from", "valid_until"]
-    list_filter = ["is_active", "discount_type", "applicable_to", "is_user_specific"]
+    list_display = ["code", "discount_type", "discount_value", "min_purchase_amount", "times_used", "max_uses", "max_uses_per_user", "is_active", "customers_only", "is_user_specific", "applicable_to", "valid_from", "valid_until"]
+    list_filter = ["is_active", "discount_type", "applicable_to", "is_user_specific", "customers_only"]
     search_fields = ["code", "description"]
     readonly_fields = ["times_used", "created_at", "updated_at"]
     filter_horizontal = ["allowed_users"]
@@ -365,17 +366,27 @@ class PromoCodeAdmin(admin.ModelAdmin):
             "fields": ("discount_type", "discount_value", "min_purchase_amount")
         }),
         ("Usage Limits", {
-            "fields": ("max_uses", "times_used")
+            "fields": ("max_uses", "max_uses_per_user", "times_used"),
+            "description": "max_uses = global cap across all users. max_uses_per_user = cap per individual user (set to 1 for one-time-per-customer)."
         }),
         ("Validity Period", {
             "fields": ("valid_from", "valid_until")
         }),
         ("Restrictions", {
-            "fields": ("applicable_to", "is_user_specific", "allowed_users"),
-            "description": "Set user-specific to restrict this promo to specific users only."
+            "fields": ("applicable_to", "customers_only", "is_user_specific", "allowed_users"),
+            "description": "customers_only: blocks resellers. is_user_specific: restrict to a specific whitelist of users."
         }),
         ("Metadata", {
             "fields": ("created_at", "updated_at"),
             "classes": ("collapse",)
         }),
     )
+
+
+@admin.register(PromoCodeUsage)
+class PromoCodeUsageAdmin(admin.ModelAdmin):
+    list_display = ["promo_code", "user", "used_at"]
+    list_filter = ["promo_code", "used_at"]
+    search_fields = ["promo_code__code", "user__email"]
+    readonly_fields = ["promo_code", "user", "used_at"]
+    ordering = ["-used_at"]
