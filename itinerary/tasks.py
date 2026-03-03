@@ -219,7 +219,7 @@ def send_itinerary_payment_approved_emails(transaction_id):
         **common_context,
         'customer_name': transaction.customer.get_full_name() or transaction.customer.email,
         'site_url': getattr(settings, 'FRONTEND_URL', 'https://goholiday.id'),
-        'itinerary_url': f"{getattr(settings, 'FRONTEND_URL', 'https://goholiday.id')}/itinerary/{transaction.board.id}",
+        'itinerary_url': f"{getattr(settings, 'FRONTEND_URL', 'https://goholiday.id')}/itinerary-boards/{transaction.board.slug}/view",
         'expires_at': transaction.expires_at.strftime('%d %B %Y %H:%M') if transaction.expires_at else 'Tidak terbatas',
         'transaction_id': transaction.id,
     }
@@ -324,7 +324,7 @@ def send_itinerary_expiring_soon_emails():
             'customer_name': transaction.customer.get_full_name() or transaction.customer.email,
             'expires_at': transaction.expires_at.strftime('%d %B %Y %H:%M'),
             'days_remaining': (transaction.expires_at - now).days,
-            'itinerary_url': f"{getattr(settings, 'FRONTEND_URL', 'https://goholiday.id')}/itinerary/{transaction.board.id}",
+            'itinerary_url': f"{getattr(settings, 'FRONTEND_URL', 'https://goholiday.id')}/itinerary-boards/{transaction.board.slug}/view",
             'company_name': getattr(settings, 'COMPANY_NAME', 'GoHoliday Travel Marketplace'),
             'company_address': getattr(settings, 'COMPANY_ADDRESS', 'Indonesia'),
             'support_email': getattr(settings, 'SUPPORT_EMAIL', 'support@goholiday.id'),

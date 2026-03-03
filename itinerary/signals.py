@@ -112,30 +112,22 @@ def handle_itinerary_payment_notifications(sender, instance, created, **kwargs):
         if instance._old_payment_status != 'APPROVED' and instance.payment_status == 'APPROVED':
             # Auto-activate transaction if not already active
             if instance.status == ItineraryTransactionStatus.PENDING:
-                # Set the skip flag to prevent recursion
+                # Set the skip flag to prevent recursion in post_save signal
                 instance._skip_payment_signals = True
-                
-                # Activate the transaction
-                instance.status = ItineraryTransactionStatus.ACTIVE
-                instance.activated_at = timezone.now()
-                
-                # Set expiration date if not already set (e.g., 30 days from activation)
-                if not instance.expires_at and instance.arrival_date:
-                    from datetime import timedelta
-                    # Access expires 2 days after arrival date
-                    instance.expires_at = timezone.datetime.combine(
-                        instance.arrival_date + timedelta(days=2),
-                        timezone.datetime.min.time()
-                    ).replace(tzinfo=timezone.get_current_timezone())
-                elif not instance.expires_at:
-                    # Default: 30 days from activation if no arrival date
-                    from datetime import timedelta
-                    instance.expires_at = timezone.now() + timedelta(days=30)
-                
-                instance.save(update_fields=['status', 'activated_at', 'expires_at'])
-                
-                # Remove the flag
-                delattr(instance, '_skip_payment_signals')
+                try:
+                    # Use the model's activate() method which correctly sets
+                    # expires_at to end-of-day (23:59:59) via time(23, 59, 59).
+                    # Previously this block manually used timezone.datetime.min.time()
+                    # which resolves to midnight (00:00:00), causing expires_at to land
+                    # at the very START of (arrival_date + 2 days). When arrival_date
+                    # is in the past, expires_at ends up already expired, so Celery's
+                    # expire_old_itinerary_transactions task immediately flips the status
+                    # back to EXPIRED and customers lose access right after approval.
+                    instance.activate()
+                finally:
+                    # Always remove the flag even if activate() raises an exception
+                    if hasattr(instance, '_skip_payment_signals'):
+                        delattr(instance, '_skip_payment_signals')
             
             # Send approval emails
             from .tasks import send_itinerary_payment_approved_emails
