@@ -93,7 +93,13 @@ def handle_itinerary_payment_notifications(sender, instance, created, **kwargs):
     # Skip if this is being called from within another signal to prevent recursion
     if hasattr(instance, '_skip_payment_signals'):
         return
-    
+
+    # 0. New transaction created → Email customer and supplier
+    if created:
+        from .tasks import send_itinerary_creation_emails
+        send_itinerary_creation_emails.delay(instance.id)
+        return
+
     if not created and hasattr(instance, '_old_payment_status'):
         # 1. Payment proof uploaded (new proof added when there wasn't one before)
         has_new_payment_proof = bool(instance.payment_proof_image)

@@ -369,15 +369,13 @@ class AdminSupplierProfileSerializer(BaseAdminProfileSerializer, SupplierProfile
         required=False,
         allow_null=True,
     )
-    # Override email field from BaseAdminProfileSerializer to make it read-only in responses
-    email = serializers.EmailField(source="user.email", read_only=True)
 
     class Meta(SupplierProfileSerializer.Meta):
         fields = SupplierProfileSerializer.Meta.fields + [
             "user_data", "password"
         ]
         read_only_fields = [
-            "id", "email", "user", "email_verified", "created_at", "updated_at", "approval_status", 
+            "id", "user", "email_verified", "created_at", "updated_at", "approval_status",
             "approved_at", "rejection_reason"
         ]
 
@@ -390,15 +388,12 @@ class AdminResellerProfileSerializer(BaseAdminProfileSerializer, ResellerProfile
         required=False,
         allow_null=True,
     )
-    # Override email field from BaseAdminProfileSerializer to make it read-only in responses
-    email = serializers.EmailField(source="user.email", read_only=True)
 
     class Meta(ResellerProfileSerializer.Meta):
         fields = ResellerProfileSerializer.Meta.fields + ["user_data", "password"]
         read_only_fields = [
             "id",
             "user",
-            "email",
             "referral_code",  # Auto-generated, should be read-only
             "group_root",
             "group_root_name",
@@ -453,13 +448,16 @@ class AdminCustomerProfileSerializer(BaseAdminProfileSerializer, CustomerProfile
         required=False,
         allow_null=True,
     )
-    # Override email field from BaseAdminProfileSerializer to make it read-only in responses
-    # while still allowing it to be used for user creation/updates
-    email = serializers.EmailField(source="user.email", read_only=True)
 
     class Meta(CustomerProfileSerializer.Meta):
         fields = CustomerProfileSerializer.Meta.fields + ["user_data", "password"]
-        read_only_fields = ["id", "user", "email", "created_at", "updated_at"]
+        read_only_fields = ["id", "user", "created_at", "updated_at"]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Ensure top-level email is always present in responses (frontend falls back to profile.email)
+        data['email'] = instance.user.email if instance.user else ""
+        return data
 
 
 class ContactMessageSerializer(serializers.ModelSerializer):

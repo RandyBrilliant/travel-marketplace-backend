@@ -548,6 +548,104 @@ class AdminCustomerProfileViewSet(BaseAdminProfileViewSet):
     def get_user_role(self):
         return UserRole.CUSTOMER
 
+    @action(detail=True, methods=['post'], url_path='convert-to-reseller')
+    def convert_to_reseller(self, request, pk=None):
+        """
+        Convert a customer account to a reseller account.
+        - Changes the user role from CUSTOMER to RESELLER.
+        - Creates a ResellerProfile using data from the request (falls back to customer profile data).
+        Admin can optionally supply: full_name, contact_phone, address, base_commission,
+        bank_name, bank_account_name, bank_account_number, sponsor_referral_code.
+        """
+        from account.serializers import generate_unique_referral_code, AdminResellerProfileSerializer
+
+        customer_profile = self.get_object()
+        user = customer_profile.user
+
+        # Guard: already has a reseller profile
+        if hasattr(user, 'reseller_profile'):
+            return Response(
+                {"detail": "User ini sudah memiliki profil reseller."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Collect fields, defaulting to existing customer data.
+        # Use `or ''` to coerce JSON null → "" for CharField/TextField columns
+        # that are blank=True but not null=True.
+        full_name = request.data.get('full_name') or customer_profile.full_name
+        contact_phone = request.data.get('contact_phone') or customer_profile.contact_phone or ''
+        address = request.data.get('address') or customer_profile.address or ''
+        sponsor_referral_code = request.data.get('sponsor_referral_code') or None
+
+        # Validate base_commission
+        base_commission_raw = request.data.get('base_commission', 0)
+        try:
+            base_commission = int(base_commission_raw)
+            if base_commission < 0:
+                return Response(
+                    {"base_commission": ["Komisi dasar harus bernilai 0 atau lebih."]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        except (ValueError, TypeError):
+            return Response(
+                {"base_commission": ["Komisi dasar harus berupa angka yang valid."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        bank_name = request.data.get('bank_name') or ''
+        bank_account_name = request.data.get('bank_account_name') or ''
+        bank_account_number = request.data.get('bank_account_number') or ''
+
+        # Resolve sponsor by referral code (optional)
+        sponsor = None
+        if sponsor_referral_code:
+            normalized_code = sponsor_referral_code.upper().strip()
+            try:
+                sponsor = ResellerProfile.objects.get(referral_code=normalized_code)
+            except ResellerProfile.DoesNotExist:
+                return Response(
+                    {"sponsor_referral_code": [
+                        f"Sponsor dengan kode referral '{normalized_code}' tidak ditemukan."
+                    ]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        try:
+            with transaction.atomic():
+                # Remove the customer profile before converting
+                customer_profile.delete()
+
+                # Change user role to RESELLER
+                user.role = UserRole.RESELLER
+                user.save()
+
+                # Create the reseller profile
+                reseller_profile = ResellerProfile.objects.create(
+                    user=user,
+                    full_name=full_name,
+                    contact_phone=contact_phone,
+                    address=address,
+                    base_commission=base_commission,
+                    bank_name=bank_name,
+                    bank_account_name=bank_account_name,
+                    bank_account_number=bank_account_number,
+                    referral_code=generate_unique_referral_code(),
+                    sponsor=sponsor,
+                )
+        except IntegrityError:
+            return Response(
+                {"detail": "Gagal mengkonversi akun. Data mungkin sudah ada."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as e:
+            return Response(
+                {"detail": f"Terjadi kesalahan: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        serializer = AdminResellerProfileSerializer(reseller_profile, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
 
 # ==================== ADMIN CONTACT MESSAGE ENDPOINTS ====================
 
