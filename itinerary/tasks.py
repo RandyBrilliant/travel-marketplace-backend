@@ -46,9 +46,8 @@ def expire_old_itinerary_transactions():
 @shared_task
 def send_itinerary_creation_emails(transaction_id):
     """
-    Send itinerary creation emails to customer and supplier ONLY.
-    Admin will be notified when payment is uploaded.
-    
+    Send itinerary creation emails to customer, supplier, and admin/staff.
+
     Args:
         transaction_id: The ID of the itinerary transaction that was created
     """
@@ -123,7 +122,33 @@ def send_itinerary_creation_emails(transaction_id):
         recipient_list=[transaction.board.created_by.email],
         email_type="itinerary_created_supplier"
     )
-    
+
+    # 3. Send notification email to all admin/staff
+    buyer_role = getattr(transaction.customer, 'role', None)
+    buyer_type = 'Reseller' if buyer_role == UserRole.RESELLER else 'Customer'
+    admin_context = {
+        **common_context,
+        'buyer_name': transaction.customer.get_full_name() or transaction.customer.email,
+        'buyer_type': buyer_type,
+        'buyer_email': transaction.customer.email,
+        'supplier_name': transaction.board.created_by.get_full_name() or transaction.board.created_by.email,
+        'status': 'Menunggu Pembayaran',
+        'platform_fee_formatted': 'N/A',
+        'admin_url': getattr(settings, 'ADMIN_FRONTEND_URL', 'https://goholiday.id/admin'),
+        'transaction_id': transaction.id,
+    }
+
+    admin_emails = list(User.objects.filter(role=UserRole.STAFF, is_active=True).values_list('email', flat=True))
+    if admin_emails:
+        admin_html = render_to_string('itinerary/transaction_notification_admin.html', admin_context)
+        send_email_with_backend_detection(
+            subject=f"Transaksi Itinerary Baru - {common_context['transaction_number']}",
+            plain_message=f"Transaksi itinerary baru dari {admin_context['buyer_name']} untuk {transaction.board.title}.",
+            html_message=admin_html,
+            recipient_list=admin_emails,
+            email_type="itinerary_created_admin"
+        )
+
     return f"Itinerary creation emails sent for transaction ID {transaction_id}"
 
 

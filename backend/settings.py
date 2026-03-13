@@ -320,6 +320,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'itinerary.tasks.expire_old_itinerary_transactions',
         'schedule': crontab(hour=0, minute=0),  # Run daily at midnight
     },
+    'send-itinerary-expiring-soon-emails': {
+        'task': 'itinerary.tasks.send_itinerary_expiring_soon_emails',
+        'schedule': crontab(hour=8, minute=0),  # Run daily at 8 AM
+    },
 }
 
 # API Documentation (drf-spectacular)

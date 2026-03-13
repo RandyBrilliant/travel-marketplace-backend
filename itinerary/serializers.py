@@ -569,10 +569,6 @@ class ItineraryTransactionCreateSerializer(serializers.ModelSerializer):
                 from travel.models import PromoCodeUsage
                 PromoCodeUsage.objects.create(promo_code=promo, user_id=transaction.customer_id)
 
-        # Send confirmation emails to all parties
-        from itinerary.tasks import send_itinerary_transaction_confirmation_emails
-        send_itinerary_transaction_confirmation_emails.delay(transaction.id)
-
         return transaction
 
 
