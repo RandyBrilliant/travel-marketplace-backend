@@ -208,7 +208,8 @@ def send_itinerary_payment_approved_emails(transaction_id):
     Send emails when payment is approved and access is granted.
     - Customer: Access granted notification with itinerary link
     - Supplier: Payment received notification
-    
+    - Staff: Payment approved notification
+
     Args:
         transaction_id: The ID of the transaction with approved payment
     """
@@ -275,7 +276,32 @@ def send_itinerary_payment_approved_emails(transaction_id):
         recipient_list=[transaction.board.created_by.email],
         email_type="itinerary_payment_approved_supplier"
     )
-    
+
+    # 3. Send notification to staff
+    buyer_role = getattr(transaction.customer, 'role', None)
+    buyer_type = 'Reseller' if buyer_role == UserRole.RESELLER else 'Customer'
+    staff_context = {
+        **common_context,
+        'buyer_name': transaction.customer.get_full_name() or transaction.customer.email,
+        'buyer_type': buyer_type,
+        'buyer_email': transaction.customer.email,
+        'supplier_name': transaction.board.created_by.get_full_name() or transaction.board.created_by.email,
+        'admin_url': getattr(settings, 'ADMIN_FRONTEND_URL', 'https://goholiday.id/admin'),
+        'transaction_id': transaction.id,
+    }
+
+    staff_emails = list(User.objects.filter(role=UserRole.STAFF, is_active=True).values_list('email', flat=True))
+
+    if staff_emails:
+        staff_html = render_to_string('itinerary/payment_approved_admin.html', staff_context)
+        send_email_with_backend_detection(
+            subject=f"Pembayaran Itinerary Disetujui - {transaction.transaction_number}",
+            plain_message=f"Pembayaran untuk itinerary {transaction.board.title} telah disetujui.",
+            html_message=staff_html,
+            recipient_list=staff_emails,
+            email_type="itinerary_payment_approved_admin"
+        )
+
     return f"Payment approved emails sent for transaction ID {transaction_id}"
 
 

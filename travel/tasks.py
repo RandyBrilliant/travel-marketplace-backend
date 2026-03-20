@@ -8,9 +8,8 @@ from account.models import UserRole
 @shared_task
 def send_booking_creation_emails(booking_id):
     """
-    Send booking creation emails to customer/reseller and supplier ONLY.
-    Admin will be notified when the booking is confirmed.
-    
+    Send booking creation emails to customer/reseller, supplier, and staff.
+
     Args:
         booking_id: The ID of the booking that was created
     """
@@ -98,7 +97,32 @@ def send_booking_creation_emails(booking_id):
         recipient_list=[tour_package.supplier.user.email],
         email_type="booking_supplier_notification"
     )
-    
+
+    # 3. Send notification email to all staff
+    booked_by_type = "Reseller" if booking.reseller else "Customer"
+    staff_context = {
+        **common_context,
+        'booked_by_name': booked_by_user.get_full_name() or booked_by_user.email,
+        'booked_by_type': booked_by_type,
+        'booked_by_email': booked_by_user.email,
+        'supplier_name': tour_package.supplier.user.get_full_name() or tour_package.supplier.user.email,
+        'booking_status': 'Pending',
+        'admin_url': getattr(settings, 'ADMIN_FRONTEND_URL', 'https://goholiday.id/admin'),
+        'booking_id': booking.id,
+    }
+
+    staff_emails = list(User.objects.filter(role=UserRole.STAFF, is_active=True).values_list('email', flat=True))
+
+    if staff_emails:
+        staff_html = render_to_string('travel/booking_created_admin.html', staff_context)
+        send_email_with_backend_detection(
+            subject=f"Pemesanan Baru #{common_context['booking_number']} - {tour_package.name}",
+            plain_message=f"Pemesanan baru dari {staff_context['booked_by_name']} untuk {tour_package.name}",
+            html_message=staff_html,
+            recipient_list=staff_emails,
+            email_type="booking_created_admin"
+        )
+
     return f"Booking creation emails sent for booking ID {booking_id}"
 
 
@@ -271,7 +295,8 @@ def send_payment_approved_emails(payment_id):
     Send emails when payment status changes to APPROVED.
     - Customer/Reseller: Payment approved confirmation
     - Supplier: Payment approved notification
-    
+    - Staff: Payment approved notification
+
     Args:
         payment_id: The ID of the payment that was approved
     """
@@ -348,6 +373,31 @@ def send_payment_approved_emails(payment_id):
         recipient_list=[tour_package.supplier.user.email],
         email_type="payment_approved_supplier"
     )
-    
+
+    # 3. Send notification to staff
+    booked_by_type = "Reseller" if booking.reseller else "Customer"
+    staff_context = {
+        **common_context,
+        'booked_by_name': booked_by_user.get_full_name() or booked_by_user.email,
+        'booked_by_type': booked_by_type,
+        'booked_by_email': booked_by_user.email,
+        'supplier_name': tour_package.supplier.user.get_full_name() or tour_package.supplier.user.email,
+        'admin_url': getattr(settings, 'ADMIN_FRONTEND_URL', 'https://goholiday.id/admin'),
+        'booking_id': booking.id,
+        'payment_id': payment.id,
+    }
+
+    staff_emails = list(User.objects.filter(role=UserRole.STAFF, is_active=True).values_list('email', flat=True))
+
+    if staff_emails:
+        staff_html = render_to_string('travel/payment_approved_admin.html', staff_context)
+        send_email_with_backend_detection(
+            subject=f"Pembayaran Disetujui - Booking #{booking.booking_number}",
+            plain_message=f"Pembayaran untuk booking {booking.booking_number} telah disetujui.",
+            html_message=staff_html,
+            recipient_list=staff_emails,
+            email_type="payment_approved_admin"
+        )
+
     return f"Payment approved emails sent for payment ID {payment_id}"
 
