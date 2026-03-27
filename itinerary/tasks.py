@@ -58,17 +58,17 @@ def send_itinerary_creation_emails(self, transaction_id):
     try:
         transaction = ItineraryTransaction.objects.select_related(
             'customer',
-            'board__created_by',
+            'board__supplier__user',
             'promo_code'
         ).get(id=transaction_id)
     except ItineraryTransaction.DoesNotExist:
         logger.error(f"ItineraryTransaction with ID {transaction_id} does not exist")
         return f"ItineraryTransaction with ID {transaction_id} does not exist"
 
-    # Check if board has a creator
-    if not transaction.board.created_by:
-        logger.error(f"ItineraryTransaction {transaction_id} has no board creator")
-        return f"ItineraryTransaction {transaction_id} has no board creator"
+    # Check if board has a supplier
+    if not transaction.board.supplier or not transaction.board.supplier.user:
+        logger.error(f"ItineraryTransaction {transaction_id} has no board supplier")
+        return f"ItineraryTransaction {transaction_id} has no board supplier"
 
     emails_sent = []
     emails_failed = []
@@ -116,10 +116,11 @@ def send_itinerary_creation_emails(self, transaction_id):
         logger.error(f"Failed to send itinerary creation email to customer {transaction.customer.email} for transaction {transaction_id}: {str(e)}")
 
     # 2. Send notification email to supplier (itinerary owner)
+    supplier_user = transaction.board.supplier.user
     try:
         supplier_context = {
             **common_context,
-            'supplier_name': transaction.board.created_by.get_full_name() or transaction.board.created_by.email,
+            'supplier_name': supplier_user.get_full_name() or supplier_user.email,
             'customer_name': transaction.customer.get_full_name() or transaction.customer.email,
             'customer_email': transaction.customer.email,
             'supplier_url': getattr(settings, 'FRONTEND_URL', 'https://goholiday.id'),
@@ -131,14 +132,14 @@ def send_itinerary_creation_emails(self, transaction_id):
             subject=f"Pembelian Baru Itinerary: {transaction.board.title}",
             plain_message=f"Itinerary Anda {transaction.board.title} telah dibeli.",
             html_message=supplier_html,
-            recipient_list=[transaction.board.created_by.email],
+            recipient_list=[supplier_user.email],
             email_type="itinerary_created_supplier"
         )
-        emails_sent.append(f"supplier:{transaction.board.created_by.email}")
-        logger.info(f"Itinerary creation email sent to supplier {transaction.board.created_by.email} for transaction {transaction_id}")
+        emails_sent.append(f"supplier:{supplier_user.email}")
+        logger.info(f"Itinerary creation email sent to supplier {supplier_user.email} for transaction {transaction_id}")
     except Exception as e:
-        emails_failed.append(f"supplier:{transaction.board.created_by.email}")
-        logger.error(f"Failed to send itinerary creation email to supplier {transaction.board.created_by.email} for transaction {transaction_id}: {str(e)}")
+        emails_failed.append(f"supplier:{supplier_user.email}")
+        logger.error(f"Failed to send itinerary creation email to supplier {supplier_user.email} for transaction {transaction_id}: {str(e)}")
 
     # 3. Send notification email to all admin/staff
     try:
@@ -149,7 +150,7 @@ def send_itinerary_creation_emails(self, transaction_id):
             'buyer_name': transaction.customer.get_full_name() or transaction.customer.email,
             'buyer_type': buyer_type,
             'buyer_email': transaction.customer.email,
-            'supplier_name': transaction.board.created_by.get_full_name() or transaction.board.created_by.email,
+            'supplier_name': supplier_user.get_full_name() or supplier_user.email,
             'status': 'Menunggu Pembayaran',
             'platform_fee_formatted': 'N/A',
             'admin_url': getattr(settings, 'ADMIN_FRONTEND_URL', 'https://goholiday.id/admin'),
@@ -202,7 +203,7 @@ def send_itinerary_payment_uploaded_emails(self, transaction_id):
     try:
         transaction = ItineraryTransaction.objects.select_related(
             'customer',
-            'board__created_by'
+            'board__supplier__user'
         ).get(id=transaction_id)
     except ItineraryTransaction.DoesNotExist:
         logger.error(f"ItineraryTransaction with ID {transaction_id} does not exist")
@@ -275,15 +276,15 @@ def send_itinerary_payment_approved_emails(self, transaction_id):
     try:
         transaction = ItineraryTransaction.objects.select_related(
             'customer',
-            'board__created_by'
+            'board__supplier__user'
         ).get(id=transaction_id)
     except ItineraryTransaction.DoesNotExist:
         logger.error(f"ItineraryTransaction with ID {transaction_id} does not exist")
         return f"ItineraryTransaction with ID {transaction_id} does not exist"
 
-    if not transaction.board.created_by:
-        logger.error(f"ItineraryTransaction {transaction_id} has no board creator")
-        return f"ItineraryTransaction {transaction_id} has no board creator"
+    if not transaction.board.supplier or not transaction.board.supplier.user:
+        logger.error(f"ItineraryTransaction {transaction_id} has no board supplier")
+        return f"ItineraryTransaction {transaction_id} has no board supplier"
 
     emails_sent = []
     emails_failed = []
@@ -326,10 +327,11 @@ def send_itinerary_payment_approved_emails(self, transaction_id):
         logger.error(f"Failed to send payment approved email to customer {transaction.customer.email} for transaction {transaction_id}: {str(e)}")
 
     # 2. Send payment received email to supplier
+    supplier_user = transaction.board.supplier.user
     try:
         supplier_context = {
             **common_context,
-            'supplier_name': transaction.board.created_by.get_full_name() or transaction.board.created_by.email,
+            'supplier_name': supplier_user.get_full_name() or supplier_user.email,
             'customer_name': transaction.customer.get_full_name() or transaction.customer.email,
             'supplier_url': getattr(settings, 'FRONTEND_URL', 'https://goholiday.id'),
             'transaction_id': transaction.id,
@@ -340,14 +342,14 @@ def send_itinerary_payment_approved_emails(self, transaction_id):
             subject=f"Pembayaran Diterima - Itinerary {transaction.board.title}",
             plain_message=f"Pembayaran untuk itinerary {transaction.board.title} telah disetujui.",
             html_message=supplier_html,
-            recipient_list=[transaction.board.created_by.email],
+            recipient_list=[supplier_user.email],
             email_type="itinerary_payment_approved_supplier"
         )
-        emails_sent.append(f"supplier:{transaction.board.created_by.email}")
-        logger.info(f"Payment approved email sent to supplier {transaction.board.created_by.email} for transaction {transaction_id}")
+        emails_sent.append(f"supplier:{supplier_user.email}")
+        logger.info(f"Payment approved email sent to supplier {supplier_user.email} for transaction {transaction_id}")
     except Exception as e:
-        emails_failed.append(f"supplier:{transaction.board.created_by.email}")
-        logger.error(f"Failed to send payment approved email to supplier {transaction.board.created_by.email} for transaction {transaction_id}: {str(e)}")
+        emails_failed.append(f"supplier:{supplier_user.email}")
+        logger.error(f"Failed to send payment approved email to supplier {supplier_user.email} for transaction {transaction_id}: {str(e)}")
 
     # 3. Send notification to staff
     try:
@@ -358,7 +360,7 @@ def send_itinerary_payment_approved_emails(self, transaction_id):
             'buyer_name': transaction.customer.get_full_name() or transaction.customer.email,
             'buyer_type': buyer_type,
             'buyer_email': transaction.customer.email,
-            'supplier_name': transaction.board.created_by.get_full_name() or transaction.board.created_by.email,
+            'supplier_name': supplier_user.get_full_name() or supplier_user.email,
             'admin_url': getattr(settings, 'ADMIN_FRONTEND_URL', 'https://goholiday.id/admin'),
             'transaction_id': transaction.id,
         }
