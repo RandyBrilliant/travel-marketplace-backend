@@ -1,3 +1,4 @@
+import logging
 from celery import shared_task
 from django.utils import timezone
 from django.template.loader import render_to_string
@@ -5,7 +6,6 @@ from django.conf import settings
 from .models import ItineraryTransaction, ItineraryTransactionStatus
 from account.tasks import send_email_with_backend_detection
 from account.models import UserRole
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -15,19 +15,19 @@ def expire_old_itinerary_transactions():
     """
     Check for ACTIVE itinerary transactions that have passed their expiry date
     and update their status to EXPIRED.
-    
+
     This task should be run periodically (e.g., daily or hourly).
     """
     now = timezone.now()
-    
+
     # Find ACTIVE transactions where expires_at has passed
     expired_transactions = ItineraryTransaction.objects.filter(
         status=ItineraryTransactionStatus.ACTIVE,
         expires_at__lt=now
     )
-    
+
     count = expired_transactions.count()
-    
+
     if count > 0:
         # Update all expired transactions to EXPIRED status
         expired_transactions.update(
@@ -36,15 +36,15 @@ def expire_old_itinerary_transactions():
         logger.info(f"Expired {count} itinerary transaction(s)")
     else:
         logger.info("No itinerary transactions to expire")
-    
+
     return {
         'expired_count': count,
         'timestamp': now.isoformat()
     }
 
 
-@shared_task
-def send_itinerary_creation_emails(transaction_id):
+@shared_task(bind=True, max_retries=3)
+def send_itinerary_creation_emails(self, transaction_id):
     """
     Send itinerary creation emails to customer, supplier, and admin/staff.
 
@@ -52,9 +52,9 @@ def send_itinerary_creation_emails(transaction_id):
         transaction_id: The ID of the itinerary transaction that was created
     """
     from django.contrib.auth import get_user_model
-    
+
     User = get_user_model()
-    
+
     try:
         transaction = ItineraryTransaction.objects.select_related(
             'customer',
@@ -62,12 +62,17 @@ def send_itinerary_creation_emails(transaction_id):
             'promo_code'
         ).get(id=transaction_id)
     except ItineraryTransaction.DoesNotExist:
+        logger.error(f"ItineraryTransaction with ID {transaction_id} does not exist")
         return f"ItineraryTransaction with ID {transaction_id} does not exist"
-    
+
     # Check if board has a creator
     if not transaction.board.created_by:
+        logger.error(f"ItineraryTransaction {transaction_id} has no board creator")
         return f"ItineraryTransaction {transaction_id} has no board creator"
-    
+
+    emails_sent = []
+    emails_failed = []
+
     # Common context for all emails
     common_context = {
         'transaction_number': transaction.transaction_number or f"IT-{transaction.id:06d}",
@@ -81,97 +86,131 @@ def send_itinerary_creation_emails(transaction_id):
         'support_email': getattr(settings, 'SUPPORT_EMAIL', 'support@goholiday.id'),
         'support_phone': getattr(settings, 'SUPPORT_PHONE', '+62 xxx xxxx xxxx'),
     }
-    
+
     # Add promo code info if used
     if transaction.promo_code:
         common_context['promo_code'] = transaction.promo_code
         common_context['promo_discount_formatted'] = f"Rp {transaction.promo_discount_amount:,.0f}"
-    
+
     # 1. Send confirmation email to customer
-    customer_context = {
-        **common_context,
-        'customer_name': transaction.customer.get_full_name() or transaction.customer.email,
-        'site_url': getattr(settings, 'FRONTEND_URL', 'https://goholiday.id'),
-        'transaction_id': transaction.id,
-    }
-    
-    customer_html = render_to_string('itinerary/transaction_created_customer.html', customer_context)
-    send_email_with_backend_detection(
-        subject=f"Pembelian Itinerary Diterima #{common_context['transaction_number']}",
-        plain_message=f"Pembelian itinerary {transaction.board.title} telah diterima.",
-        html_message=customer_html,
-        recipient_list=[transaction.customer.email],
-        email_type="itinerary_created_customer"
-    )
-    
+    try:
+        customer_context = {
+            **common_context,
+            'customer_name': transaction.customer.get_full_name() or transaction.customer.email,
+            'site_url': getattr(settings, 'FRONTEND_URL', 'https://goholiday.id'),
+            'transaction_id': transaction.id,
+        }
+
+        customer_html = render_to_string('itinerary/transaction_created_customer.html', customer_context)
+        send_email_with_backend_detection(
+            subject=f"Pembelian Itinerary Diterima #{common_context['transaction_number']}",
+            plain_message=f"Pembelian itinerary {transaction.board.title} telah diterima.",
+            html_message=customer_html,
+            recipient_list=[transaction.customer.email],
+            email_type="itinerary_created_customer"
+        )
+        emails_sent.append(f"customer:{transaction.customer.email}")
+        logger.info(f"Itinerary creation email sent to customer {transaction.customer.email} for transaction {transaction_id}")
+    except Exception as e:
+        emails_failed.append(f"customer:{transaction.customer.email}")
+        logger.error(f"Failed to send itinerary creation email to customer {transaction.customer.email} for transaction {transaction_id}: {str(e)}")
+
     # 2. Send notification email to supplier (itinerary owner)
-    supplier_context = {
-        **common_context,
-        'supplier_name': transaction.board.created_by.get_full_name() or transaction.board.created_by.email,
-        'customer_name': transaction.customer.get_full_name() or transaction.customer.email,
-        'customer_email': transaction.customer.email,
-        'supplier_url': getattr(settings, 'FRONTEND_URL', 'https://goholiday.id'),
-        'transaction_id': transaction.id,
-    }
-    
-    supplier_html = render_to_string('itinerary/transaction_created_supplier.html', supplier_context)
-    send_email_with_backend_detection(
-        subject=f"Pembelian Baru Itinerary: {transaction.board.title}",
-        plain_message=f"Itinerary Anda {transaction.board.title} telah dibeli.",
-        html_message=supplier_html,
-        recipient_list=[transaction.board.created_by.email],
-        email_type="itinerary_created_supplier"
-    )
+    try:
+        supplier_context = {
+            **common_context,
+            'supplier_name': transaction.board.created_by.get_full_name() or transaction.board.created_by.email,
+            'customer_name': transaction.customer.get_full_name() or transaction.customer.email,
+            'customer_email': transaction.customer.email,
+            'supplier_url': getattr(settings, 'FRONTEND_URL', 'https://goholiday.id'),
+            'transaction_id': transaction.id,
+        }
+
+        supplier_html = render_to_string('itinerary/transaction_created_supplier.html', supplier_context)
+        send_email_with_backend_detection(
+            subject=f"Pembelian Baru Itinerary: {transaction.board.title}",
+            plain_message=f"Itinerary Anda {transaction.board.title} telah dibeli.",
+            html_message=supplier_html,
+            recipient_list=[transaction.board.created_by.email],
+            email_type="itinerary_created_supplier"
+        )
+        emails_sent.append(f"supplier:{transaction.board.created_by.email}")
+        logger.info(f"Itinerary creation email sent to supplier {transaction.board.created_by.email} for transaction {transaction_id}")
+    except Exception as e:
+        emails_failed.append(f"supplier:{transaction.board.created_by.email}")
+        logger.error(f"Failed to send itinerary creation email to supplier {transaction.board.created_by.email} for transaction {transaction_id}: {str(e)}")
 
     # 3. Send notification email to all admin/staff
-    buyer_role = getattr(transaction.customer, 'role', None)
-    buyer_type = 'Reseller' if buyer_role == UserRole.RESELLER else 'Customer'
-    admin_context = {
-        **common_context,
-        'buyer_name': transaction.customer.get_full_name() or transaction.customer.email,
-        'buyer_type': buyer_type,
-        'buyer_email': transaction.customer.email,
-        'supplier_name': transaction.board.created_by.get_full_name() or transaction.board.created_by.email,
-        'status': 'Menunggu Pembayaran',
-        'platform_fee_formatted': 'N/A',
-        'admin_url': getattr(settings, 'ADMIN_FRONTEND_URL', 'https://goholiday.id/admin'),
-        'transaction_id': transaction.id,
-    }
+    try:
+        buyer_role = getattr(transaction.customer, 'role', None)
+        buyer_type = 'Reseller' if buyer_role == UserRole.RESELLER else 'Customer'
+        admin_context = {
+            **common_context,
+            'buyer_name': transaction.customer.get_full_name() or transaction.customer.email,
+            'buyer_type': buyer_type,
+            'buyer_email': transaction.customer.email,
+            'supplier_name': transaction.board.created_by.get_full_name() or transaction.board.created_by.email,
+            'status': 'Menunggu Pembayaran',
+            'platform_fee_formatted': 'N/A',
+            'admin_url': getattr(settings, 'ADMIN_FRONTEND_URL', 'https://goholiday.id/admin'),
+            'transaction_id': transaction.id,
+        }
 
-    admin_emails = list(User.objects.filter(role=UserRole.STAFF, is_active=True).values_list('email', flat=True))
-    if admin_emails:
-        admin_html = render_to_string('itinerary/transaction_notification_admin.html', admin_context)
-        send_email_with_backend_detection(
-            subject=f"Transaksi Itinerary Baru - {common_context['transaction_number']}",
-            plain_message=f"Transaksi itinerary baru dari {admin_context['buyer_name']} untuk {transaction.board.title}.",
-            html_message=admin_html,
-            recipient_list=admin_emails,
-            email_type="itinerary_created_admin"
-        )
+        admin_emails = list(User.objects.filter(role=UserRole.STAFF, is_active=True).values_list('email', flat=True))
+        logger.info(f"Found {len(admin_emails)} staff users to notify for itinerary transaction {transaction_id}: {admin_emails}")
 
-    return f"Itinerary creation emails sent for transaction ID {transaction_id}"
+        if admin_emails:
+            admin_html = render_to_string('itinerary/transaction_notification_admin.html', admin_context)
+            send_email_with_backend_detection(
+                subject=f"Transaksi Itinerary Baru - {common_context['transaction_number']}",
+                plain_message=f"Transaksi itinerary baru dari {admin_context['buyer_name']} untuk {transaction.board.title}.",
+                html_message=admin_html,
+                recipient_list=admin_emails,
+                email_type="itinerary_created_admin"
+            )
+            emails_sent.append(f"staff:{admin_emails}")
+            logger.info(f"Itinerary creation email sent to staff {admin_emails} for transaction {transaction_id}")
+        else:
+            logger.warning(f"No active staff users found to notify for itinerary transaction {transaction_id}")
+    except Exception as e:
+        emails_failed.append(f"staff:{admin_emails if 'admin_emails' in dir() else 'unknown'}")
+        logger.error(f"Failed to send itinerary creation email to staff for transaction {transaction_id}: {str(e)}")
+
+    # If all emails failed, retry the task
+    if len(emails_failed) > 0 and len(emails_sent) == 0:
+        if self.request.retries < self.max_retries:
+            logger.warning(f"All emails failed for itinerary transaction {transaction_id}, retrying... (attempt {self.request.retries + 1}/{self.max_retries})")
+            raise self.retry(countdown=60 * (2 ** self.request.retries))
+
+    result = f"Itinerary creation emails for transaction ID {transaction_id}: sent={emails_sent}, failed={emails_failed}"
+    logger.info(result)
+    return result
 
 
-@shared_task
-def send_itinerary_payment_uploaded_emails(transaction_id):
+@shared_task(bind=True, max_retries=3)
+def send_itinerary_payment_uploaded_emails(self, transaction_id):
     """
     Send email to admin when payment proof is uploaded.
-    
+
     Args:
         transaction_id: The ID of the transaction with payment proof
     """
     from django.contrib.auth import get_user_model
-    
+
     User = get_user_model()
-    
+
     try:
         transaction = ItineraryTransaction.objects.select_related(
             'customer',
             'board__created_by'
         ).get(id=transaction_id)
     except ItineraryTransaction.DoesNotExist:
+        logger.error(f"ItineraryTransaction with ID {transaction_id} does not exist")
         return f"ItineraryTransaction with ID {transaction_id} does not exist"
-    
+
+    emails_sent = []
+    emails_failed = []
+
     # Context for admin
     admin_context = {
         'transaction_number': transaction.transaction_number or f"IT-{transaction.id:06d}",
@@ -185,25 +224,41 @@ def send_itinerary_payment_uploaded_emails(transaction_id):
         'transaction_id': transaction.id,
         'company_name': getattr(settings, 'COMPANY_NAME', 'GoHoliday Travel Marketplace'),
     }
-    
-    admin_html = render_to_string('itinerary/payment_uploaded_admin.html', admin_context)
-    
-    admin_emails = list(User.objects.filter(role=UserRole.STAFF, is_active=True).values_list('email', flat=True))
-    
-    if admin_emails:
-        send_email_with_backend_detection(
-            subject=f"Bukti Pembayaran Itinerary Baru - {transaction.transaction_number}",
-            plain_message=f"Bukti pembayaran telah diupload untuk transaksi itinerary {transaction.transaction_number}",
-            html_message=admin_html,
-            recipient_list=admin_emails,
-            email_type="itinerary_payment_uploaded_admin"
-        )
-    
-    return f"Payment uploaded email sent for transaction ID {transaction_id}"
+
+    try:
+        admin_html = render_to_string('itinerary/payment_uploaded_admin.html', admin_context)
+        admin_emails = list(User.objects.filter(role=UserRole.STAFF, is_active=True).values_list('email', flat=True))
+        logger.info(f"Found {len(admin_emails)} staff users to notify for payment uploaded {transaction_id}: {admin_emails}")
+
+        if admin_emails:
+            send_email_with_backend_detection(
+                subject=f"Bukti Pembayaran Itinerary Baru - {transaction.transaction_number}",
+                plain_message=f"Bukti pembayaran telah diupload untuk transaksi itinerary {transaction.transaction_number}",
+                html_message=admin_html,
+                recipient_list=admin_emails,
+                email_type="itinerary_payment_uploaded_admin"
+            )
+            emails_sent.append(f"staff:{admin_emails}")
+            logger.info(f"Payment uploaded email sent to staff {admin_emails} for transaction {transaction_id}")
+        else:
+            logger.warning(f"No active staff users found to notify for payment uploaded {transaction_id}")
+    except Exception as e:
+        emails_failed.append(f"staff:{admin_emails if 'admin_emails' in dir() else 'unknown'}")
+        logger.error(f"Failed to send payment uploaded email to staff for transaction {transaction_id}: {str(e)}")
+
+    # If all emails failed, retry the task
+    if len(emails_failed) > 0 and len(emails_sent) == 0:
+        if self.request.retries < self.max_retries:
+            logger.warning(f"All emails failed for payment uploaded {transaction_id}, retrying... (attempt {self.request.retries + 1}/{self.max_retries})")
+            raise self.retry(countdown=60 * (2 ** self.request.retries))
+
+    result = f"Payment uploaded email for transaction ID {transaction_id}: sent={emails_sent}, failed={emails_failed}"
+    logger.info(result)
+    return result
 
 
-@shared_task
-def send_itinerary_payment_approved_emails(transaction_id):
+@shared_task(bind=True, max_retries=3)
+def send_itinerary_payment_approved_emails(self, transaction_id):
     """
     Send emails when payment is approved and access is granted.
     - Customer: Access granted notification with itinerary link
@@ -214,20 +269,25 @@ def send_itinerary_payment_approved_emails(transaction_id):
         transaction_id: The ID of the transaction with approved payment
     """
     from django.contrib.auth import get_user_model
-    
+
     User = get_user_model()
-    
+
     try:
         transaction = ItineraryTransaction.objects.select_related(
             'customer',
             'board__created_by'
         ).get(id=transaction_id)
     except ItineraryTransaction.DoesNotExist:
+        logger.error(f"ItineraryTransaction with ID {transaction_id} does not exist")
         return f"ItineraryTransaction with ID {transaction_id} does not exist"
-    
+
     if not transaction.board.created_by:
+        logger.error(f"ItineraryTransaction {transaction_id} has no board creator")
         return f"ItineraryTransaction {transaction_id} has no board creator"
-    
+
+    emails_sent = []
+    emails_failed = []
+
     # Common context
     common_context = {
         'transaction_number': transaction.transaction_number or f"IT-{transaction.id:06d}",
@@ -239,77 +299,106 @@ def send_itinerary_payment_approved_emails(transaction_id):
         'support_email': getattr(settings, 'SUPPORT_EMAIL', 'support@goholiday.id'),
         'support_phone': getattr(settings, 'SUPPORT_PHONE', '+62 xxx xxxx xxxx'),
     }
-    
+
     # 1. Send access granted email to customer
-    customer_context = {
-        **common_context,
-        'customer_name': transaction.customer.get_full_name() or transaction.customer.email,
-        'site_url': getattr(settings, 'FRONTEND_URL', 'https://goholiday.id'),
-        'itinerary_url': f"{getattr(settings, 'FRONTEND_URL', 'https://goholiday.id')}/itinerary-boards/{transaction.board.slug}/view",
-        'expires_at': transaction.expires_at.strftime('%d %B %Y %H:%M') if transaction.expires_at else 'Tidak terbatas',
-        'transaction_id': transaction.id,
-    }
-    
-    customer_html = render_to_string('itinerary/payment_approved_customer.html', customer_context)
-    send_email_with_backend_detection(
-        subject=f"Akses Itinerary Diberikan - {transaction.transaction_number}",
-        plain_message=f"Pembayaran Anda telah disetujui. Akses itinerary {transaction.board.title} sekarang tersedia.",
-        html_message=customer_html,
-        recipient_list=[transaction.customer.email],
-        email_type="itinerary_payment_approved_customer"
-    )
-    
+    try:
+        customer_context = {
+            **common_context,
+            'customer_name': transaction.customer.get_full_name() or transaction.customer.email,
+            'site_url': getattr(settings, 'FRONTEND_URL', 'https://goholiday.id'),
+            'itinerary_url': f"{getattr(settings, 'FRONTEND_URL', 'https://goholiday.id')}/itinerary-boards/{transaction.board.slug}/view",
+            'expires_at': transaction.expires_at.strftime('%d %B %Y %H:%M') if transaction.expires_at else 'Tidak terbatas',
+            'transaction_id': transaction.id,
+        }
+
+        customer_html = render_to_string('itinerary/payment_approved_customer.html', customer_context)
+        send_email_with_backend_detection(
+            subject=f"Akses Itinerary Diberikan - {transaction.transaction_number}",
+            plain_message=f"Pembayaran Anda telah disetujui. Akses itinerary {transaction.board.title} sekarang tersedia.",
+            html_message=customer_html,
+            recipient_list=[transaction.customer.email],
+            email_type="itinerary_payment_approved_customer"
+        )
+        emails_sent.append(f"customer:{transaction.customer.email}")
+        logger.info(f"Payment approved email sent to customer {transaction.customer.email} for transaction {transaction_id}")
+    except Exception as e:
+        emails_failed.append(f"customer:{transaction.customer.email}")
+        logger.error(f"Failed to send payment approved email to customer {transaction.customer.email} for transaction {transaction_id}: {str(e)}")
+
     # 2. Send payment received email to supplier
-    supplier_context = {
-        **common_context,
-        'supplier_name': transaction.board.created_by.get_full_name() or transaction.board.created_by.email,
-        'customer_name': transaction.customer.get_full_name() or transaction.customer.email,
-        'supplier_url': getattr(settings, 'FRONTEND_URL', 'https://goholiday.id'),
-        'transaction_id': transaction.id,
-    }
-    
-    supplier_html = render_to_string('itinerary/payment_approved_supplier.html', supplier_context)
-    send_email_with_backend_detection(
-        subject=f"Pembayaran Diterima - Itinerary {transaction.board.title}",
-        plain_message=f"Pembayaran untuk itinerary {transaction.board.title} telah disetujui.",
-        html_message=supplier_html,
-        recipient_list=[transaction.board.created_by.email],
-        email_type="itinerary_payment_approved_supplier"
-    )
+    try:
+        supplier_context = {
+            **common_context,
+            'supplier_name': transaction.board.created_by.get_full_name() or transaction.board.created_by.email,
+            'customer_name': transaction.customer.get_full_name() or transaction.customer.email,
+            'supplier_url': getattr(settings, 'FRONTEND_URL', 'https://goholiday.id'),
+            'transaction_id': transaction.id,
+        }
+
+        supplier_html = render_to_string('itinerary/payment_approved_supplier.html', supplier_context)
+        send_email_with_backend_detection(
+            subject=f"Pembayaran Diterima - Itinerary {transaction.board.title}",
+            plain_message=f"Pembayaran untuk itinerary {transaction.board.title} telah disetujui.",
+            html_message=supplier_html,
+            recipient_list=[transaction.board.created_by.email],
+            email_type="itinerary_payment_approved_supplier"
+        )
+        emails_sent.append(f"supplier:{transaction.board.created_by.email}")
+        logger.info(f"Payment approved email sent to supplier {transaction.board.created_by.email} for transaction {transaction_id}")
+    except Exception as e:
+        emails_failed.append(f"supplier:{transaction.board.created_by.email}")
+        logger.error(f"Failed to send payment approved email to supplier {transaction.board.created_by.email} for transaction {transaction_id}: {str(e)}")
 
     # 3. Send notification to staff
-    buyer_role = getattr(transaction.customer, 'role', None)
-    buyer_type = 'Reseller' if buyer_role == UserRole.RESELLER else 'Customer'
-    staff_context = {
-        **common_context,
-        'buyer_name': transaction.customer.get_full_name() or transaction.customer.email,
-        'buyer_type': buyer_type,
-        'buyer_email': transaction.customer.email,
-        'supplier_name': transaction.board.created_by.get_full_name() or transaction.board.created_by.email,
-        'admin_url': getattr(settings, 'ADMIN_FRONTEND_URL', 'https://goholiday.id/admin'),
-        'transaction_id': transaction.id,
-    }
+    try:
+        buyer_role = getattr(transaction.customer, 'role', None)
+        buyer_type = 'Reseller' if buyer_role == UserRole.RESELLER else 'Customer'
+        staff_context = {
+            **common_context,
+            'buyer_name': transaction.customer.get_full_name() or transaction.customer.email,
+            'buyer_type': buyer_type,
+            'buyer_email': transaction.customer.email,
+            'supplier_name': transaction.board.created_by.get_full_name() or transaction.board.created_by.email,
+            'admin_url': getattr(settings, 'ADMIN_FRONTEND_URL', 'https://goholiday.id/admin'),
+            'transaction_id': transaction.id,
+        }
 
-    staff_emails = list(User.objects.filter(role=UserRole.STAFF, is_active=True).values_list('email', flat=True))
+        staff_emails = list(User.objects.filter(role=UserRole.STAFF, is_active=True).values_list('email', flat=True))
+        logger.info(f"Found {len(staff_emails)} staff users to notify for payment approved {transaction_id}: {staff_emails}")
 
-    if staff_emails:
-        staff_html = render_to_string('itinerary/payment_approved_admin.html', staff_context)
-        send_email_with_backend_detection(
-            subject=f"Pembayaran Itinerary Disetujui - {transaction.transaction_number}",
-            plain_message=f"Pembayaran untuk itinerary {transaction.board.title} telah disetujui.",
-            html_message=staff_html,
-            recipient_list=staff_emails,
-            email_type="itinerary_payment_approved_admin"
-        )
+        if staff_emails:
+            staff_html = render_to_string('itinerary/payment_approved_admin.html', staff_context)
+            send_email_with_backend_detection(
+                subject=f"Pembayaran Itinerary Disetujui - {transaction.transaction_number}",
+                plain_message=f"Pembayaran untuk itinerary {transaction.board.title} telah disetujui.",
+                html_message=staff_html,
+                recipient_list=staff_emails,
+                email_type="itinerary_payment_approved_admin"
+            )
+            emails_sent.append(f"staff:{staff_emails}")
+            logger.info(f"Payment approved email sent to staff {staff_emails} for transaction {transaction_id}")
+        else:
+            logger.warning(f"No active staff users found to notify for payment approved {transaction_id}")
+    except Exception as e:
+        emails_failed.append(f"staff:{staff_emails if 'staff_emails' in dir() else 'unknown'}")
+        logger.error(f"Failed to send payment approved email to staff for transaction {transaction_id}: {str(e)}")
 
-    return f"Payment approved emails sent for transaction ID {transaction_id}"
+    # If all emails failed, retry the task
+    if len(emails_failed) > 0 and len(emails_sent) == 0:
+        if self.request.retries < self.max_retries:
+            logger.warning(f"All emails failed for payment approved {transaction_id}, retrying... (attempt {self.request.retries + 1}/{self.max_retries})")
+            raise self.retry(countdown=60 * (2 ** self.request.retries))
+
+    result = f"Payment approved emails for transaction ID {transaction_id}: sent={emails_sent}, failed={emails_failed}"
+    logger.info(result)
+    return result
 
 
-@shared_task
-def send_itinerary_payment_rejected_emails(transaction_id):
+@shared_task(bind=True, max_retries=3)
+def send_itinerary_payment_rejected_emails(self, transaction_id):
     """
     Send email to customer when payment is rejected.
-    
+
     Args:
         transaction_id: The ID of the transaction with rejected payment
     """
@@ -319,8 +408,12 @@ def send_itinerary_payment_rejected_emails(transaction_id):
             'board'
         ).get(id=transaction_id)
     except ItineraryTransaction.DoesNotExist:
+        logger.error(f"ItineraryTransaction with ID {transaction_id} does not exist")
         return f"ItineraryTransaction with ID {transaction_id} does not exist"
-    
+
+    emails_sent = []
+    emails_failed = []
+
     # Context for customer
     customer_context = {
         'transaction_number': transaction.transaction_number or f"IT-{transaction.id:06d}",
@@ -334,17 +427,31 @@ def send_itinerary_payment_rejected_emails(transaction_id):
         'support_email': getattr(settings, 'SUPPORT_EMAIL', 'support@goholiday.id'),
         'support_phone': getattr(settings, 'SUPPORT_PHONE', '+62 xxx xxxx xxxx'),
     }
-    
-    customer_html = render_to_string('itinerary/payment_rejected_customer.html', customer_context)
-    send_email_with_backend_detection(
-        subject=f"Pembayaran Ditolak - {transaction.transaction_number}",
-        plain_message=f"Pembayaran untuk transaksi {transaction.transaction_number} ditolak. Silakan upload ulang bukti pembayaran.",
-        html_message=customer_html,
-        recipient_list=[transaction.customer.email],
-        email_type="itinerary_payment_rejected_customer"
-    )
-    
-    return f"Payment rejected email sent for transaction ID {transaction_id}"
+
+    try:
+        customer_html = render_to_string('itinerary/payment_rejected_customer.html', customer_context)
+        send_email_with_backend_detection(
+            subject=f"Pembayaran Ditolak - {transaction.transaction_number}",
+            plain_message=f"Pembayaran untuk transaksi {transaction.transaction_number} ditolak. Silakan upload ulang bukti pembayaran.",
+            html_message=customer_html,
+            recipient_list=[transaction.customer.email],
+            email_type="itinerary_payment_rejected_customer"
+        )
+        emails_sent.append(f"customer:{transaction.customer.email}")
+        logger.info(f"Payment rejected email sent to customer {transaction.customer.email} for transaction {transaction_id}")
+    except Exception as e:
+        emails_failed.append(f"customer:{transaction.customer.email}")
+        logger.error(f"Failed to send payment rejected email to customer {transaction.customer.email} for transaction {transaction_id}: {str(e)}")
+
+    # If all emails failed, retry the task
+    if len(emails_failed) > 0 and len(emails_sent) == 0:
+        if self.request.retries < self.max_retries:
+            logger.warning(f"All emails failed for payment rejected {transaction_id}, retrying... (attempt {self.request.retries + 1}/{self.max_retries})")
+            raise self.retry(countdown=60 * (2 ** self.request.retries))
+
+    result = f"Payment rejected email for transaction ID {transaction_id}: sent={emails_sent}, failed={emails_failed}"
+    logger.info(result)
+    return result
 
 
 @shared_task
@@ -354,10 +461,10 @@ def send_itinerary_expiring_soon_emails():
     This task should be run daily via cron/celery beat.
     """
     from datetime import timedelta
-    
+
     now = timezone.now()
     two_days_later = now + timedelta(days=2)
-    
+
     # Find ACTIVE transactions expiring in the next 2 days
     expiring_transactions = ItineraryTransaction.objects.filter(
         status=ItineraryTransactionStatus.ACTIVE,
@@ -365,33 +472,37 @@ def send_itinerary_expiring_soon_emails():
         expires_at__gte=now,
         expires_at__lte=two_days_later
     ).select_related('customer', 'board')
-    
+
     count = 0
     for transaction in expiring_transactions:
-        # Context for customer
-        customer_context = {
-            'transaction_number': transaction.transaction_number or f"IT-{transaction.id:06d}",
-            'itinerary_title': transaction.board.title,
-            'customer_name': transaction.customer.get_full_name() or transaction.customer.email,
-            'expires_at': transaction.expires_at.strftime('%d %B %Y %H:%M'),
-            'days_remaining': (transaction.expires_at - now).days,
-            'itinerary_url': f"{getattr(settings, 'FRONTEND_URL', 'https://goholiday.id')}/itinerary-boards/{transaction.board.slug}/view",
-            'company_name': getattr(settings, 'COMPANY_NAME', 'GoHoliday Travel Marketplace'),
-            'company_address': getattr(settings, 'COMPANY_ADDRESS', 'Indonesia'),
-            'support_email': getattr(settings, 'SUPPORT_EMAIL', 'support@goholiday.id'),
-            'support_phone': getattr(settings, 'SUPPORT_PHONE', '+62 xxx xxxx xxxx'),
-        }
-        
-        customer_html = render_to_string('itinerary/expiring_soon_reminder.html', customer_context)
-        send_email_with_backend_detection(
-            subject=f"Pengingat: Akses Itinerary Akan Berakhir - {transaction.transaction_number}",
-            plain_message=f"Akses Anda ke itinerary {transaction.board.title} akan berakhir dalam {customer_context['days_remaining']} hari.",
-            html_message=customer_html,
-            recipient_list=[transaction.customer.email],
-            email_type="itinerary_expiring_soon"
-        )
-        count += 1
-    
+        try:
+            # Context for customer
+            customer_context = {
+                'transaction_number': transaction.transaction_number or f"IT-{transaction.id:06d}",
+                'itinerary_title': transaction.board.title,
+                'customer_name': transaction.customer.get_full_name() or transaction.customer.email,
+                'expires_at': transaction.expires_at.strftime('%d %B %Y %H:%M'),
+                'days_remaining': (transaction.expires_at - now).days,
+                'itinerary_url': f"{getattr(settings, 'FRONTEND_URL', 'https://goholiday.id')}/itinerary-boards/{transaction.board.slug}/view",
+                'company_name': getattr(settings, 'COMPANY_NAME', 'GoHoliday Travel Marketplace'),
+                'company_address': getattr(settings, 'COMPANY_ADDRESS', 'Indonesia'),
+                'support_email': getattr(settings, 'SUPPORT_EMAIL', 'support@goholiday.id'),
+                'support_phone': getattr(settings, 'SUPPORT_PHONE', '+62 xxx xxxx xxxx'),
+            }
+
+            customer_html = render_to_string('itinerary/expiring_soon_reminder.html', customer_context)
+            send_email_with_backend_detection(
+                subject=f"Pengingat: Akses Itinerary Akan Berakhir - {transaction.transaction_number}",
+                plain_message=f"Akses Anda ke itinerary {transaction.board.title} akan berakhir dalam {customer_context['days_remaining']} hari.",
+                html_message=customer_html,
+                recipient_list=[transaction.customer.email],
+                email_type="itinerary_expiring_soon"
+            )
+            count += 1
+            logger.info(f"Expiring soon reminder sent to {transaction.customer.email} for transaction {transaction.id}")
+        except Exception as e:
+            logger.error(f"Failed to send expiring soon reminder for transaction {transaction.id}: {str(e)}")
+
     logger.info(f"Sent {count} expiration reminder email(s)")
     return f"Sent {count} expiration reminder emails"
 
