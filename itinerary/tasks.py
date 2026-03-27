@@ -58,8 +58,7 @@ def send_itinerary_creation_emails(self, transaction_id):
     try:
         transaction = ItineraryTransaction.objects.select_related(
             'customer',
-            'board__supplier__user',
-            'promo_code'
+            'board__supplier__user'
         ).get(id=transaction_id)
     except ItineraryTransaction.DoesNotExist:
         logger.error(f"ItineraryTransaction with ID {transaction_id} does not exist")
