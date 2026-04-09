@@ -83,20 +83,56 @@ fi
 
 # Create directory for certbot webroot (nginx serves this over HTTP for ACME challenge)
 echo ""
-echo -e "${BLUE}[4/6] Preparing webroot directory...${NC}"
+echo -e "${BLUE}[4/6] Preparing webroot directory and ensuring nginx has the volume mount...${NC}"
 mkdir -p /var/www/certbot
-echo -e "${GREEN}✓ Webroot ready at /var/www/certbot${NC}"
 
-# Nginx must be running so it can serve /.well-known/acme-challenge/
-# The docker-compose.prod.yml nginx service must have this volume:
-#   - /var/www/certbot:/var/www/certbot:ro
-# and the nginx config must have:
-#   location /.well-known/acme-challenge/ { root /var/www/certbot; }
+CERTBOT_MOUNT="/var/www/certbot:/var/www/certbot:ro"
+
+# Add the certbot volume to docker-compose.prod.yml if not already present
+if ! grep -qF "$CERTBOT_MOUNT" docker-compose.prod.yml; then
+    echo -e "${YELLOW}  → Adding /var/www/certbot volume mount to nginx in docker-compose.prod.yml...${NC}"
+    # Insert the mount line right after the nginx ssl volume line
+    sed -i "s|      - ./nginx/ssl:/etc/nginx/ssl:ro|      - ./nginx/ssl:/etc/nginx/ssl:ro\n      - /var/www/certbot:/var/www/certbot:ro|" docker-compose.prod.yml
+    echo -e "${GREEN}  ✓ Volume mount added${NC}"
+else
+    echo -e "${GREEN}  ✓ Volume mount already present${NC}"
+fi
+
+# Force-recreate nginx so the new volume mount takes effect
+echo -e "${YELLOW}  → Recreating nginx container to apply volume changes...${NC}"
+docker compose -f docker-compose.prod.yml up -d --force-recreate nginx
+sleep 4
+
+# Confirm nginx came back up
 if ! docker compose -f docker-compose.prod.yml ps nginx | grep -q "Up"; then
-    echo -e "${RED}Error: Nginx must be running for webroot challenge.${NC}"
-    echo "Start nginx first: docker compose -f docker-compose.prod.yml up -d nginx"
+    echo -e "${RED}Error: Nginx failed to start after recreate.${NC}"
+    docker compose -f docker-compose.prod.yml logs nginx | tail -20
     exit 1
 fi
+
+# Verify the challenge path is actually reachable before calling certbot
+echo -e "${YELLOW}  → Testing ACME challenge path...${NC}"
+TESTFILE="/var/www/certbot/.well-known/acme-challenge/.test-$(date +%s)"
+mkdir -p "$(dirname "$TESTFILE")"
+echo "ok" > "$TESTFILE"
+HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
+    "http://$DOMAIN/.well-known/acme-challenge/$(basename "$TESTFILE")" 2>/dev/null || true)
+rm -f "$TESTFILE"
+
+if [ "$HTTP_CODE" = "200" ]; then
+    echo -e "${GREEN}  ✓ Challenge path is reachable (HTTP $HTTP_CODE)${NC}"
+else
+    echo -e "${RED}Error: Challenge path returned HTTP $HTTP_CODE (expected 200).${NC}"
+    echo "  This means nginx is NOT serving /var/www/certbot correctly."
+    echo "  Check:"
+    echo "    1. docker compose -f docker-compose.prod.yml exec nginx cat /etc/nginx/conf.d/data.goholiday.id.conf"
+    echo "       Must have: location /.well-known/acme-challenge/ { root /var/www/certbot; }"
+    echo "    2. docker compose -f docker-compose.prod.yml exec nginx ls /var/www/certbot/.well-known/acme-challenge/"
+    echo "       Must list files (if empty, the volume mount still isn't working)"
+    exit 1
+fi
+
+echo -e "${GREEN}✓ Webroot ready at /var/www/certbot${NC}"
 
 # Generate certificate using webroot (nginx stays up, no port conflict)
 echo ""
