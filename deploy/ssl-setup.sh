@@ -81,20 +81,29 @@ else
     sleep 3
 fi
 
-# Stop nginx container temporarily for certbot
+# Create directory for certbot webroot (nginx serves this over HTTP for ACME challenge)
 echo ""
-echo -e "${BLUE}[4/6] Temporarily stopping Nginx for certificate generation...${NC}"
-docker compose -f docker-compose.prod.yml stop nginx
-
-# Create directory for certbot webroot
+echo -e "${BLUE}[4/6] Preparing webroot directory...${NC}"
 mkdir -p /var/www/certbot
+echo -e "${GREEN}✓ Webroot ready at /var/www/certbot${NC}"
 
-# Generate certificate
+# Nginx must be running so it can serve /.well-known/acme-challenge/
+# The docker-compose.prod.yml nginx service must have this volume:
+#   - /var/www/certbot:/var/www/certbot:ro
+# and the nginx config must have:
+#   location /.well-known/acme-challenge/ { root /var/www/certbot; }
+if ! docker compose -f docker-compose.prod.yml ps nginx | grep -q "Up"; then
+    echo -e "${RED}Error: Nginx must be running for webroot challenge.${NC}"
+    echo "Start nginx first: docker compose -f docker-compose.prod.yml up -d nginx"
+    exit 1
+fi
+
+# Generate certificate using webroot (nginx stays up, no port conflict)
 echo ""
-echo -e "${BLUE}[5/6] Generating SSL certificate...${NC}"
+echo -e "${BLUE}[5/6] Generating SSL certificate (webroot method)...${NC}"
 certbot certonly \
-    --standalone \
-    --preferred-challenges http \
+    --webroot \
+    -w /var/www/certbot \
     -d "$DOMAIN" \
     --email "$EMAIL" \
     --agree-tos \
@@ -103,9 +112,10 @@ certbot certonly \
     echo -e "${RED}Error: Certificate generation failed${NC}"
     echo "Common issues:"
     echo "  - DNS not pointing to this server"
-    echo "  - Port 80 not accessible"
+    echo "  - Port 80 not accessible from the internet"
+    echo "  - /var/www/certbot not mounted into the nginx container"
+    echo "    (check docker-compose.prod.yml nginx volumes)"
     echo "  - Too many certificate requests (Let's Encrypt rate limit)"
-    docker compose -f docker-compose.prod.yml start nginx
     exit 1
 }
 
@@ -177,13 +187,44 @@ fi
 # Setup auto-renewal
 echo ""
 echo -e "${BLUE}Setting up certificate auto-renewal...${NC}"
-# Create renewal script
-cat > /etc/cron.monthly/renew-ssl-cert <<EOF
+
+# Remove old broken monthly cron if it exists
+rm -f /etc/cron.monthly/renew-ssl-cert
+
+# Create a dedicated renewal script that uses webroot (nginx stays up)
+cat > /usr/local/bin/renew-ssl-cert.sh <<RENEWSCRIPT
 #!/bin/bash
-certbot renew --quiet --deploy-hook "cd $APP_DIR && cp /etc/letsencrypt/live/$DOMAIN/fullchain.pem nginx/ssl/$DOMAIN/fullchain.pem && cp /etc/letsencrypt/live/$DOMAIN/privkey.pem nginx/ssl/$DOMAIN/privkey.pem && cp /etc/letsencrypt/live/$DOMAIN/chain.pem nginx/ssl/$DOMAIN/chain.pem && docker compose -f docker-compose.prod.yml restart nginx"
-EOF
-chmod +x /etc/cron.monthly/renew-ssl-cert
-echo -e "${GREEN}✓ Auto-renewal configured${NC}"
+# Let's Encrypt auto-renewal for $DOMAIN
+# Uses webroot authenticator so nginx stays running during renewal.
+# Runs twice daily via cron; certbot only renews when <30 days remain.
+
+set -euo pipefail
+
+APP_DIR="$APP_DIR"
+DOMAIN="$DOMAIN"
+
+certbot renew \\
+    --webroot -w /var/www/certbot \\
+    --cert-name "\$DOMAIN" \\
+    --deploy-hook "
+        set -e
+        cp /etc/letsencrypt/live/\$DOMAIN/fullchain.pem \$APP_DIR/nginx/ssl/\$DOMAIN/fullchain.pem
+        cp /etc/letsencrypt/live/\$DOMAIN/privkey.pem  \$APP_DIR/nginx/ssl/\$DOMAIN/privkey.pem
+        cp /etc/letsencrypt/live/\$DOMAIN/chain.pem    \$APP_DIR/nginx/ssl/\$DOMAIN/chain.pem
+        chmod 644 \$APP_DIR/nginx/ssl/\$DOMAIN/fullchain.pem \$APP_DIR/nginx/ssl/\$DOMAIN/chain.pem
+        chmod 600 \$APP_DIR/nginx/ssl/\$DOMAIN/privkey.pem
+        docker compose -f \$APP_DIR/docker-compose.prod.yml exec -T nginx nginx -s reload
+    "
+RENEWSCRIPT
+chmod +x /usr/local/bin/renew-ssl-cert.sh
+
+# Install twice-daily cron (standard Let's Encrypt recommendation)
+# Runs at 03:17 and 15:17 with jitter to reduce Let's Encrypt server load.
+CRON_LINE="17 3,15 * * * root /usr/local/bin/renew-ssl-cert.sh >> /var/log/certbot-renew.log 2>&1"
+CRON_FILE="/etc/cron.d/certbot-renew"
+echo "$CRON_LINE" > "$CRON_FILE"
+chmod 644 "$CRON_FILE"
+echo -e "${GREEN}✓ Auto-renewal configured (twice daily, logs: /var/log/certbot-renew.log)${NC}"
 
 echo ""
 echo -e "${GREEN}=========================================="
@@ -198,7 +239,9 @@ echo ""
 echo -e "${GREEN}Your site is now available at: https://$DOMAIN${NC}"
 echo ""
 echo -e "${YELLOW}Important:${NC}"
-echo "  - Certificates will auto-renew monthly"
+echo "  - Certificates will auto-renew twice daily (03:17 and 15:17)"
+echo "  - Renewal logs: /var/log/certbot-renew.log"
+echo "  - Test renewal dry-run: sudo certbot renew --dry-run --webroot -w /var/www/certbot"
 echo "  - Update your .env file:"
 echo "    ${BLUE}SECURE_SSL_REDIRECT=1${NC}"
 echo "    ${BLUE}SESSION_COOKIE_SECURE=1${NC}"
