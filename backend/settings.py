@@ -269,30 +269,22 @@ CSRF_TRUSTED_ORIGINS = get_env_list("CSRF_TRUSTED_ORIGINS")
 SESSION_COOKIE_SAMESITE = 'Lax'
 SESSION_COOKIE_SECURE = not DEBUG
 
-# Email configuration (Resend preferred; Mailgun/SMTP fallback for production migration)
-from backend.email import build_email_settings, default_from_email_for_provider
+# Email configuration (Resend)
+from backend.email import CONSOLE_PROVIDER, build_email_settings, default_from_email_for_provider
 
 _email_settings = build_email_settings()
 EMAIL_BACKEND = _email_settings["EMAIL_BACKEND"]
 EMAIL_PROVIDER = _email_settings["EMAIL_PROVIDER"]
 RESEND_API_KEY = _email_settings.get("RESEND_API_KEY", "")
 RESEND_SENDING_DOMAIN = _email_settings.get("RESEND_SENDING_DOMAIN", "")
-MAILGUN_API_KEY = _email_settings.get("MAILGUN_API_KEY", "")
-MAILGUN_DOMAIN = _email_settings.get("MAILGUN_DOMAIN", "")
 ANYMAIL = _email_settings.get("ANYMAIL", {})
 EMAIL_TIMEOUT = _email_settings.get("EMAIL_TIMEOUT", 30)
 
-if EMAIL_BACKEND.endswith("smtp.EmailBackend"):
-    EMAIL_HOST = _email_settings["EMAIL_HOST"]
-    EMAIL_PORT = _email_settings["EMAIL_PORT"]
-    EMAIL_USE_TLS = _email_settings["EMAIL_USE_TLS"]
-    EMAIL_HOST_USER = _email_settings["EMAIL_HOST_USER"]
-    EMAIL_HOST_PASSWORD = _email_settings["EMAIL_HOST_PASSWORD"]
-
-# Resend path validates domain in build_email_settings; other providers use env/default.
 DEFAULT_FROM_EMAIL = _email_settings.get("DEFAULT_FROM_EMAIL") or os.environ.get(
     "DEFAULT_FROM_EMAIL",
-    default_from_email_for_provider(EMAIL_PROVIDER),
+    default_from_email_for_provider(
+        EMAIL_PROVIDER if EMAIL_PROVIDER != CONSOLE_PROVIDER else "resend"
+    ),
 )
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
 
@@ -358,8 +350,16 @@ SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
 SESSION_CACHE_ALIAS = 'default'
 
 # Logging Configuration
+# In Docker, api + celery share ./logs; RotatingFileHandler causes PermissionError on rotate.
+# Production: set LOG_FILE_ENABLED=false and use `docker compose logs` (stdout).
 LOGS_DIR = BASE_DIR / 'logs'
-LOGS_DIR.mkdir(exist_ok=True)
+LOG_FILE_ENABLED = get_env_bool("LOG_FILE_ENABLED", default=True)
+if LOG_FILE_ENABLED:
+    LOGS_DIR.mkdir(exist_ok=True)
+
+_log_handlers = ["console"]
+if LOG_FILE_ENABLED:
+    _log_handlers.append("file")
 
 LOGGING = {
     'version': 1,
@@ -375,36 +375,42 @@ LOGGING = {
         },
     },
     'handlers': {
-        'file': {
-            'level': 'INFO',
-            'class': 'logging.handlers.RotatingFileHandler',
-            'filename': LOGS_DIR / 'django.log',
-            'maxBytes': 1024 * 1024 * 10,  # 10 MB
-            'backupCount': 10,
-            'formatter': 'verbose',
-        },
         'console': {
             'level': 'DEBUG' if DEBUG else 'INFO',
             'class': 'logging.StreamHandler',
             'formatter': 'verbose',
         },
+        **(
+            {
+                'file': {
+                    'level': 'INFO',
+                    'class': 'logging.handlers.RotatingFileHandler',
+                    'filename': LOGS_DIR / 'django.log',
+                    'maxBytes': 1024 * 1024 * 10,  # 10 MB
+                    'backupCount': 10,
+                    'formatter': 'verbose',
+                },
+            }
+            if LOG_FILE_ENABLED
+            else {}
+        ),
     },
     'root': {
-        'handlers': ['console', 'file'],
+        'handlers': _log_handlers,
         'level': 'INFO',
     },
     'loggers': {
         'django': {
-            'handlers': ['console', 'file'],
+            'handlers': _log_handlers,
             'level': 'INFO',
             'propagate': False,
         },
         'account': {
-            'handlers': ['console', 'file'],
+            'handlers': _log_handlers,
             'level': 'DEBUG' if DEBUG else 'INFO',
         },
         'travel': {
-            'handlers': ['console', 'file'],
+            'handlers': _log_handlers,
             'level': 'DEBUG' if DEBUG else 'INFO',
         },
     },

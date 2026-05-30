@@ -6,10 +6,9 @@ from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase, override_settings
 
 from backend.email import (
+    CONSOLE_PROVIDER,
     DEFAULT_RESEND_SENDING_DOMAIN,
-    MAILGUN_PROVIDER,
     RESEND_PROVIDER,
-    SMTP_PROVIDER,
     build_email_settings,
     default_from_email_for_provider,
     is_http_api_backend,
@@ -20,52 +19,60 @@ from backend.email import (
 
 
 class ResolveEmailProviderTests(SimpleTestCase):
-    def test_auto_prefers_resend_when_key_set(self):
-        env = {
-            "EMAIL_PROVIDER": "auto",
-            "RESEND_API_KEY": "re_test",
-            "MAILGUN_API_KEY": "mg_test",
-            "MAILGUN_DOMAIN": "example.com",
-        }
-        with patch.dict(os.environ, env, clear=False):
+    def test_auto_uses_resend_when_key_set(self):
+        env = {"EMAIL_PROVIDER": "auto", "RESEND_API_KEY": "re_test", "DEBUG": "0"}
+        with patch.dict(os.environ, env, clear=True):
             self.assertEqual(resolve_email_provider(), RESEND_PROVIDER)
 
-    def test_auto_uses_mailgun_when_only_mailgun_configured(self):
-        env = {
-            "EMAIL_PROVIDER": "auto",
-            "RESEND_API_KEY": "",
-            "MAILGUN_API_KEY": "mg_test",
-            "MAILGUN_DOMAIN": "example.com",
-        }
-        with patch.dict(os.environ, env, clear=True):
-            self.assertEqual(resolve_email_provider(), MAILGUN_PROVIDER)
+    def test_auto_uses_console_in_debug_without_key(self):
+        with patch.dict(os.environ, {"EMAIL_PROVIDER": "auto", "DEBUG": "1"}, clear=True):
+            self.assertEqual(resolve_email_provider(), CONSOLE_PROVIDER)
 
-    def test_auto_falls_back_to_smtp_without_api_keys(self):
-        with patch.dict(os.environ, {"EMAIL_PROVIDER": "auto"}, clear=True):
-            self.assertEqual(resolve_email_provider(), SMTP_PROVIDER)
+    def test_auto_requires_resend_in_production_without_key(self):
+        with patch.dict(os.environ, {"EMAIL_PROVIDER": "auto", "DEBUG": "0"}, clear=True):
+            self.assertEqual(resolve_email_provider(), RESEND_PROVIDER)
 
 
 class BuildEmailSettingsTests(SimpleTestCase):
-    def test_resend_backend_when_forced(self):
+    def test_resend_backend(self):
         env = {
             "EMAIL_PROVIDER": "resend",
             "RESEND_API_KEY": "re_test_key",
             "DEFAULT_FROM_EMAIL": f"noreply@{DEFAULT_RESEND_SENDING_DOMAIN}",
+            "DEBUG": "0",
         }
         with patch.dict(os.environ, env, clear=True):
             cfg = build_email_settings()
         self.assertEqual(cfg["EMAIL_PROVIDER"], RESEND_PROVIDER)
         self.assertEqual(cfg["EMAIL_BACKEND"], "anymail.backends.resend.EmailBackend")
         self.assertEqual(cfg["ANYMAIL"]["RESEND_API_KEY"], "re_test_key")
-        self.assertEqual(cfg["DEFAULT_FROM_EMAIL"], f"noreply@{DEFAULT_RESEND_SENDING_DOMAIN}")
 
     def test_resend_rejects_wrong_from_domain(self):
         env = {
             "EMAIL_PROVIDER": "resend",
             "RESEND_API_KEY": "re_test_key",
             "DEFAULT_FROM_EMAIL": "noreply@goholiday.id",
+            "DEBUG": "0",
         }
         with patch.dict(os.environ, env, clear=True):
+            with self.assertRaises(ImproperlyConfigured):
+                build_email_settings()
+
+    def test_console_backend_in_debug(self):
+        with patch.dict(
+            os.environ,
+            {"EMAIL_PROVIDER": "console", "DEBUG": "1"},
+            clear=True,
+        ):
+            cfg = build_email_settings()
+        self.assertEqual(cfg["EMAIL_BACKEND"], "django.core.mail.backends.console.EmailBackend")
+
+    def test_resend_requires_api_key_in_production(self):
+        with patch.dict(
+            os.environ,
+            {"EMAIL_PROVIDER": "resend", "DEBUG": "0"},
+            clear=True,
+        ):
             with self.assertRaises(ImproperlyConfigured):
                 build_email_settings()
 
@@ -74,22 +81,6 @@ class BuildEmailSettingsTests(SimpleTestCase):
             default_from_email_for_provider(RESEND_PROVIDER),
             f"noreply@{DEFAULT_RESEND_SENDING_DOMAIN}",
         )
-
-    def test_mailgun_backend_when_forced(self):
-        env = {
-            "EMAIL_PROVIDER": "mailgun",
-            "MAILGUN_API_KEY": "key",
-            "MAILGUN_DOMAIN": "goholiday.id",
-        }
-        with patch.dict(os.environ, env, clear=True):
-            cfg = build_email_settings()
-        self.assertEqual(cfg["EMAIL_BACKEND"], "anymail.backends.mailgun.EmailBackend")
-        self.assertEqual(cfg["ANYMAIL"]["MAILGUN_SENDER_DOMAIN"], "goholiday.id")
-
-    def test_resend_requires_api_key_when_forced(self):
-        with patch.dict(os.environ, {"EMAIL_PROVIDER": "resend"}, clear=True):
-            with self.assertRaises(ImproperlyConfigured):
-                build_email_settings()
 
 
 class ValidateResendFromEmailTests(SimpleTestCase):
@@ -108,6 +99,7 @@ class ValidateEmailConfigurationTests(SimpleTestCase):
     @override_settings(
         DEFAULT_FROM_EMAIL=f"noreply@{DEFAULT_RESEND_SENDING_DOMAIN}",
         EMAIL_BACKEND="anymail.backends.resend.EmailBackend",
+        EMAIL_PROVIDER=RESEND_PROVIDER,
         RESEND_API_KEY="re_test",
         RESEND_SENDING_DOMAIN=DEFAULT_RESEND_SENDING_DOMAIN,
         ANYMAIL={"RESEND_API_KEY": "re_test"},
@@ -145,6 +137,6 @@ class IsHttpApiBackendTests(SimpleTestCase):
     def test_resend_is_http_api(self):
         self.assertTrue(is_http_api_backend())
 
-    @override_settings(EMAIL_BACKEND="django.core.mail.backends.smtp.EmailBackend")
-    def test_smtp_is_not_http_api(self):
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.console.EmailBackend")
+    def test_console_is_not_http_api(self):
         self.assertFalse(is_http_api_backend())

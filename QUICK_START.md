@@ -26,7 +26,6 @@ SECRET_KEY=your-secret-key-here  # Generate with: python -c "from django.core.ma
 
 # Email (optional for testing - can use console backend)
 RESEND_API_KEY=re_your-resend-api-key
-# Or legacy Mailgun: MAILGUN_API_KEY + MAILGUN_DOMAIN
 DEFAULT_FROM_EMAIL=noreply@yourdomain.com
 ```
 
@@ -136,7 +135,7 @@ docker-compose exec api python manage.py createsuperadmin --email admin@example.
 ### Email not sending
 
 1. **For testing, use console backend** (see Step 2)
-2. **Check Resend or Mailgun credentials** in `.env` (`RESEND_API_KEY` or `MAILGUN_API_KEY` + `MAILGUN_DOMAIN`)
+2. **Check Resend credentials** in `.env` (`RESEND_API_KEY`)
 3. **Check Celery worker logs:**
    ```bash
    docker-compose logs celery | grep -i error
@@ -193,7 +192,7 @@ All services will automatically:
 
 ## Next Steps
 
-1. **Set up Resend** (or Mailgun legacy / console backend for testing)
+1. **Set up Resend** (or console backend for local testing with `DEBUG=1`)
 2. **Create your first user** via API or admin
 3. **Test email sending** by triggering a welcome email
 4. **Configure frontend** to connect to `http://localhost:8000`
@@ -205,6 +204,6 @@ For production, you'll need to:
 - Set up proper SSL certificates
 - Configure production database
 - Set up monitoring and logging
-- Verify sending domain in Resend (or legacy Mailgun)
+- Verify sending domain in Resend
 - Configure proper CORS settings
 
