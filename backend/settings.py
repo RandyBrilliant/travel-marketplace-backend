@@ -269,31 +269,31 @@ CSRF_TRUSTED_ORIGINS = get_env_list("CSRF_TRUSTED_ORIGINS")
 SESSION_COOKIE_SAMESITE = 'Lax'
 SESSION_COOKIE_SECURE = not DEBUG
 
-# Email Configuration (Mailgun)
-# Use HTTP API backend if MAILGUN_API_KEY is provided, otherwise fall back to SMTP
-MAILGUN_API_KEY = os.environ.get('MAILGUN_API_KEY', '')
-MAILGUN_DOMAIN = os.environ.get('MAILGUN_DOMAIN', '')
+# Email configuration (Resend preferred; Mailgun/SMTP fallback for production migration)
+from backend.email import build_email_settings, default_from_email_for_provider
 
-if MAILGUN_API_KEY and MAILGUN_DOMAIN:
-    # Use Mailgun HTTP API (recommended - no SMTP port issues)
-    EMAIL_BACKEND = 'anymail.backends.mailgun.EmailBackend'
-    ANYMAIL = {
-        'MAILGUN_API_KEY': MAILGUN_API_KEY,
-        'MAILGUN_SENDER_DOMAIN': MAILGUN_DOMAIN,
-        'MAILGUN_API_URL': os.environ.get('MAILGUN_API_URL', 'https://api.mailgun.net/v3'),
-    }
-else:
-    # Fall back to SMTP (may be blocked on some servers)
-    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-    EMAIL_HOST = os.environ.get('MAILGUN_SMTP_SERVER', 'smtp.mailgun.org')
-    EMAIL_PORT = int(os.environ.get('MAILGUN_SMTP_PORT', '587'))
-    EMAIL_USE_TLS = True
-    EMAIL_HOST_USER = os.environ.get('MAILGUN_SMTP_LOGIN', '')
-    EMAIL_HOST_PASSWORD = os.environ.get('MAILGUN_SMTP_PASSWORD', '')
-    # Email connection timeout (in seconds) - prevents hanging connections
-    EMAIL_TIMEOUT = int(os.environ.get('EMAIL_TIMEOUT', '30'))
+_email_settings = build_email_settings()
+EMAIL_BACKEND = _email_settings["EMAIL_BACKEND"]
+EMAIL_PROVIDER = _email_settings["EMAIL_PROVIDER"]
+RESEND_API_KEY = _email_settings.get("RESEND_API_KEY", "")
+RESEND_SENDING_DOMAIN = _email_settings.get("RESEND_SENDING_DOMAIN", "")
+MAILGUN_API_KEY = _email_settings.get("MAILGUN_API_KEY", "")
+MAILGUN_DOMAIN = _email_settings.get("MAILGUN_DOMAIN", "")
+ANYMAIL = _email_settings.get("ANYMAIL", {})
+EMAIL_TIMEOUT = _email_settings.get("EMAIL_TIMEOUT", 30)
 
-DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'noreply@yourdomain.com')
+if EMAIL_BACKEND.endswith("smtp.EmailBackend"):
+    EMAIL_HOST = _email_settings["EMAIL_HOST"]
+    EMAIL_PORT = _email_settings["EMAIL_PORT"]
+    EMAIL_USE_TLS = _email_settings["EMAIL_USE_TLS"]
+    EMAIL_HOST_USER = _email_settings["EMAIL_HOST_USER"]
+    EMAIL_HOST_PASSWORD = _email_settings["EMAIL_HOST_PASSWORD"]
+
+# Resend path validates domain in build_email_settings; other providers use env/default.
+DEFAULT_FROM_EMAIL = _email_settings.get("DEFAULT_FROM_EMAIL") or os.environ.get(
+    "DEFAULT_FROM_EMAIL",
+    default_from_email_for_provider(EMAIL_PROVIDER),
+)
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
 
 # Celery Configuration

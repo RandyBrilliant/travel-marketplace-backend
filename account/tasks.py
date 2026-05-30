@@ -10,6 +10,7 @@ from django.template.loader import render_to_string
 from django.utils.html import strip_tags
 
 from account.models import CustomUser
+from backend.email import is_http_api_backend, validate_email_configuration
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +27,14 @@ def send_email_with_backend_detection(subject, plain_message, html_message, reci
         recipient_list: List of recipient email addresses
         email_type: Type of email being sent (for logging)
     """
-    backend = settings.EMAIL_BACKEND
     recipient = recipient_list[0] if recipient_list else "unknown"
-    logger.info(f"Attempting to send {email_type} to {recipient} using backend: {backend}")
-    
-    # Only apply socket timeout for SMTP backend
-    if 'smtp' in backend.lower():
+    provider = getattr(settings, "EMAIL_PROVIDER", "unknown")
+    logger.info(
+        f"Attempting to send {email_type} to {recipient} "
+        f"(provider={provider}, backend={settings.EMAIL_BACKEND})"
+    )
+
+    if not is_http_api_backend():
         logger.info("Using SMTP backend - applying connection timeout")
         timeout = getattr(settings, 'EMAIL_TIMEOUT', 30)
         old_timeout = socket.getdefaulttimeout()
@@ -93,28 +96,8 @@ def send_email_verification(self, user_id):
     logger.info(f"Starting email verification task for user_id={user_id}")
     
     try:
-        # Validate email configuration
-        backend = settings.EMAIL_BACKEND
-        if 'anymail' in backend.lower():
-            # HTTP API backend - check for API key
-            mailgun_api_key = getattr(settings, 'MAILGUN_API_KEY', '') or settings.ANYMAIL.get('MAILGUN_API_KEY', '')
-            if not mailgun_api_key:
-                error_msg = "Mailgun API key not configured. Set MAILGUN_API_KEY in .env"
-                logger.error(error_msg)
-                raise ValueError(error_msg)
-            logger.info(f"Email config check passed. Using Mailgun HTTP API")
-        else:
-            # SMTP backend - check for SMTP credentials
-            if not settings.EMAIL_HOST_USER or not settings.EMAIL_HOST_PASSWORD:
-                error_msg = "Mailgun SMTP credentials not configured. EMAIL_HOST_USER or EMAIL_HOST_PASSWORD is missing."
-                logger.error(error_msg)
-                raise ValueError(error_msg)
-            logger.info(f"Email config check passed. Using SMTP: {settings.EMAIL_HOST}")
-        
-        if not settings.DEFAULT_FROM_EMAIL:
-            error_msg = "DEFAULT_FROM_EMAIL is not configured."
-            logger.error(error_msg)
-            raise ValueError(error_msg)
+        provider_desc = validate_email_configuration()
+        logger.info(f"Email config check passed. Using {provider_desc}")
         
         user = CustomUser.objects.get(pk=user_id)
         logger.info(f"Found user: {user.email}")
