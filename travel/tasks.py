@@ -55,8 +55,8 @@ def send_booking_creation_emails(self, booking_id):
         'total_amount_formatted': f"Rp {booking.total_amount:,.0f}",
         'company_name': getattr(settings, 'COMPANY_NAME', 'GoHoliday Travel Marketplace'),
         'company_address': getattr(settings, 'COMPANY_ADDRESS', 'Indonesia'),
-        'support_email': getattr(settings, 'SUPPORT_EMAIL', 'support@goholiday.id'),
-        'support_phone': getattr(settings, 'SUPPORT_PHONE', '+62 xxx xxxx xxxx'),
+        'support_email': getattr(settings, 'SUPPORT_EMAIL', 'dcgoholiday@gmail.com'),
+        'support_phone': getattr(settings, 'SUPPORT_PHONE', '+62811650123'),
     }
 
     # Add promo code info if used
@@ -212,8 +212,8 @@ def send_booking_confirmed_emails(self, booking_id):
         'total_amount_formatted': f"Rp {booking.total_amount:,.0f}",
         'company_name': getattr(settings, 'COMPANY_NAME', 'GoHoliday Travel Marketplace'),
         'company_address': getattr(settings, 'COMPANY_ADDRESS', 'Indonesia'),
-        'support_email': getattr(settings, 'SUPPORT_EMAIL', 'support@goholiday.id'),
-        'support_phone': getattr(settings, 'SUPPORT_PHONE', '+62 xxx xxxx xxxx'),
+        'support_email': getattr(settings, 'SUPPORT_EMAIL', 'dcgoholiday@gmail.com'),
+        'support_phone': getattr(settings, 'SUPPORT_PHONE', '+62811650123'),
     }
 
     # 1. Send payment request email to customer/reseller
@@ -424,8 +424,8 @@ def send_payment_approved_emails(self, payment_id):
         'transfer_date': payment.transfer_date.strftime('%d %B %Y'),
         'company_name': getattr(settings, 'COMPANY_NAME', 'GoHoliday Travel Marketplace'),
         'company_address': getattr(settings, 'COMPANY_ADDRESS', 'Indonesia'),
-        'support_email': getattr(settings, 'SUPPORT_EMAIL', 'support@goholiday.id'),
-        'support_phone': getattr(settings, 'SUPPORT_PHONE', '+62 xxx xxxx xxxx'),
+        'support_email': getattr(settings, 'SUPPORT_EMAIL', 'dcgoholiday@gmail.com'),
+        'support_phone': getattr(settings, 'SUPPORT_PHONE', '+62811650123'),
     }
 
     # 1. Send approval confirmation to customer/reseller

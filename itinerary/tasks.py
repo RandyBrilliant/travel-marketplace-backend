@@ -82,8 +82,8 @@ def send_itinerary_creation_emails(self, transaction_id):
         'total_amount_formatted': f"Rp {transaction.amount:,.0f}",
         'company_name': getattr(settings, 'COMPANY_NAME', 'GoHoliday Travel Marketplace'),
         'company_address': getattr(settings, 'COMPANY_ADDRESS', 'Indonesia'),
-        'support_email': getattr(settings, 'SUPPORT_EMAIL', 'support@goholiday.id'),
-        'support_phone': getattr(settings, 'SUPPORT_PHONE', '+62 xxx xxxx xxxx'),
+        'support_email': getattr(settings, 'SUPPORT_EMAIL', 'dcgoholiday@gmail.com'),
+        'support_phone': getattr(settings, 'SUPPORT_PHONE', '+62811650123'),
     }
 
     # Add promo code info if used
@@ -296,8 +296,8 @@ def send_itinerary_payment_approved_emails(self, transaction_id):
         'transfer_date': transaction.payment_transfer_date.strftime('%d %B %Y') if transaction.payment_transfer_date else 'Tidak tersedia',
         'company_name': getattr(settings, 'COMPANY_NAME', 'GoHoliday Travel Marketplace'),
         'company_address': getattr(settings, 'COMPANY_ADDRESS', 'Indonesia'),
-        'support_email': getattr(settings, 'SUPPORT_EMAIL', 'support@goholiday.id'),
-        'support_phone': getattr(settings, 'SUPPORT_PHONE', '+62 xxx xxxx xxxx'),
+        'support_email': getattr(settings, 'SUPPORT_EMAIL', 'dcgoholiday@gmail.com'),
+        'support_phone': getattr(settings, 'SUPPORT_PHONE', '+62811650123'),
     }
 
     # 1. Send access granted email to customer
@@ -425,8 +425,8 @@ def send_itinerary_payment_rejected_emails(self, transaction_id):
         'transaction_url': f"{getattr(settings, 'FRONTEND_URL', 'https://goholiday.id')}/itinerary/transactions/{transaction.id}",
         'company_name': getattr(settings, 'COMPANY_NAME', 'GoHoliday Travel Marketplace'),
         'company_address': getattr(settings, 'COMPANY_ADDRESS', 'Indonesia'),
-        'support_email': getattr(settings, 'SUPPORT_EMAIL', 'support@goholiday.id'),
-        'support_phone': getattr(settings, 'SUPPORT_PHONE', '+62 xxx xxxx xxxx'),
+        'support_email': getattr(settings, 'SUPPORT_EMAIL', 'dcgoholiday@gmail.com'),
+        'support_phone': getattr(settings, 'SUPPORT_PHONE', '+62811650123'),
     }
 
     try:
@@ -487,8 +487,8 @@ def send_itinerary_expiring_soon_emails():
                 'itinerary_url': f"{getattr(settings, 'FRONTEND_URL', 'https://goholiday.id')}/itinerary-boards/{transaction.board.slug}/view",
                 'company_name': getattr(settings, 'COMPANY_NAME', 'GoHoliday Travel Marketplace'),
                 'company_address': getattr(settings, 'COMPANY_ADDRESS', 'Indonesia'),
-                'support_email': getattr(settings, 'SUPPORT_EMAIL', 'support@goholiday.id'),
-                'support_phone': getattr(settings, 'SUPPORT_PHONE', '+62 xxx xxxx xxxx'),
+                'support_email': getattr(settings, 'SUPPORT_EMAIL', 'dcgoholiday@gmail.com'),
+                'support_phone': getattr(settings, 'SUPPORT_PHONE', '+62811650123'),
             }
 
             customer_html = render_to_string('itinerary/expiring_soon_reminder.html', customer_context)
