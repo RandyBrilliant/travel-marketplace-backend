@@ -596,12 +596,32 @@ class TourPackageSerializer(serializers.ModelSerializer):
         return slug
 
 
+def get_reseller_commission_for_request(request, tour_package):
+    """
+    Return reseller commission amount for an authenticated reseller viewing a tour.
+    Supports dual roles - suppliers with reseller profiles can see commission.
+    """
+    if not (request and request.user.is_authenticated and request.user.is_reseller):
+        return None
+
+    if hasattr(request.user, "reseller_profile"):
+        reseller_profile = request.user.reseller_profile
+    else:
+        try:
+            reseller_profile = ResellerProfile.objects.select_related("user").get(user=request.user)
+        except ResellerProfile.DoesNotExist:
+            return None
+
+    return tour_package.get_reseller_commission(reseller_profile)
+
+
 class TourPackageListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for tour package list view."""
     
     supplier_name = serializers.CharField(source="supplier.company_name", read_only=True)
     duration_display = serializers.CharField(read_only=True)
     main_image_url = serializers.SerializerMethodField()
+    reseller_commission = serializers.SerializerMethodField()
     currency = CurrencySerializer(read_only=True)
     
     class Meta:
@@ -619,6 +639,7 @@ class TourPackageListSerializer(serializers.ModelSerializer):
             "is_active",
             "supplier_name",
             "main_image_url",
+            "reseller_commission",
             "currency",
             "created_at",
         ]
@@ -641,6 +662,11 @@ class TourPackageListSerializer(serializers.ModelSerializer):
             return build_absolute_image_url(primary_image.image.url, request)
         
         return None
+
+    def get_reseller_commission(self, obj):
+        request = self.context.get("request")
+        return get_reseller_commission_for_request(request, obj)
+
 
 class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
     """Detailed serializer for public tour package detail view."""
@@ -727,37 +753,8 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
         return TourDateSerializer(dates_to_show, many=True, context=self.context).data
     
     def get_reseller_commission(self, obj):
-        """
-        Return reseller commission amount if user has reseller profile.
-        Supports dual roles - suppliers with reseller profiles can see commission.
-        """
-        import logging
-        logger = logging.getLogger(__name__)
-        
         request = self.context.get("request")
-        if request:
-            logger.debug(f"[Commission Debug] request.user={request.user}, is_authenticated={request.user.is_authenticated}, is_reseller={getattr(request.user, 'is_reseller', 'N/A')}")
-            if hasattr(request.user, 'role'):
-                logger.debug(f"[Commission Debug] user.role={request.user.role}")
-        
-        if request and request.user.is_authenticated and request.user.is_reseller:
-            logger.debug(f"[Commission Debug] User is authenticated reseller, attempting to get commission")
-            # Use prefetched reseller_profile if available to avoid N+1 query
-            if hasattr(request.user, 'reseller_profile'):
-                logger.debug(f"[Commission Debug] Using prefetched reseller_profile")
-                reseller_profile = request.user.reseller_profile
-            else:
-                logger.debug(f"[Commission Debug] Fetching reseller_profile from DB")
-                try:
-                    reseller_profile = ResellerProfile.objects.select_related('user').get(user=request.user)
-                except ResellerProfile.DoesNotExist:
-                    logger.warning(f"[Commission Debug] ResellerProfile.DoesNotExist for user {request.user}")
-                    return None
-            commission = obj.get_reseller_commission(reseller_profile)
-            logger.debug(f"[Commission Debug] commission={commission}")
-            return commission
-        logger.debug(f"[Commission Debug] User not authenticated reseller, returning None")
-        return None
+        return get_reseller_commission_for_request(request, obj)
 
 
 class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):

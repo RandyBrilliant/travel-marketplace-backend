@@ -683,7 +683,8 @@ class PublicTourPackageListView(APIView):
         reseller_group_ids = []
         if request.user.is_authenticated and request.user.is_reseller:
             try:
-                reseller_profile = ResellerProfile.objects.prefetch_related('reseller_groups').get(user=request.user)
+                reseller_profile = ResellerProfile.objects.prefetch_related('reseller_groups').select_related('user').get(user=request.user)
+                request.user.reseller_profile = reseller_profile  # Cache for serializer commission field
                 reseller_groups = reseller_profile.reseller_groups.filter(is_active=True)
                 reseller_group_ids = sorted(list(reseller_groups.values_list('id', flat=True)))
             except ResellerProfile.DoesNotExist:
