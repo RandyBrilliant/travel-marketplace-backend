@@ -809,11 +809,13 @@ class TourImage(models.Model):
     def clean(self):
         """Validate that only one primary image exists per package."""
         super().clean()
-        if self.is_primary:
+        if self.is_primary and self.package_id:
             existing_primary = TourImage.objects.filter(
-                package=self.package,
-                is_primary=True
-            ).exclude(pk=self.pk if self.pk else None)
+                package_id=self.package_id,
+                is_primary=True,
+            )
+            if self.pk:
+                existing_primary = existing_primary.exclude(pk=self.pk)
             if existing_primary.exists():
                 raise ValidationError({
                     'is_primary': 'Hanya satu gambar utama yang diperbolehkan per paket tur.'
@@ -821,6 +823,26 @@ class TourImage(models.Model):
     
     def save(self, *args, **kwargs):
         """Validate before saving, with better error handling."""
+        is_new = self.pk is None
+
+        # First gallery image for a package becomes primary automatically.
+        if is_new and self.package_id and not self.is_primary:
+            if not TourImage.objects.filter(
+                package_id=self.package_id,
+                is_primary=True,
+            ).exists():
+                self.is_primary = True
+
+        # Ensure only one primary per package before validation runs.
+        if self.is_primary and self.package_id:
+            others = TourImage.objects.filter(
+                package_id=self.package_id,
+                is_primary=True,
+            )
+            if self.pk:
+                others = others.exclude(pk=self.pk)
+            others.update(is_primary=False)
+
         try:
             self.full_clean()
         except ValidationError as e:

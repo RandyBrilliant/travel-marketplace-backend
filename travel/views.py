@@ -660,6 +660,16 @@ class SupplierTourImageViewSet(viewsets.ModelViewSet):
                 {"package": ["Paket tur tidak ditemukan atau Anda tidak memiliki izin untuk mengaksesnya."]}
             )
 
+    def perform_destroy(self, instance):
+        """Promote the next gallery image when the primary image is deleted."""
+        package = instance.package
+        was_primary = instance.is_primary
+        instance.delete()
+        if was_primary:
+            next_image = package.images.order_by("order", "id").first()
+            if next_image and not next_image.is_primary:
+                TourImage.objects.filter(pk=next_image.pk).update(is_primary=True)
+
 
 class PublicTourPackageListView(APIView):
     """

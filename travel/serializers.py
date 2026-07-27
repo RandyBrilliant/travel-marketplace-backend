@@ -646,16 +646,22 @@ class TourPackageListSerializer(serializers.ModelSerializer):
     
     def get_main_image_url(self, obj):
         """
-        Return absolute URL for primary image from gallery images.
-        Gets the image marked as primary (is_primary=True), or None if no primary image exists.
+        Return absolute URL for the list thumbnail image.
+        Prefers the primary image (is_primary=True), then falls back to the
+        first gallery image by order (order=0 / lowest order).
         """
         # Get primary image from prefetched images if available
         if hasattr(obj, '_prefetched_objects_cache') and 'images' in obj._prefetched_objects_cache:
             images = obj._prefetched_objects_cache['images']
             primary_image = next((img for img in images if img.is_primary), None)
+            if not primary_image and images:
+                primary_image = min(images, key=lambda img: (img.order, img.id))
         else:
             # Fallback to query if not prefetched
-            primary_image = obj.images.filter(is_primary=True).first()
+            primary_image = (
+                obj.images.filter(is_primary=True).first()
+                or obj.images.order_by("order", "id").first()
+            )
         
         if primary_image and primary_image.image:
             request = self.context.get("request")
