@@ -489,7 +489,7 @@ class TourPackageSerializer(serializers.ModelSerializer):
     """Serializer for tour packages (supplier view)."""
     
     supplier = serializers.PrimaryKeyRelatedField(read_only=True)
-    supplier_name = serializers.CharField(source="supplier.company_name", read_only=True)
+    supplier_name = serializers.CharField(source="effective_supplier_name", read_only=True)
     images = TourImageSerializer(many=True, read_only=True)
     dates = TourDateSerializer(many=True, read_only=True)
     duration_display = serializers.CharField(read_only=True)
@@ -514,6 +514,7 @@ class TourPackageSerializer(serializers.ModelSerializer):
             "id",
             "supplier",
             "supplier_name",
+            "supplier_display_name",
             "name",
             "slug",
             "itinerary",
@@ -618,7 +619,7 @@ def get_reseller_commission_for_request(request, tour_package):
 class TourPackageListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for tour package list view."""
     
-    supplier_name = serializers.CharField(source="supplier.company_name", read_only=True)
+    supplier_name = serializers.CharField(source="effective_supplier_name", read_only=True)
     duration_display = serializers.CharField(read_only=True)
     main_image_url = serializers.SerializerMethodField()
     reseller_commission = serializers.SerializerMethodField()
@@ -677,7 +678,7 @@ class TourPackageListSerializer(serializers.ModelSerializer):
 class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
     """Detailed serializer for public tour package detail view."""
     
-    supplier_name = serializers.CharField(source="supplier.company_name", read_only=True)
+    supplier_name = serializers.CharField(source="effective_supplier_name", read_only=True)
     duration_display = serializers.CharField(read_only=True)
     itinerary_pdf_url = serializers.SerializerMethodField()
     images = TourImageSerializer(many=True, read_only=True)
@@ -813,8 +814,12 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
             "is_flexible",
             "reseller_groups",
             "commission",
+            "supplier_display_name",
         ]
         read_only_fields = ["id", "supplier", "slug"]
+        extra_kwargs = {
+            "supplier_display_name": {"required": False, "allow_blank": True},
+        }
     
     def validate_reseller_groups(self, value):
         """Additional validation for reseller groups (conversion handled by ResellerGroupField)."""
@@ -831,6 +836,12 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
             return filtered
         
         return value
+    
+    def validate_supplier_display_name(self, value):
+        """Normalize optional supplier display name override."""
+        if value is None:
+            return ""
+        return value.strip()
     
     def validate_highlights(self, value):
         """Convert list to JSON if needed."""
@@ -936,7 +947,7 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
     """Serializer for admin to view tour packages with all details."""
     
     reseller_groups_detail = serializers.SerializerMethodField()
-    supplier_name = serializers.CharField(source="supplier.company_name", read_only=True)
+    supplier_name = serializers.CharField(source="effective_supplier_name", read_only=True)
     images = TourImageSerializer(many=True, read_only=True)
     dates = TourDateSerializer(many=True, read_only=True)
     duration_display = serializers.CharField(read_only=True)
@@ -961,6 +972,7 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
             "id",
             "supplier",
             "supplier_name",
+            "supplier_display_name",
             "name",
             "slug",
             "itinerary",
@@ -994,6 +1006,7 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
             "id",
             "supplier",
             "supplier_name",
+            "supplier_display_name",
             "name",
             "slug",
             "itinerary",
@@ -1166,7 +1179,7 @@ class BookingListSerializer(serializers.ModelSerializer):
     booked_by_email = serializers.SerializerMethodField()
     booked_by_phone = serializers.SerializerMethodField()
     tour_package_name = serializers.CharField(source="tour_date.package.name", read_only=True)
-    supplier_name = serializers.CharField(source="tour_date.package.supplier.company_name", read_only=True)
+    supplier_name = serializers.CharField(source="tour_date.package.effective_supplier_name", read_only=True)
     departure_date = serializers.DateField(source="tour_date.departure_date", read_only=True)
     seats_booked = serializers.IntegerField(read_only=True)
     total_amount = serializers.IntegerField(read_only=True)
@@ -1927,7 +1940,7 @@ class BookingSerializer(serializers.ModelSerializer):
     payment_id = serializers.SerializerMethodField()
     
     # Supplier information including bank details
-    supplier_name = serializers.CharField(source="tour_date.package.supplier.company_name", read_only=True)
+    supplier_name = serializers.CharField(source="tour_date.package.effective_supplier_name", read_only=True)
     supplier_id = serializers.IntegerField(source="tour_date.package.supplier.id", read_only=True)
     supplier_bank_name = serializers.CharField(source="tour_date.package.supplier.bank_name", read_only=True, allow_null=True)
     supplier_bank_account_name = serializers.CharField(source="tour_date.package.supplier.bank_account_name", read_only=True, allow_null=True)

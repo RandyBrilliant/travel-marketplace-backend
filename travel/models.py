@@ -323,6 +323,16 @@ class TourPackage(models.Model):
         related_name="packages",
         help_text=_("Supplier who created and owns this tour package."),
     )
+    supplier_display_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text=_(
+            "Optional supplier name shown for this tour. "
+            "Use when entering tours on behalf of another supplier. "
+            "If blank, the account company name is used."
+        ),
+    )
     name = models.CharField(max_length=255)
     slug = models.SlugField(max_length=255, unique=True)
     itinerary = models.TextField(
@@ -474,6 +484,13 @@ class TourPackage(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name}, {self.country}"
+
+    @property
+    def effective_supplier_name(self) -> str:
+        """Return display override if set, otherwise the owning supplier's company name."""
+        if self.supplier_display_name and self.supplier_display_name.strip():
+            return self.supplier_display_name.strip()
+        return self.supplier.company_name
     
     @property
     def duration_display(self):
