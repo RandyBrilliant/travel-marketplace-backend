@@ -119,6 +119,43 @@ class AgentTourImageCreateView(APIView):
         )
 
 
+MAX_ITINERARY_PDF_BYTES = 20 * 1024 * 1024
+
+
+class AgentTourItineraryPdfView(APIView):
+    permission_classes = [IsStaffAgent]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, pk):
+        tour = generics.get_object_or_404(TourPackage, pk=pk)
+        pdf = request.FILES.get("itinerary_pdf") or request.FILES.get("file")
+        if not pdf:
+            return Response(
+                {"itinerary_pdf": ["File PDF itinerary wajib diisi."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        name = (getattr(pdf, "name", "") or "").lower()
+        content_type = (getattr(pdf, "content_type", "") or "").split(";")[0].strip().lower()
+        header = pdf.read(5)
+        pdf.seek(0)
+        if not name.endswith(".pdf") or header != b"%PDF-" or (
+            content_type and content_type not in {"application/pdf", "application/octet-stream"}
+        ):
+            return Response(
+                {"itinerary_pdf": ["Hanya file PDF yang diterima."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if pdf.size and pdf.size > MAX_ITINERARY_PDF_BYTES:
+            return Response(
+                {"itinerary_pdf": ["PDF melebihi batas 20MB."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        tour.itinerary_pdf = pdf
+        tour.save(update_fields=["itinerary_pdf"])
+        _log_agent(request, "upload_tour_itinerary_pdf", tour_id=tour.id)
+        return Response(AgentTourSerializer(tour, context={"request": request}).data)
+
+
 class AgentTourDateCreateView(APIView):
     permission_classes = [IsStaffAgent]
 

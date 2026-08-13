@@ -215,3 +215,42 @@ class AgentApiTests(TestCase):
             format="multipart",
         )
         self.assertEqual(cover.status_code, 200, cover.data)
+
+    def test_upload_tour_itinerary_pdf(self):
+        self.client.force_authenticate(self.staff)
+        created = self.client.post(
+            "/api/v1/agent/tours/",
+            {
+                "name": "PDF Tour",
+                "country": "Korea",
+                "days": 5,
+                "nights": 4,
+                "base_price": 1,
+                "itinerary": "Day 1 Seoul",
+                "supplier": self.supplier.id,
+                "is_flexible": True,
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.data)
+        tour_id = created.data["id"]
+        pdf = SimpleUploadedFile(
+            "korea-itinerary.pdf",
+            b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n",
+            content_type="application/pdf",
+        )
+        uploaded = self.client.post(
+            f"/api/v1/agent/tours/{tour_id}/itinerary-pdf/",
+            {"itinerary_pdf": pdf},
+            format="multipart",
+        )
+        self.assertEqual(uploaded.status_code, 200, uploaded.data)
+        tour = TourPackage.objects.get(pk=tour_id)
+        self.assertTrue(tour.itinerary_pdf)
+        self.assertTrue(tour.itinerary_pdf.name.endswith(".pdf"))
+        rejected = self.client.post(
+            f"/api/v1/agent/tours/{tour_id}/itinerary-pdf/",
+            {"itinerary_pdf": _png()},
+            format="multipart",
+        )
+        self.assertEqual(rejected.status_code, 400)
