@@ -365,22 +365,40 @@ class TourDateSerializer(serializers.ModelSerializer):
         return value
     
     def validate(self, attrs):
-        """Validate that the combination of package, departure_date, has_shopping_stop, and departure_city is unique."""
+        """Validate that date + city + airline + shopping-stop is unique per package."""
         from travel.models import TourDate
         
         # Get package from instance if updating, or from attrs if creating
-        package = attrs.get('package') or (self.instance.package if self.instance else None)
+        package = (
+            attrs.get("package")
+            or self.context.get("package")
+            or (self.instance.package if self.instance else None)
+        )
         departure_date = attrs.get('departure_date')
         has_shopping_stop = attrs.get('has_shopping_stop', False)
-        departure_city = attrs.get('departure_city', '') or ''
+        departure_city = (attrs.get('departure_city', '') or '')
+        airline = (attrs.get('airline', '') or '')
+        if self.instance:
+            if 'has_shopping_stop' not in attrs:
+                has_shopping_stop = self.instance.has_shopping_stop
+            if 'departure_city' not in attrs:
+                departure_city = self.instance.departure_city or ''
+            if 'airline' not in attrs:
+                airline = self.instance.airline or ''
+            if not departure_date:
+                departure_date = self.instance.departure_date
+        departure_city = departure_city.strip()
+        airline = airline.strip()
+        attrs['departure_city'] = departure_city
+        attrs['airline'] = airline
         
         if package and departure_date:
-            # Check if a TourDate with this combination already exists
             queryset = TourDate.objects.filter(
                 package=package,
                 departure_date=departure_date,
                 has_shopping_stop=has_shopping_stop,
-                departure_city=departure_city
+                departure_city=departure_city,
+                airline=airline,
             )
             
             # Exclude current instance if updating
@@ -390,9 +408,10 @@ class TourDateSerializer(serializers.ModelSerializer):
             if queryset.exists():
                 variant_text = "dengan shopping stop" if has_shopping_stop else "tanpa shopping stop"
                 city_text = f" dari {departure_city}" if departure_city else ""
+                airline_text = f" maskapai {airline}" if airline else ""
                 raise serializers.ValidationError(
-                    f"Tanggal keberangkatan {variant_text}{city_text} untuk paket ini sudah ada. "
-                    f"Silakan gunakan tanggal yang berbeda, kota keberangkatan yang berbeda, atau ubah opsi shopping stop."
+                    f"Tanggal keberangkatan {variant_text}{city_text}{airline_text} untuk paket ini sudah ada. "
+                    f"Untuk tanggal yang sama, gunakan kota, maskapai, atau opsi shopping stop yang berbeda."
                 )
         
         return attrs

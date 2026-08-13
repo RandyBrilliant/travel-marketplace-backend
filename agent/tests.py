@@ -1,5 +1,8 @@
+from datetime import timedelta
+
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from account.models import (
@@ -92,6 +95,27 @@ class AgentApiTests(TestCase):
         tour = TourPackage.objects.get(pk=response.data["id"])
         self.assertFalse(tour.is_active)
         self.assertEqual(tour.supplier_id, self.supplier.id)
+
+    def test_create_tour_stores_commission(self):
+        self.client.force_authenticate(self.staff)
+        response = self.client.post(
+            "/api/v1/agent/tours/",
+            {
+                "name": "Korea 5D4N",
+                "country": "Korea",
+                "days": 5,
+                "nights": 4,
+                "base_price": 15000000,
+                "commission": 500000,
+                "itinerary": "Day 1 Seoul",
+                "supplier": self.supplier.id,
+                "is_flexible": True,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        tour = TourPackage.objects.get(pk=response.data["id"])
+        self.assertEqual(tour.commission, 500000)
 
     def test_publish_requires_dates_unless_flexible(self):
         self.client.force_authenticate(self.staff)
@@ -254,3 +278,58 @@ class AgentApiTests(TestCase):
             format="multipart",
         )
         self.assertEqual(rejected.status_code, 400)
+
+    def test_same_date_two_airlines(self):
+        self.client.force_authenticate(self.staff)
+        created = self.client.post(
+            "/api/v1/agent/tours/",
+            {
+                "name": "Multi Airline",
+                "country": "Korea",
+                "days": 5,
+                "nights": 4,
+                "base_price": 15000000,
+                "itinerary": "Day 1",
+                "supplier": self.supplier.id,
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.data)
+        tour_id = created.data["id"]
+        departure = (timezone.now() + timedelta(days=60)).date().isoformat()
+        first = self.client.post(
+            f"/api/v1/agent/tours/{tour_id}/dates/",
+            {
+                "departure_date": departure,
+                "price": 15000000,
+                "total_seats": 20,
+                "departure_city": "Medan",
+                "airline": "Garuda",
+            },
+            format="json",
+        )
+        self.assertEqual(first.status_code, 201, first.data)
+        second = self.client.post(
+            f"/api/v1/agent/tours/{tour_id}/dates/",
+            {
+                "departure_date": departure,
+                "price": 14500000,
+                "total_seats": 15,
+                "departure_city": "Medan",
+                "airline": "Lion Air",
+            },
+            format="json",
+        )
+        self.assertEqual(second.status_code, 201, second.data)
+        duplicate = self.client.post(
+            f"/api/v1/agent/tours/{tour_id}/dates/",
+            {
+                "departure_date": departure,
+                "price": 15000000,
+                "total_seats": 10,
+                "departure_city": "Medan",
+                "airline": "Garuda",
+            },
+            format="json",
+        )
+        self.assertEqual(duplicate.status_code, 400)

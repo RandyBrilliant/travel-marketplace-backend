@@ -161,7 +161,10 @@ class AgentTourDateCreateView(APIView):
 
     def post(self, request, pk):
         tour = generics.get_object_or_404(TourPackage, pk=pk)
-        serializer = TourDateSerializer(data=request.data, context={"request": request})
+        serializer = TourDateSerializer(
+            data=request.data,
+            context={"request": request, "package": tour},
+        )
         serializer.is_valid(raise_exception=True)
         tour_date = serializer.save(package=tour)
         _log_agent(request, "add_tour_date", tour_id=tour.id, date_id=tour_date.id)
