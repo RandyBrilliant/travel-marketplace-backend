@@ -17,6 +17,16 @@ class ItineraryBoard(models.Model):
         related_name="itinerary_boards",
         help_text=_("Supplier who created and owns this itinerary board."),
     )
+    supplier_display_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text=_(
+            "Optional supplier name shown for this board. "
+            "Use when entering on behalf of a partner without an account. "
+            "If blank, the owning supplier company name is used."
+        ),
+    )
     
     # Board metadata
     title = models.CharField(
@@ -99,6 +109,13 @@ class ItineraryBoard(models.Model):
     
     def __str__(self) -> str:
         return f"{self.title} ({'Public' if self.is_public else 'Private'})"
+
+    @property
+    def effective_supplier_name(self) -> str:
+        """Public supplier label: display override, else owning company name."""
+        if self.supplier_display_name and self.supplier_display_name.strip():
+            return self.supplier_display_name.strip()
+        return self.supplier.company_name
     
     def save(self, *args, **kwargs):
         """Generate share_token and slug if not set, and validate before saving."""

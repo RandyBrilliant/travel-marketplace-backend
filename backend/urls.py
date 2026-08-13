@@ -217,6 +217,7 @@ api_v1_patterns = [
     path("customers/me/itinerary-boards/slug/<str:slug>/", CustomerItineraryBoardDetailView.as_view(), name="customer-itinerary-board-detail-slug"),
     # Itinerary endpoints
     path("itinerary/", include("itinerary.urls")),
+    path("agent/", include("agent.urls")),
 ]
 
 urlpatterns = [

@@ -13,11 +13,11 @@ from .models import (
 class ItineraryBoardAdmin(admin.ModelAdmin):
     list_display = ['title', 'slug', 'is_public', 'supplier', 'price', 'is_active', 'created_at']
     list_filter = ['is_public', 'is_active', 'supplier', 'created_at']
-    search_fields = ['title', 'slug', 'share_token', 'supplier__company_name']
+    search_fields = ['title', 'slug', 'share_token', 'supplier__company_name', 'supplier_display_name']
     readonly_fields = ['share_token', 'created_at', 'updated_at']
     fieldsets = (
         ('Supplier & Board Information', {
-            'fields': ('supplier', 'title', 'description', 'slug')
+            'fields': ('supplier', 'supplier_display_name', 'title', 'description', 'slug')
         }),
         ('Media', {
             'fields': ('package_image', 'video_link')

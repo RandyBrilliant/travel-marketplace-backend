@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     "account.apps.AccountConfig",
     "travel.apps.TravelConfig",
     "itinerary.apps.ItineraryConfig",
+    "agent.apps.AgentConfig",
 ]
 
 MIDDLEWARE = [
@@ -289,6 +290,10 @@ DEFAULT_FROM_EMAIL = _email_settings.get("DEFAULT_FROM_EMAIL") or os.environ.get
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
 SUPPORT_EMAIL = os.environ.get('SUPPORT_EMAIL', 'dcgoholiday@gmail.com')
 SUPPORT_PHONE = os.environ.get('SUPPORT_PHONE', '+62811650123')
+
+# Optional second factor for Hermes / agent writes. When set, staff JWT
+# requests must also send matching X-Agent-Key.
+HERMES_AGENT_API_KEY = os.environ.get("HERMES_AGENT_API_KEY", "").strip()
 
 # Celery Configuration
 CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')

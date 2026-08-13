@@ -272,8 +272,7 @@ class SupplierItineraryCardChecklistViewSet(viewsets.ModelViewSet):
 class AdminItineraryBoardViewSet(viewsets.ModelViewSet):
     """
     ViewSet for admin to view and manage itinerary boards.
-    Admin can view, edit all boards but cannot create/delete them.
-    Suppliers create and manage their own boards.
+    Admin can view, create, and edit boards. Deletion remains supplier-owned.
     """
     
     permission_classes = [IsAdminUser]
@@ -313,34 +312,26 @@ class AdminItineraryBoardViewSet(viewsets.ModelViewSet):
         return queryset
     
     def get_serializer_class(self):
-        """Use different serializers for list vs detail/update."""
+        """Use different serializers for list vs detail/create/update."""
         if self.action == 'list':
             return ItineraryBoardListSerializer
-        elif self.action in ['update', 'partial_update']:
+        elif self.action in ['create', 'update', 'partial_update']:
             return ItineraryBoardCreateUpdateSerializer
         return ItineraryBoardDetailSerializer
     
     def perform_update(self, serializer):
-        """Admin can only update certain fields."""
+        """Admin can update board metadata including supplier assignment."""
         serializer.save()
     
-    def get_permissions(self):
-        """
-        Override permissions:
-        - Only admins can view/update (no create/delete)
-        """
-        if self.action in ['create', 'destroy']:
-            permission_classes = [IsAdminUser]
-            # But actually return 403 for create/destroy
-            return [IsAdminUser()]
-        return super().get_permissions()
-    
     def create(self, request, *args, **kwargs):
-        """Suppliers create boards, not admins."""
-        return Response(
-            {"detail": "Admins cannot create itinerary boards. Suppliers create their own boards."},
-            status=status.HTTP_403_FORBIDDEN
-        )
+        """Staff can create boards on behalf of a supplier."""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        board = serializer.instance
+        output = ItineraryBoardDetailSerializer(board, context={"request": request})
+        headers = self.get_success_headers(output.data)
+        return Response(output.data, status=status.HTTP_201_CREATED, headers=headers)
     
     def destroy(self, request, *args, **kwargs):
         """Admins cannot delete boards."""

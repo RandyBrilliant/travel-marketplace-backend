@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.conf import settings
+from account.models import SupplierProfile
 from .models import (
     ItineraryBoard,
     ItineraryColumn,
@@ -166,7 +167,7 @@ class ItineraryColumnSerializer(serializers.ModelSerializer):
 class ItineraryBoardListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for board list views."""
     
-    supplier_name = serializers.CharField(source='supplier.company_name', read_only=True)
+    supplier_name = serializers.CharField(source='effective_supplier_name', read_only=True)
     columns_count = serializers.IntegerField(source='columns.count', read_only=True)
     package_image_url = serializers.SerializerMethodField()
     
@@ -181,6 +182,7 @@ class ItineraryBoardListSerializer(serializers.ModelSerializer):
             'share_token',
             'supplier',
             'supplier_name',
+            'supplier_display_name',
             'price',
             'currency',
             'package_image_url',
@@ -207,7 +209,7 @@ class ItineraryBoardDetailSerializer(serializers.ModelSerializer):
     
     columns = ItineraryColumnSerializer(many=True, read_only=True)
     columns_count = serializers.IntegerField(source='columns.count', read_only=True)
-    supplier_name = serializers.CharField(source='supplier.company_name', read_only=True)
+    supplier_name = serializers.CharField(source='effective_supplier_name', read_only=True)
     package_image_url = serializers.SerializerMethodField()
     
     class Meta:
@@ -221,6 +223,7 @@ class ItineraryBoardDetailSerializer(serializers.ModelSerializer):
             'share_token',
             'supplier',
             'supplier_name',
+            'supplier_display_name',
             'price',
             'currency',
             'package_image_url',
@@ -245,7 +248,12 @@ class ItineraryBoardDetailSerializer(serializers.ModelSerializer):
 
 class ItineraryBoardCreateUpdateSerializer(serializers.ModelSerializer):
     """Serializer for creating and updating boards."""
-    
+
+    supplier = serializers.PrimaryKeyRelatedField(
+        queryset=SupplierProfile.objects.all(),
+        required=False,
+    )
+
     class Meta:
         model = ItineraryBoard
         fields = [
@@ -258,18 +266,34 @@ class ItineraryBoardCreateUpdateSerializer(serializers.ModelSerializer):
             'package_image',
             'video_link',
             'is_active',
+            'supplier',
+            'supplier_display_name',
             'slug',
             'share_token',
             'created_at',
             'updated_at',
         ]
         read_only_fields = ['id', 'slug', 'share_token', 'created_at', 'updated_at']
-    
+
     def validate_title(self, value):
         """Validate title is not empty."""
         if not value or not value.strip():
             raise serializers.ValidationError("Judul wajib diisi.")
         return value.strip()
+
+    def validate_supplier_display_name(self, value):
+        if value is None:
+            return ""
+        return value.strip()
+
+    def validate(self, attrs):
+        request = self.context.get("request")
+        is_staff = bool(request and getattr(request.user, "is_staff", False))
+        if not self.instance and is_staff and not attrs.get("supplier"):
+            raise serializers.ValidationError(
+                {"supplier": "Supplier wajib diisi saat membuat board."}
+            )
+        return attrs
 
 
 class ItineraryColumnCreateUpdateSerializer(serializers.ModelSerializer):
