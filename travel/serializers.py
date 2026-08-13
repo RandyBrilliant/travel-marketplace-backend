@@ -185,6 +185,28 @@ def build_absolute_image_url(relative_url, request=None):
     return f'{base_url}{relative_url}'
 
 
+def get_tour_package_main_image_url(obj, request=None):
+    """
+    Absolute URL for the tour cover image used in listings and link previews.
+    Prefers is_primary=True, then the first gallery image by order.
+    """
+    if hasattr(obj, "_prefetched_objects_cache") and "images" in obj._prefetched_objects_cache:
+        images = obj._prefetched_objects_cache["images"]
+        primary_image = next((img for img in images if img.is_primary), None)
+        if not primary_image and images:
+            primary_image = min(images, key=lambda img: (img.order, img.id))
+    else:
+        primary_image = (
+            obj.images.filter(is_primary=True).first()
+            or obj.images.order_by("order", "id").first()
+        )
+
+    if primary_image and primary_image.image:
+        return build_absolute_image_url(primary_image.image.url, request)
+
+    return None
+
+
 class TourImageSerializer(serializers.ModelSerializer):
     """Serializer for tour gallery images (read-only for list/detail)."""
     
@@ -665,29 +687,7 @@ class TourPackageListSerializer(serializers.ModelSerializer):
         ]
     
     def get_main_image_url(self, obj):
-        """
-        Return absolute URL for the list thumbnail image.
-        Prefers the primary image (is_primary=True), then falls back to the
-        first gallery image by order (order=0 / lowest order).
-        """
-        # Get primary image from prefetched images if available
-        if hasattr(obj, '_prefetched_objects_cache') and 'images' in obj._prefetched_objects_cache:
-            images = obj._prefetched_objects_cache['images']
-            primary_image = next((img for img in images if img.is_primary), None)
-            if not primary_image and images:
-                primary_image = min(images, key=lambda img: (img.order, img.id))
-        else:
-            # Fallback to query if not prefetched
-            primary_image = (
-                obj.images.filter(is_primary=True).first()
-                or obj.images.order_by("order", "id").first()
-            )
-        
-        if primary_image and primary_image.image:
-            request = self.context.get("request")
-            return build_absolute_image_url(primary_image.image.url, request)
-        
-        return None
+        return get_tour_package_main_image_url(obj, self.context.get("request"))
 
     def get_reseller_commission(self, obj):
         request = self.context.get("request")
@@ -700,6 +700,7 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
     supplier_name = serializers.CharField(source="effective_supplier_name", read_only=True)
     duration_display = serializers.CharField(read_only=True)
     itinerary_pdf_url = serializers.SerializerMethodField()
+    main_image_url = serializers.SerializerMethodField()
     images = TourImageSerializer(many=True, read_only=True)
     dates = serializers.SerializerMethodField()
     reseller_commission = serializers.SerializerMethodField()
@@ -728,6 +729,7 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
             "tipping_price",
             "currency",
             "itinerary_pdf_url",
+            "main_image_url",
             "images",
             "dates",
             "supplier_name",
@@ -741,9 +743,13 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
             "slug",
             "duration_display",
             "itinerary_pdf_url",
+            "main_image_url",
             "created_at",
             "currency",
         ]
+
+    def get_main_image_url(self, obj):
+        return get_tour_package_main_image_url(obj, self.context.get("request"))
     
     def get_itinerary_pdf_url(self, obj):
         """Return absolute URL for itinerary PDF if exists."""

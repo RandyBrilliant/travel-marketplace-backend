@@ -851,7 +851,10 @@ class PublicTourPackageDetailView(APIView):
                 "supplier", "supplier__user"
             ).prefetch_related(
                 "reseller_groups", "reseller_groups__resellers",
-                "images",
+                models.Prefetch(
+                    "images",
+                    queryset=TourImage.objects.order_by("-is_primary", "order", "id"),
+                ),
                 models.Prefetch(
                     "dates",
                     queryset=TourDate.objects.prefetch_related(
