@@ -1732,6 +1732,13 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         Total: 150,000 + 150,000 + 75,000 + 75,000 = 450,000 IDR
         """
         from .models import ResellerCommission, ResellerTourCommission
+        from .commission import (
+            MAX_UPLINE_LEVELS,
+            UPLINE_DISTRIBUTION_PERCENT,
+            deduction_per_seat as calc_deduction_per_seat,
+            to_rupiah,
+            upline_shares,
+        )
         from django.db import transaction
         import logging
         
@@ -1757,114 +1764,73 @@ class BookingCreateSerializer(serializers.ModelSerializer):
             )
             return
         
-        # Fixed upline deduction and distribution percentages (PER SEAT)
-        # Deduction is calculated per seat, then multiplied by number of passengers
-        # If commission per seat >= 100,000 IDR, deduct 100k per seat
-        # If commission per seat < 100,000 IDR, deduct 50% per seat
-        UPLINE_DEDUCTION_PER_SEAT_MAX = 100000  # Maximum deduction per seat from reseller's commission
-        UPLINE_DISTRIBUTION_PERCENT = {
-            1: 50,  # Level 1: 50% of upline share
-            2: 25,  # Level 2: 25% of upline share
-            3: 25,  # Level 3: 25% of upline share
-        }
-        
-        # Level 0: Commission for the reseller who made the booking
-        # Commission comes from: ResellerTourCommission (if exists) OR TourPackage.commission (fallback)
-        # This is calculated per seat, then upline deduction is subtracted (only if reseller has uplines)
-        # Wrap in transaction to ensure atomicity
         try:
             with transaction.atomic():
                 tour_commission_per_seat = tour_package.get_reseller_commission(booking_reseller)
                 
-                # Validate commission per seat
-                if tour_commission_per_seat is not None and tour_commission_per_seat > 0:
-                    # Additional safety check
-                    if tour_commission_per_seat < 0:
-                        logger.error(
-                            f"Negative commission per seat ({tour_commission_per_seat}) detected "
-                            f"for booking {booking.id}. Commission creation aborted."
-                        )
-                        return
-
-                    # Whole rupiah only — float * 0.5 can truncate 300000 to 299999
-                    tour_commission_per_seat = int(round(tour_commission_per_seat))
-                    
-                    # Calculate base commission (before deduction)
-                    base_commission = tour_commission_per_seat * seats_count
-                    
-                    # Check if reseller has any upline (sponsor)
-                    # If no upline, reseller gets full commission without deduction
-                    has_upline = booking_reseller.sponsor is not None
-                    
-                    if has_upline:
-                        # Calculate upline deduction PER SEAT first, then multiply by seats
-                        # - If commission_per_seat >= 100k, deduct 100k per seat
-                        # - If commission_per_seat < 100k, deduct 50% per seat
-                        if tour_commission_per_seat >= UPLINE_DEDUCTION_PER_SEAT_MAX:
-                            deduction_per_seat = UPLINE_DEDUCTION_PER_SEAT_MAX
-                        else:
-                            deduction_per_seat = tour_commission_per_seat // 2
-                        
-                        # Total deduction = deduction per seat × number of passengers
-                        upline_deduction = deduction_per_seat * seats_count
-                    else:
-                        # No upline = no deduction, reseller gets full commission
-                        deduction_per_seat = 0
-                        upline_deduction = 0
-                        logger.info(
-                            f"Reseller {booking_reseller.id} has no upline (group root), no deduction applied"
-                        )
-                    
-                    # Calculate final commission for reseller
-                    reseller_final_commission = base_commission - upline_deduction
-                    
-                    # Only create commission if reseller gets something (commission must be positive)
-                    if reseller_final_commission > 0:
-                        commission = ResellerCommission.objects.create(
-                            booking=booking,
-                            reseller=booking_reseller,
-                            level=0,
-                            amount=reseller_final_commission
-                        )
-                        # Check if it came from ResellerTourCommission or TourPackage.commission
-                        has_specific = ResellerTourCommission.objects.filter(
-                            reseller=booking_reseller,
-                            tour_package=tour_package,
-                            is_active=True
-                        ).exists()
-                        commission_source = "ResellerTourCommission" if has_specific else "TourPackage.commission"
-                        logger.info(
-                            f"Created commission {commission.id} for reseller {booking_reseller.id} (Level 0): "
-                            f"{reseller_final_commission} IDR (base: {base_commission} IDR - upline deduction: {upline_deduction} IDR "
-                            f"[{deduction_per_seat} IDR × {seats_count} passengers]) "
-                            f"from {commission_source} (tour {tour_package.id}, booking {booking.id})"
-                        )
-                    else:
-                        logger.warning(
-                            f"No commission created for reseller {booking_reseller.id} on booking {booking.id} "
-                            f"because final commission after upline deduction would be {reseller_final_commission} IDR "
-                            f"(base: {base_commission} IDR - deduction: {upline_deduction} IDR). "
-                            f"Commission must be positive."
-                        )
-                        return  # No upline commissions if reseller gets nothing
-                else:
+                if tour_commission_per_seat is None or tour_commission_per_seat <= 0:
                     logger.warning(
                         f"No commission created for reseller {booking_reseller.id} on booking {booking.id} "
                         f"because tour package {tour_package.id} has no commission set "
                         f"(neither ResellerTourCommission nor TourPackage.commission)."
                     )
-                    # If reseller doesn't get commission, uplines shouldn't either
                     return
-                
-                # Upline Commission Structure: Traverse up to 3 levels
-                # Calculate individual upline amounts based on total deduction
+
+                tour_commission_per_seat = to_rupiah(tour_commission_per_seat)
+                base_commission = tour_commission_per_seat * seats_count
+                has_upline = booking_reseller.sponsor is not None
+                deduction_per_seat = calc_deduction_per_seat(
+                    tour_commission_per_seat, has_upline
+                )
+                upline_deduction = deduction_per_seat * seats_count
+                reseller_final_commission = base_commission - upline_deduction
+
+                if not has_upline:
+                    logger.info(
+                        f"Reseller {booking_reseller.id} has no upline (group root), no deduction applied"
+                    )
+
+                # Level 0 can be 0 (e.g. commission exactly 100k with an upline).
+                # Still pay uplines from the deducted pool.
+                if reseller_final_commission > 0:
+                    commission = ResellerCommission.objects.create(
+                        booking=booking,
+                        reseller=booking_reseller,
+                        level=0,
+                        amount=reseller_final_commission
+                    )
+                    has_specific = ResellerTourCommission.objects.filter(
+                        reseller=booking_reseller,
+                        tour_package=tour_package,
+                        is_active=True
+                    ).exists()
+                    commission_source = "ResellerTourCommission" if has_specific else "TourPackage.commission"
+                    logger.info(
+                        f"Created commission {commission.id} for reseller {booking_reseller.id} (Level 0): "
+                        f"{reseller_final_commission} IDR (base: {base_commission} IDR - upline deduction: {upline_deduction} IDR "
+                        f"[{deduction_per_seat} IDR × {seats_count} passengers]) "
+                        f"from {commission_source} (tour {tour_package.id}, booking {booking.id})"
+                    )
+                else:
+                    logger.warning(
+                        f"No Level 0 commission for reseller {booking_reseller.id} on booking {booking.id} "
+                        f"(final amount {reseller_final_commission} IDR). "
+                        f"Upline pool is still {upline_deduction} IDR."
+                    )
+
+                if upline_deduction <= 0:
+                    if not has_upline:
+                        logger.info(
+                            f"No sponsor for reseller {booking_reseller.id}, skipping upline commission"
+                        )
+                    return
+
+                shares = upline_shares(upline_deduction)
                 current_upline = booking_reseller.sponsor
                 level = 1
-                visited_resellers = {booking_reseller.id}  # Track visited to prevent circular references
-                MAX_LEVELS = 3  # Safety limit
-                
-                while current_upline and level <= MAX_LEVELS:
-                    # Circular reference detection
+                visited_resellers = {booking_reseller.id}
+
+                while current_upline and level <= MAX_UPLINE_LEVELS:
                     if current_upline.id in visited_resellers:
                         logger.error(
                             f"Circular reference detected at level {level} for reseller {current_upline.id} "
@@ -1872,11 +1838,10 @@ class BookingCreateSerializer(serializers.ModelSerializer):
                         )
                         break
                     visited_resellers.add(current_upline.id)
-                    
-                    # Calculate commission amount for this level based on deduction
+
+                    commission_amount = shares.get(level, 0)
                     distribution_percent = UPLINE_DISTRIBUTION_PERCENT.get(level, 0)
-                    commission_amount = (upline_deduction * distribution_percent) // 100
-                    
+
                     if commission_amount > 0:
                         upline_commission_obj = ResellerCommission.objects.create(
                             booking=booking,
@@ -1893,14 +1858,10 @@ class BookingCreateSerializer(serializers.ModelSerializer):
                             f"Skipping commission for upline {current_upline.id} at level {level}: "
                             f"commission amount would be 0 IDR"
                         )
-                    
-                    # Move to next upline level
+
                     current_upline = current_upline.sponsor
                     level += 1
-                
-                if level == 1:
-                    logger.info(f"No sponsor for reseller {booking_reseller.id}, skipping upline commission")
-        
+
         except Exception as e:
             logger.error(
                 f"Error creating commissions for booking {booking.id}: {str(e)}",
