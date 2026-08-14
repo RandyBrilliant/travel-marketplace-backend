@@ -1762,11 +1762,10 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         # If commission per seat >= 100,000 IDR, deduct 100k per seat
         # If commission per seat < 100,000 IDR, deduct 50% per seat
         UPLINE_DEDUCTION_PER_SEAT_MAX = 100000  # Maximum deduction per seat from reseller's commission
-        UPLINE_PERCENTAGE = 0.5  # 50% of commission per seat goes to uplines if commission < 100k
-        UPLINE_DISTRIBUTION = {
-            1: 0.50,  # Level 1: 50% of upline share
-            2: 0.25,  # Level 2: 25% of upline share
-            3: 0.25,  # Level 3: 25% of upline share
+        UPLINE_DISTRIBUTION_PERCENT = {
+            1: 50,  # Level 1: 50% of upline share
+            2: 25,  # Level 2: 25% of upline share
+            3: 25,  # Level 3: 25% of upline share
         }
         
         # Level 0: Commission for the reseller who made the booking
@@ -1786,6 +1785,9 @@ class BookingCreateSerializer(serializers.ModelSerializer):
                             f"for booking {booking.id}. Commission creation aborted."
                         )
                         return
+
+                    # Whole rupiah only — float * 0.5 can truncate 300000 to 299999
+                    tour_commission_per_seat = int(round(tour_commission_per_seat))
                     
                     # Calculate base commission (before deduction)
                     base_commission = tour_commission_per_seat * seats_count
@@ -1801,7 +1803,7 @@ class BookingCreateSerializer(serializers.ModelSerializer):
                         if tour_commission_per_seat >= UPLINE_DEDUCTION_PER_SEAT_MAX:
                             deduction_per_seat = UPLINE_DEDUCTION_PER_SEAT_MAX
                         else:
-                            deduction_per_seat = int(tour_commission_per_seat * UPLINE_PERCENTAGE)
+                            deduction_per_seat = tour_commission_per_seat // 2
                         
                         # Total deduction = deduction per seat × number of passengers
                         upline_deduction = deduction_per_seat * seats_count
@@ -1872,8 +1874,8 @@ class BookingCreateSerializer(serializers.ModelSerializer):
                     visited_resellers.add(current_upline.id)
                     
                     # Calculate commission amount for this level based on deduction
-                    distribution_percentage = UPLINE_DISTRIBUTION.get(level, 0)
-                    commission_amount = int(upline_deduction * distribution_percentage)
+                    distribution_percent = UPLINE_DISTRIBUTION_PERCENT.get(level, 0)
+                    commission_amount = (upline_deduction * distribution_percent) // 100
                     
                     if commission_amount > 0:
                         upline_commission_obj = ResellerCommission.objects.create(
@@ -1884,7 +1886,7 @@ class BookingCreateSerializer(serializers.ModelSerializer):
                         )
                         logger.info(
                             f"Created upline commission {upline_commission_obj.id} for upline {current_upline.id} (Level {level}): "
-                            f"{commission_amount} IDR ({distribution_percentage*100}% of {upline_deduction} IDR deduction) (booking {booking.id})"
+                            f"{commission_amount} IDR ({distribution_percent}% of {upline_deduction} IDR deduction) (booking {booking.id})"
                         )
                     else:
                         logger.info(
