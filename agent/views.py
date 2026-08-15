@@ -14,8 +14,8 @@ from itinerary.serializers import (
     ItineraryCardSerializer,
     ItineraryColumnSerializer,
 )
-from travel.models import TourPackage
-from travel.serializers import TourDateSerializer, TourImageSerializer
+from travel.models import Currency, TourPackage
+from travel.serializers import CurrencySerializer, TourDateSerializer, TourImageSerializer
 
 from .permissions import IsStaffAgent
 from .serializers import (
@@ -65,6 +65,12 @@ class AgentSupplierLookupView(generics.ListAPIView):
         return queryset.order_by("company_name")
 
 
+class AgentCurrencyListView(generics.ListAPIView):
+    permission_classes = [IsStaffAgent]
+    serializer_class = CurrencySerializer
+    queryset = Currency.objects.all().order_by("code")
+
+
 class AgentTourListCreateView(generics.CreateAPIView):
     permission_classes = [IsStaffAgent]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
@@ -90,7 +96,9 @@ class AgentTourListCreateView(generics.CreateAPIView):
 class AgentTourDetailView(generics.RetrieveUpdateAPIView):
     permission_classes = [IsStaffAgent]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
-    queryset = TourPackage.objects.select_related("supplier", "supplier__user").prefetch_related(
+    queryset = TourPackage.objects.select_related(
+        "supplier", "supplier__user", "currency"
+    ).prefetch_related(
         "images", "dates"
     )
     http_method_names = ["get", "patch", "head", "options"]
@@ -99,6 +107,15 @@ class AgentTourDetailView(generics.RetrieveUpdateAPIView):
         if self.request.method == "PATCH":
             return AgentTourCreateSerializer
         return AgentTourSerializer
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        tour = self.get_object()
+        return Response(AgentTourSerializer(tour, context={"request": request}).data)
 
 
 class AgentTourImageCreateView(APIView):

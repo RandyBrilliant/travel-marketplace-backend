@@ -977,6 +977,7 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
     dates = TourDateSerializer(many=True, read_only=True)
     duration_display = serializers.CharField(read_only=True)
     group_size_display = serializers.CharField(read_only=True)
+    currency = CurrencySerializer(read_only=True)
     
     def get_reseller_groups_detail(self, obj):
         """Return detailed information about reseller groups."""
@@ -1016,6 +1017,7 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
             "base_price",
             "visa_price",
             "tipping_price",
+            "currency",
             "itinerary_pdf",
             "is_active",
             "is_flexible",
@@ -1050,6 +1052,7 @@ class AdminTourPackageSerializer(serializers.ModelSerializer):
             "base_price",
             "visa_price",
             "tipping_price",
+            "currency",
             "itinerary_pdf",
             "is_flexible",
             "reseller_groups",

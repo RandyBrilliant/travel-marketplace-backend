@@ -969,6 +969,7 @@ class AdminTourPackageViewSet(viewsets.ReadOnlyModelViewSet):
         queryset = TourPackage.objects.select_related(
             "supplier",
             "supplier__user",
+            "currency",
         ).prefetch_related(
             models.Prefetch(
                 "reseller_groups",

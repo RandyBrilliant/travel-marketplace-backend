@@ -9,6 +9,7 @@ from .views import (
     AgentCardCoverView,
     AgentCardCreateView,
     AgentCardDetailView,
+    AgentCurrencyListView,
     AgentSupplierLookupView,
     AgentTourDateCreateView,
     AgentTourDetailView,
@@ -20,6 +21,7 @@ from .views import (
 
 urlpatterns = [
     path("suppliers/", AgentSupplierLookupView.as_view(), name="agent-suppliers"),
+    path("currencies/", AgentCurrencyListView.as_view(), name="agent-currencies"),
     path("tours/", AgentTourListCreateView.as_view(), name="agent-tours"),
     path("tours/<int:pk>/", AgentTourDetailView.as_view(), name="agent-tour-detail"),
     path("tours/<int:pk>/images/", AgentTourImageCreateView.as_view(), name="agent-tour-images"),

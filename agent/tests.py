@@ -12,7 +12,7 @@ from account.models import (
     UserRole,
 )
 from itinerary.models import ItineraryBoard
-from travel.models import TourPackage
+from travel.models import Currency, TourPackage
 
 
 def _png():
@@ -63,6 +63,8 @@ class AgentApiTests(TestCase):
             contact_phone="0812",
             approval_status=SupplierApprovalStatus.APPROVED,
         )
+        self.idr = Currency.objects.create(code="IDR", name="Indonesia Rupiah", symbol="Rp")
+        self.usd = Currency.objects.create(code="USD", name="United States Dollar", symbol="$")
 
     def test_requires_staff(self):
         response = self.client.get("/api/v1/agent/suppliers/")
@@ -333,3 +335,44 @@ class AgentApiTests(TestCase):
             format="json",
         )
         self.assertEqual(duplicate.status_code, 400)
+
+    def test_list_currencies(self):
+        self.client.force_authenticate(self.staff)
+        response = self.client.get("/api/v1/agent/currencies/")
+        self.assertEqual(response.status_code, 200)
+        codes = [row["code"] for row in response.data["results"]]
+        self.assertIn("IDR", codes)
+        self.assertIn("USD", codes)
+
+    def test_patch_tour_currency_returns_nested_currency(self):
+        self.client.force_authenticate(self.staff)
+        created = self.client.post(
+            "/api/v1/agent/tours/",
+            {
+                "name": "Argentina 7D6N",
+                "country": "Argentina",
+                "days": 7,
+                "nights": 6,
+                "base_price": 1895,
+                "itinerary": "Day 1 Buenos Aires",
+                "supplier": self.supplier.id,
+                "is_flexible": True,
+                "currency_id": self.usd.id,
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.data)
+        self.assertEqual(created.data["currency"]["code"], "USD")
+        tour_id = created.data["id"]
+        patched = self.client.patch(
+            f"/api/v1/agent/tours/{tour_id}/",
+            {"currency_id": self.idr.id},
+            format="json",
+        )
+        self.assertEqual(patched.status_code, 200, patched.data)
+        self.assertEqual(patched.data["currency"]["code"], "IDR")
+        fetched = self.client.get(f"/api/v1/agent/tours/{tour_id}/")
+        self.assertEqual(fetched.status_code, 200)
+        self.assertEqual(fetched.data["currency"]["code"], "IDR")
+        tour = TourPackage.objects.get(pk=tour_id)
+        self.assertEqual(tour.currency_id, self.idr.id)
