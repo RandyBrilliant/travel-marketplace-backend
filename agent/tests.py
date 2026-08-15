@@ -203,6 +203,50 @@ class AgentApiTests(TestCase):
         self.assertEqual(ok.status_code, 200)
         self.assertTrue(TourPackage.objects.get(pk=tour_id).is_active)
 
+    def test_unpublish_requires_confirm_and_deactivates(self):
+        self.client.force_authenticate(self.staff)
+        created = self.client.post(
+            "/api/v1/agent/tours/",
+            {
+                "name": "Live Tour",
+                "country": "China",
+                "days": 5,
+                "nights": 4,
+                "base_price": 1,
+                "itinerary": "x",
+                "supplier": self.supplier.id,
+                "is_flexible": True,
+            },
+            format="json",
+        )
+        tour_id = created.data["id"]
+        self.client.post(
+            f"/api/v1/agent/tours/{tour_id}/publish/",
+            {"confirm": True},
+            format="json",
+        )
+        ignored = self.client.patch(
+            f"/api/v1/agent/tours/{tour_id}/",
+            {"is_active": False},
+            format="json",
+        )
+        self.assertEqual(ignored.status_code, 200, ignored.data)
+        self.assertTrue(TourPackage.objects.get(pk=tour_id).is_active)
+        denied = self.client.post(
+            f"/api/v1/agent/tours/{tour_id}/unpublish/",
+            {"confirm": False},
+            format="json",
+        )
+        self.assertEqual(denied.status_code, 400)
+        ok = self.client.post(
+            f"/api/v1/agent/tours/{tour_id}/unpublish/",
+            {"confirm": True},
+            format="json",
+        )
+        self.assertEqual(ok.status_code, 200, ok.data)
+        self.assertFalse(ok.data["is_active"])
+        self.assertFalse(TourPackage.objects.get(pk=tour_id).is_active)
+
     @override_settings(HERMES_AGENT_API_KEY="secret-agent")
     def test_agent_key_required_when_configured(self):
         self.client.force_authenticate(self.staff)

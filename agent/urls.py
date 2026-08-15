@@ -17,6 +17,7 @@ from .views import (
     AgentTourItineraryPdfView,
     AgentTourListCreateView,
     AgentTourPublishView,
+    AgentTourUnpublishView,
 )
 
 urlpatterns = [
@@ -32,6 +33,7 @@ urlpatterns = [
     ),
     path("tours/<int:pk>/dates/", AgentTourDateCreateView.as_view(), name="agent-tour-dates"),
     path("tours/<int:pk>/publish/", AgentTourPublishView.as_view(), name="agent-tour-publish"),
+    path("tours/<int:pk>/unpublish/", AgentTourUnpublishView.as_view(), name="agent-tour-unpublish"),
     path("boards/", AgentBoardListCreateView.as_view(), name="agent-boards"),
     path("boards/<int:pk>/", AgentBoardDetailView.as_view(), name="agent-board-detail"),
     path(

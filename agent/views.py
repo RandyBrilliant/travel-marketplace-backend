@@ -217,6 +217,19 @@ class AgentTourPublishView(APIView):
         return Response(AgentTourSerializer(tour, context={"request": request}).data)
 
 
+class AgentTourUnpublishView(APIView):
+    permission_classes = [IsStaffAgent]
+
+    def post(self, request, pk):
+        serializer = AgentPublishSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        tour = generics.get_object_or_404(TourPackage, pk=pk)
+        tour.is_active = False
+        tour.save(update_fields=["is_active"])
+        _log_agent(request, "unpublish_tour", tour_id=tour.id)
+        return Response(AgentTourSerializer(tour, context={"request": request}).data)
+
+
 class AgentBoardListCreateView(generics.CreateAPIView):
     permission_classes = [IsStaffAgent]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
