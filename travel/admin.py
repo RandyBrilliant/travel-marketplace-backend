@@ -18,9 +18,9 @@ from .models import (
 
 @admin.register(TourPackage)
 class TourPackageAdmin(admin.ModelAdmin):
-    list_display = ["name", "supplier", "country", "tour_type", "base_price", "is_active", "reseller_groups_count"]
+    list_display = ["name", "supplier", "country", "tour_type", "base_price", "is_active", "is_guaranteed", "reseller_groups_count"]
     list_display_links = ["name"]
-    list_filter = ["tour_type", "is_active", "created_at"]
+    list_filter = ["tour_type", "is_active", "is_guaranteed", "created_at"]
     search_fields = ["name", "country", "supplier__company_name", "supplier_display_name", "slug"]
     filter_horizontal = ["reseller_groups"]
     readonly_fields = ["slug", "duration_display", "created_at", "updated_at"]
@@ -46,7 +46,7 @@ class TourPackageAdmin(admin.ModelAdmin):
             "fields": ("cancellation_policy", "important_notes", "itinerary_pdf")
         }),
         ("Settings", {
-            "fields": ("is_active", "reseller_groups")
+            "fields": ("is_active", "is_flexible", "is_guaranteed", "reseller_groups")
         }),
         ("Commission Settings", {
             "fields": ("commission",),

@@ -445,6 +445,14 @@ class TourPackage(models.Model):
         default=False,
         help_text=_("If True, allows booking for any date without pre-created TourDate. TourDate will be created automatically on booking.")
     )
+
+    # Guaranteed departure ("Pasti Jalan")
+    is_guaranteed = models.BooleanField(
+        default=False,
+        help_text=_(
+            "If True, the tour is confirmed to depart (Pasti Jalan) even if capacity is not yet filled."
+        ),
+    )
     
     # Reseller groups that can access this tour package
     # If empty, tour is visible to all resellers
