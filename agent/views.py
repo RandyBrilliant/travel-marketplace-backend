@@ -14,7 +14,7 @@ from itinerary.serializers import (
     ItineraryCardSerializer,
     ItineraryColumnSerializer,
 )
-from travel.models import Currency, TourPackage
+from travel.models import Currency, TourDate, TourPackage
 from travel.serializers import CurrencySerializer, TourDateSerializer, TourImageSerializer
 
 from .permissions import IsStaffAgent
@@ -173,6 +173,14 @@ class AgentTourItineraryPdfView(APIView):
         return Response(AgentTourSerializer(tour, context={"request": request}).data)
 
 
+def _truthy(value):
+    if value is True:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes"}
+    return False
+
+
 class AgentTourDateCreateView(APIView):
     permission_classes = [IsStaffAgent]
 
@@ -189,6 +197,50 @@ class AgentTourDateCreateView(APIView):
             TourDateSerializer(tour_date, context={"request": request}).data,
             status=status.HTTP_201_CREATED,
         )
+
+
+class AgentTourDateDetailView(APIView):
+    permission_classes = [IsStaffAgent]
+
+    def _get_date(self, pk, date_id):
+        return generics.get_object_or_404(
+            TourDate.objects.select_related("package").prefetch_related("seat_slots"),
+            pk=date_id,
+            package_id=pk,
+        )
+
+    def get(self, request, pk, date_id):
+        tour_date = self._get_date(pk, date_id)
+        return Response(TourDateSerializer(tour_date, context={"request": request}).data)
+
+    def patch(self, request, pk, date_id):
+        tour = generics.get_object_or_404(TourPackage, pk=pk)
+        tour_date = self._get_date(pk, date_id)
+        payload = request.data.copy() if hasattr(request.data, "copy") else dict(request.data)
+        if _truthy(payload.pop("sold_out", False)):
+            payload["total_seats"] = 0
+        if not payload:
+            return Response(
+                {"detail": "Provide at least one field to update (e.g. total_seats or sold_out)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        serializer = TourDateSerializer(
+            tour_date,
+            data=payload,
+            partial=True,
+            context={"request": request, "package": tour},
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        _log_agent(
+            request,
+            "update_tour_date",
+            tour_id=tour.id,
+            date_id=tour_date.id,
+            fields=sorted(str(key) for key in payload.keys()),
+        )
+        updated = TourDate.objects.prefetch_related("seat_slots").get(pk=tour_date.pk)
+        return Response(TourDateSerializer(updated, context={"request": request}).data)
 
 
 class AgentTourPublishView(APIView):

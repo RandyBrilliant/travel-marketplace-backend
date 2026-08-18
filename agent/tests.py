@@ -12,7 +12,7 @@ from account.models import (
     UserRole,
 )
 from itinerary.models import ItineraryBoard
-from travel.models import Currency, TourPackage
+from travel.models import Currency, SeatSlot, SeatSlotStatus, TourPackage
 
 
 def _png():
@@ -379,6 +379,112 @@ class AgentApiTests(TestCase):
             format="json",
         )
         self.assertEqual(duplicate.status_code, 400)
+
+    def _draft_tour_with_date(self, **date_overrides):
+        created = self.client.post(
+            "/api/v1/agent/tours/",
+            {
+                "name": "Seat Update Tour",
+                "country": "China",
+                "days": 9,
+                "nights": 8,
+                "base_price": 15000000,
+                "itinerary": "Day 1",
+                "supplier": self.supplier.id,
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.data)
+        tour_id = created.data["id"]
+        payload = {
+            "departure_date": (timezone.now() + timedelta(days=60)).date().isoformat(),
+            "price": 15000000,
+            "total_seats": 20,
+            "departure_city": "Medan",
+            "airline": "Garuda",
+        }
+        payload.update(date_overrides)
+        added = self.client.post(
+            f"/api/v1/agent/tours/{tour_id}/dates/",
+            payload,
+            format="json",
+        )
+        self.assertEqual(added.status_code, 201, added.data)
+        return tour_id, added.data
+
+    def test_patch_tour_date_sold_out_sets_total_seats_zero(self):
+        self.client.force_authenticate(self.staff)
+        tour_id, date = self._draft_tour_with_date(total_seats=20)
+        date_id = date["id"]
+        self.assertGreater(len(date.get("seat_slots") or []), 0)
+        patched = self.client.patch(
+            f"/api/v1/agent/tours/{tour_id}/dates/{date_id}/",
+            {"total_seats": 0},
+            format="json",
+        )
+        self.assertEqual(patched.status_code, 200, patched.data)
+        self.assertEqual(patched.data["total_seats"], 0)
+        self.assertEqual(patched.data["remaining_seats"], 0)
+        self.assertEqual(patched.data["booked_seats_count"], 0)
+        self.assertEqual(patched.data["seat_slots"], [])
+        fetched = self.client.get(f"/api/v1/agent/tours/{tour_id}/dates/{date_id}/")
+        self.assertEqual(fetched.status_code, 200)
+        self.assertEqual(fetched.data["total_seats"], 0)
+
+    def test_patch_tour_date_sold_out_flag(self):
+        self.client.force_authenticate(self.staff)
+        tour_id, date = self._draft_tour_with_date(total_seats=12)
+        patched = self.client.patch(
+            f"/api/v1/agent/tours/{tour_id}/dates/{date['id']}/",
+            {"sold_out": True},
+            format="json",
+        )
+        self.assertEqual(patched.status_code, 200, patched.data)
+        self.assertEqual(patched.data["total_seats"], 0)
+        self.assertEqual(patched.data["remaining_seats"], 0)
+
+    def test_patch_tour_date_rejects_total_seats_below_booked(self):
+        self.client.force_authenticate(self.staff)
+        tour_id, date = self._draft_tour_with_date(total_seats=5)
+        slot = SeatSlot.objects.filter(tour_date_id=date["id"]).first()
+        SeatSlot.objects.filter(pk=slot.pk).update(status=SeatSlotStatus.BOOKED)
+        denied = self.client.patch(
+            f"/api/v1/agent/tours/{tour_id}/dates/{date['id']}/",
+            {"total_seats": 0},
+            format="json",
+        )
+        self.assertEqual(denied.status_code, 400)
+        self.assertIn("sudah dibooking", str(denied.data))
+
+    def test_patch_tour_date_not_found_on_other_tour(self):
+        self.client.force_authenticate(self.staff)
+        tour_a, date = self._draft_tour_with_date()
+        tour_b = self.client.post(
+            "/api/v1/agent/tours/",
+            {
+                "name": "Other Tour",
+                "country": "Japan",
+                "days": 3,
+                "nights": 2,
+                "base_price": 1,
+                "itinerary": "x",
+                "supplier": self.supplier.id,
+                "is_flexible": True,
+            },
+            format="json",
+        ).data["id"]
+        missing = self.client.patch(
+            f"/api/v1/agent/tours/{tour_b}/dates/{date['id']}/",
+            {"total_seats": 0},
+            format="json",
+        )
+        self.assertEqual(missing.status_code, 404)
+        empty = self.client.patch(
+            f"/api/v1/agent/tours/{tour_a}/dates/{date['id']}/",
+            {},
+            format="json",
+        )
+        self.assertEqual(empty.status_code, 400)
 
     def test_list_currencies(self):
         self.client.force_authenticate(self.staff)
