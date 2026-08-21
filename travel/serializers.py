@@ -672,7 +672,7 @@ def get_reseller_commission_for_request(request, tour_package):
 
 
 class TourPackageListSerializer(serializers.ModelSerializer):
-    """Lightweight serializer for tour package list view."""
+    """Lightweight serializer for tour package list (supplier and admin)."""
     
     supplier_name = serializers.CharField(source="effective_supplier_name", read_only=True)
     duration_display = serializers.CharField(read_only=True)
@@ -710,10 +710,22 @@ class TourPackageListSerializer(serializers.ModelSerializer):
         return get_reseller_commission_for_request(request, obj)
 
 
+class PublicTourPackageListSerializer(TourPackageListSerializer):
+    """Public/reseller catalog. Supplier name is omitted so resellers cannot
+    contact the supplier off-platform before booking.
+    """
+
+    class Meta(TourPackageListSerializer.Meta):
+        fields = [
+            field
+            for field in TourPackageListSerializer.Meta.fields
+            if field != "supplier_name"
+        ]
+
+
 class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
-    """Detailed serializer for public tour package detail view."""
+    """Public/reseller tour detail. Supplier name is only on booking APIs."""
     
-    supplier_name = serializers.CharField(source="effective_supplier_name", read_only=True)
     duration_display = serializers.CharField(read_only=True)
     itinerary_pdf_url = serializers.SerializerMethodField()
     main_image_url = serializers.SerializerMethodField()
@@ -748,7 +760,6 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
             "main_image_url",
             "images",
             "dates",
-            "supplier_name",
             "reseller_commission",
             "is_active",
             "is_flexible",

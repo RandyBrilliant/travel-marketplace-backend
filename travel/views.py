@@ -15,6 +15,7 @@ from .models import TourPackage, TourDate, TourImage, ResellerTourCommission, Re
 from .serializers import (
     TourPackageSerializer,
     TourPackageListSerializer,
+    PublicTourPackageListSerializer,
     TourPackageCreateUpdateSerializer,
     AdminTourPackageSerializer,
     AdminTourPackageToggleSerializer,
@@ -683,7 +684,7 @@ class PublicTourPackageListView(APIView):
     
     def get(self, request):
         """List tour packages with optional filtering."""
-        from .serializers import TourPackageListSerializer
+        from .serializers import PublicTourPackageListSerializer
         from django.core.cache import cache
         from hashlib import md5
         
@@ -828,7 +829,7 @@ class PublicTourPackageListView(APIView):
             if ordering_fields:
                 queryset = queryset.order_by(*ordering_fields)
         
-        serializer = TourPackageListSerializer(queryset, many=True, context={"request": request})
+        serializer = PublicTourPackageListSerializer(queryset, many=True, context={"request": request})
         response_data = serializer.data
         
         # Cache for 5 minutes (300 seconds)
