@@ -21,6 +21,7 @@ from .models import (
     Currency,
     PromoCode,
 )
+from .countries import canonicalize_country
 from .utils import optimize_image_to_webp
 from account.models import ResellerProfile, SupplierProfile
 
@@ -641,8 +642,11 @@ class TourPackageSerializer(serializers.ModelSerializer):
 
 def get_reseller_commission_for_request(request, tour_package):
     """
-    Return reseller commission amount for an authenticated reseller viewing a tour.
-    Supports dual roles - suppliers with reseller profiles can see commission.
+    Net commission per seat the logged-in reseller keeps if they sell this tour.
+
+    Package commission (e.g. 500_000) is the pool. If the reseller has an upline,
+    100k (or 50% below 100k) is reserved for levels 1–3, so the website shows
+    400_000 — not the full 500_000.
     """
     if not (request and request.user.is_authenticated and request.user.is_reseller):
         return None
@@ -651,11 +655,20 @@ def get_reseller_commission_for_request(request, tour_package):
         reseller_profile = request.user.reseller_profile
     else:
         try:
-            reseller_profile = ResellerProfile.objects.select_related("user").get(user=request.user)
+            reseller_profile = ResellerProfile.objects.select_related("user").get(
+                user=request.user
+            )
         except ResellerProfile.DoesNotExist:
             return None
 
-    return tour_package.get_reseller_commission(reseller_profile)
+    gross = tour_package.get_reseller_commission(reseller_profile)
+    if not gross:
+        return None
+
+    from .commission import net_commission_per_seat
+
+    has_upline = reseller_profile.sponsor_id is not None
+    return net_commission_per_seat(gross, has_upline)
 
 
 class TourPackageListSerializer(serializers.ModelSerializer):
@@ -872,6 +885,13 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
         if value is None:
             return ""
         return value.strip()
+
+    def validate_country(self, value):
+        """Store the country, not a city/region, so public filters match."""
+        text = canonicalize_country(value)
+        if not text:
+            raise serializers.ValidationError("Negara wajib diisi.")
+        return text
     
     def validate_highlights(self, value):
         """Convert list to JSON if needed."""

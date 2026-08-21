@@ -1,0 +1,317 @@
+"""Canonical tour countries for website filters.
+
+`TourPackage.country` is a free-text field, but the public search chips match
+English country names (Japan, South Korea, …). Operators and the ingest agent
+often write a city, prefecture, or Indonesian name instead (Hokkaido, Jepang).
+Normalize on write so a Hokkaido tour appears when the Japan filter is clicked.
+"""
+
+from __future__ import annotations
+
+# Same English values as the supplier/admin country picker and search chips.
+CANONICAL_COUNTRIES = (
+    "Indonesia",
+    "Malaysia",
+    "Singapore",
+    "Thailand",
+    "Vietnam",
+    "Philippines",
+    "Myanmar",
+    "Cambodia",
+    "Laos",
+    "Brunei",
+    "China",
+    "Japan",
+    "South Korea",
+    "North Korea",
+    "Taiwan",
+    "Hong Kong",
+    "Macau",
+    "Mongolia",
+    "India",
+    "Pakistan",
+    "Bangladesh",
+    "Sri Lanka",
+    "Nepal",
+    "Bhutan",
+    "Maldives",
+    "Afghanistan",
+    "United Arab Emirates",
+    "Saudi Arabia",
+    "Qatar",
+    "Kuwait",
+    "Bahrain",
+    "Oman",
+    "Yemen",
+    "Iraq",
+    "Iran",
+    "Israel",
+    "Palestine",
+    "Jordan",
+    "Lebanon",
+    "Syria",
+    "Turkey",
+    "Kazakhstan",
+    "Uzbekistan",
+    "Kyrgyzstan",
+    "Tajikistan",
+    "Turkmenistan",
+    "Russia",
+    "United States",
+    "Canada",
+    "Mexico",
+    "Brazil",
+    "Argentina",
+    "Chile",
+    "Peru",
+    "Colombia",
+    "Venezuela",
+    "Ecuador",
+    "United Kingdom",
+    "France",
+    "Germany",
+    "Italy",
+    "Spain",
+    "Netherlands",
+    "Belgium",
+    "Switzerland",
+    "Austria",
+    "Portugal",
+    "Greece",
+    "Poland",
+    "Czech Republic",
+    "Hungary",
+    "Romania",
+    "Bulgaria",
+    "Croatia",
+    "Serbia",
+    "Sweden",
+    "Norway",
+    "Denmark",
+    "Finland",
+    "Iceland",
+    "Ireland",
+    "Australia",
+    "New Zealand",
+    "Fiji",
+    "Papua New Guinea",
+    "Egypt",
+    "South Africa",
+    "Kenya",
+    "Tanzania",
+    "Morocco",
+    "Tunisia",
+    "Algeria",
+    "Ethiopia",
+    "Ghana",
+    "Nigeria",
+)
+
+# Lowercased alias → canonical English country. Includes Indonesian names and
+# well-known tour cities/regions so they are not stored as the country.
+_ALIAS_GROUPS = {
+    "Japan": (
+        "jepang",
+        "nippon",
+        "nihon",
+        "hokkaido",
+        "tokyo",
+        "osaka",
+        "kyoto",
+        "okinawa",
+        "nagoya",
+        "fukuoka",
+        "hiroshima",
+        "nara",
+        "kanazawa",
+        "sapporo",
+        "hakodate",
+        "niseko",
+        "yokohama",
+        "kobe",
+        "sendai",
+        "nagasaki",
+        "takayama",
+        "hakone",
+        "kamakura",
+        "nikko",
+        "biei",
+        "furano",
+        "otaru",
+        "asahikawa",
+        "mt fuji",
+        "mount fuji",
+    ),
+    "South Korea": (
+        "korea",
+        "korea selatan",
+        "korsel",
+        "south korea",
+        "republik korea",
+        "rok",
+        "seoul",
+        "busan",
+        "jeju",
+        "incheon",
+        "jeonju",
+        "gyeongju",
+        "gangnam",
+    ),
+    "China": (
+        "tiongkok",
+        "cina",
+        "prc",
+        "beijing",
+        "peking",
+        "shanghai",
+        "guangzhou",
+        "shenzhen",
+        "xi'an",
+        "xian",
+        "chengdu",
+        "hangzhou",
+        "zhangjiajie",
+        "guilin",
+        "harbin",
+        "chongqing",
+        "suzhou",
+        "nanjing",
+        "wuhan",
+        "kunming",
+        "lhasa",
+        "tibet",
+        "great wall",
+    ),
+    "Indonesia": (
+        "ri",
+        "nkri",
+        "bali",
+        "jakarta",
+        "yogyakarta",
+        "jogja",
+        "lombok",
+        "labuan bajo",
+        "raja ampat",
+        "medan",
+        "surabaya",
+        "bandung",
+        "makassar",
+        "komodo",
+        "flores",
+        "sumatera",
+        "sumatra",
+        "java",
+        "jawa",
+        "sulawesi",
+        "kalimantan",
+        "papua",
+    ),
+    "Thailand": (
+        "thai",
+        "bangkok",
+        "phuket",
+        "chiang mai",
+        "pattaya",
+        "krabi",
+        "koh samui",
+        "samui",
+        "hua hin",
+        "ayutthaya",
+    ),
+    "Vietnam": ("viet nam", "hanoi", "ha noi", "ho chi minh", "saigon", "sai gon", "da nang", "danang", "hoi an", "nha trang", "ha long", "halong"),
+    "Malaysia": ("my", "kuala lumpur", "kl", "penang", "langkawi", "malaka", "melaka", "kota kinabalu", "sabah", "sarawak", "genting"),
+    "Singapore": ("singapura", "sg", "sin"),
+    "Philippines": ("filipina", "manila", "cebu", "boracay", "palawan", "davao"),
+    "Cambodia": ("kamboja", "phnom penh", "siem reap", "angkor", "angkor wat"),
+    "Myanmar": ("burma", "yangon", "mandalay", "bagan"),
+    "Laos": ("laos", "vientiane", "luang prabang"),
+    "Taiwan": ("taipei", "taiwan", "kaohsiung", "taichung", "tainan"),
+    "Hong Kong": ("hongkong", "hk"),
+    "Macau": ("makau", "macao"),
+    "India": ("india", "delhi", "new delhi", "mumbai", "agra", "jaipur", "goa", "kerala", "varanasi"),
+    "Maldives": ("maladewa", "male"),
+    "Nepal": ("nepal", "kathmandu", "pokhara"),
+    "Sri Lanka": ("srilanka", "colombo", "kandy"),
+    "United Arab Emirates": (
+        "uae",
+        "uni emirat arab",
+        "emirat arab",
+        "dubai",
+        "abu dhabi",
+        "abudhabi",
+        "sharjah",
+    ),
+    "Saudi Arabia": ("arab saudi", "ksa", "riyadh", "jeddah", "mekkah", "mecca", "madinah", "medina"),
+    "Qatar": ("qatar", "doha"),
+    "Turkey": ("turki", "istanbul", "ankara", "cappadocia", "kapadokia", "antalya", "izmir"),
+    "Egypt": ("mesir", "cairo", "kairo", "giza", "luxor", "aswan", "alexandria", "sharm el sheikh"),
+    "France": ("prancis", "perancis", "paris", "nice", "lyon", "marseille", "bordeaux"),
+    "United Kingdom": ("inggris", "uk", "great britain", "britain", "england", "london", "edinburgh", "manchester"),
+    "Italy": ("italia", "rome", "roma", "milan", "milano", "venice", "venesia", "florence", "firenze", "naples", "napoli"),
+    "Spain": ("spanyol", "madrid", "barcelona", "seville", "sevilla", "valencia"),
+    "Germany": ("jerman", "berlin", "munich", "munchen", "frankfurt", "hamburg", "cologne", "koln"),
+    "Netherlands": ("belanda", "holland", "amsterdam"),
+    "Switzerland": ("swiss", "zurich", "geneva", "interlaken", "zermatt", "lucerne"),
+    "Greece": ("yunani", "athens", "athen", "santorini", "mykonos"),
+    "Australia": ("australia", "sydney", "melbourne", "brisbane", "perth", "gold coast"),
+    "New Zealand": ("selandia baru", "zealandia baru", "auckland", "queenstown", "wellington", "christchurch"),
+    "United States": (
+        "amerika",
+        "amerika serikat",
+        "as",
+        "usa",
+        "us",
+        "america",
+        "new york",
+        "los angeles",
+        "las vegas",
+        "san francisco",
+        "hawaii",
+        "honolulu",
+        "miami",
+        "chicago",
+        "washington dc",
+        "orlando",
+    ),
+    "Argentina": ("argentina", "buenos aires", "bariloche", "ushuaia", "mendoza"),
+    "Brazil": ("brasil", "brazil", "rio de janeiro", "rio", "sao paulo"),
+    "Morocco": ("maroko", "marrakech", "marrakesh", "casablanca", "fes", "fez"),
+    "South Africa": ("afrika selatan", "cape town", "johannesburg", "kruger"),
+}
+
+ALIASES: dict[str, str] = {}
+for _canonical, _aliases in _ALIAS_GROUPS.items():
+    ALIASES[_canonical.casefold()] = _canonical
+    for _alias in _aliases:
+        ALIASES[_alias.casefold()] = _canonical
+
+_CANONICAL_BY_KEY = {name.casefold(): name for name in CANONICAL_COUNTRIES}
+
+
+def canonicalize_country(raw: str) -> str:
+    """Map a city, region, or local name to the website's English country value."""
+    text = " ".join((raw or "").split())
+    if not text:
+        return text
+    key = text.casefold()
+    if key in ALIASES:
+        return ALIASES[key]
+    if key in _CANONICAL_BY_KEY:
+        return _CANONICAL_BY_KEY[key]
+    if "," in text:
+        tail = text.rsplit(",", 1)[-1].strip()
+        if tail and tail.casefold() != key:
+            return canonicalize_country(tail)
+    return text
+
+
+def matching_country_names(selected: str) -> list[str]:
+    """Values that should count as the selected country in filters."""
+    canonical = canonicalize_country(selected)
+    names = {canonical, selected.strip()} if selected.strip() else {canonical}
+    key = canonical.casefold()
+    for alias, target in ALIASES.items():
+        if target.casefold() == key:
+            names.add(alias)
+            names.add(target)
+    return [name for name in names if name]

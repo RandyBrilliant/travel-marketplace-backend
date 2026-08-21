@@ -342,7 +342,10 @@ class TourPackage(models.Model):
     # Location information
     country = models.CharField(
         max_length=255,
-        help_text=_("Country where the tour takes place (e.g., 'China', 'Japan')."),
+        help_text=_(
+            "Country where the tour takes place (e.g., 'China', 'Japan'). "
+            "Use the country, not a city or region, so filters match."
+        ),
     )
 
     # Duration
@@ -489,6 +492,13 @@ class TourPackage(models.Model):
                 name='commission_valid'
             ),
         ]
+
+    def save(self, *args, **kwargs):
+        if self.country:
+            from .countries import canonicalize_country
+
+            self.country = canonicalize_country(self.country)
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         return f"{self.name}, {self.country}"

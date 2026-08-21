@@ -784,6 +784,16 @@ class PublicTourPackageListView(APIView):
                 models.Q(name__icontains=search) |
                 models.Q(country__icontains=search)
             )
+
+        country = (request.query_params.get("country") or "").strip()
+        if country:
+            from .countries import matching_country_names
+
+            names = matching_country_names(country)
+            country_q = models.Q()
+            for name in names:
+                country_q |= models.Q(country__iexact=name)
+            queryset = queryset.filter(country_q)
         
         # Filter by month/year (format: YYYY-MM)
         month = request.query_params.get("month")

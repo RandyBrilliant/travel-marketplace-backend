@@ -325,6 +325,52 @@ class AgentApiTests(TestCase):
         )
         self.assertEqual(rejected.status_code, 400)
 
+    def test_delete_tour_image_refuses_primary_then_deletes_gallery(self):
+        self.client.force_authenticate(self.staff)
+        created = self.client.post(
+            "/api/v1/agent/tours/",
+            {
+                "name": "Image Tour",
+                "country": "Norway",
+                "days": 10,
+                "nights": 9,
+                "base_price": 1,
+                "itinerary": "Day 1",
+                "supplier": self.supplier.id,
+                "is_flexible": True,
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.data)
+        tour_id = created.data["id"]
+        cover = self.client.post(
+            f"/api/v1/agent/tours/{tour_id}/images/",
+            {"image": _png(), "is_primary": True},
+            format="multipart",
+        )
+        self.assertEqual(cover.status_code, 201, cover.data)
+        gallery = self.client.post(
+            f"/api/v1/agent/tours/{tour_id}/images/",
+            {"image": _png(), "is_primary": False},
+            format="multipart",
+        )
+        self.assertEqual(gallery.status_code, 201, gallery.data)
+        denied = self.client.delete(
+            f"/api/v1/agent/tours/{tour_id}/images/{cover.data['id']}/",
+        )
+        self.assertEqual(denied.status_code, 400)
+        deleted = self.client.delete(
+            f"/api/v1/agent/tours/{tour_id}/images/{gallery.data['id']}/",
+        )
+        self.assertEqual(deleted.status_code, 200, deleted.data)
+        self.assertTrue(deleted.data["deleted"])
+        remaining_ids = [row["id"] for row in deleted.data["images"]]
+        self.assertEqual(remaining_ids, [cover.data["id"]])
+        missing = self.client.delete(
+            f"/api/v1/agent/tours/{tour_id}/images/{gallery.data['id']}/",
+        )
+        self.assertEqual(missing.status_code, 404)
+
     def test_same_date_two_airlines(self):
         self.client.force_authenticate(self.staff)
         created = self.client.post(
@@ -485,6 +531,48 @@ class AgentApiTests(TestCase):
             format="json",
         )
         self.assertEqual(empty.status_code, 400)
+
+    def test_patch_tour_date_airline(self):
+        self.client.force_authenticate(self.staff)
+        tour_id, date = self._draft_tour_with_date(airline="CHINA SOUTHERN")
+        patched = self.client.patch(
+            f"/api/v1/agent/tours/{tour_id}/dates/{date['id']}/",
+            {"airline": "Donghai Airlines"},
+            format="json",
+        )
+        self.assertEqual(patched.status_code, 200, patched.data)
+        self.assertEqual(patched.data["airline"], "Donghai Airlines")
+        fetched = self.client.get(f"/api/v1/agent/tours/{tour_id}/dates/{date['id']}/")
+        self.assertEqual(fetched.data["airline"], "Donghai Airlines")
+
+    def test_create_tour_canonicalizes_city_to_country(self):
+        self.client.force_authenticate(self.staff)
+        response = self.client.post(
+            "/api/v1/agent/tours/",
+            {
+                "name": "Hokkaido 5D4N",
+                "country": "Hokkaido",
+                "days": 5,
+                "nights": 4,
+                "base_price": 1,
+                "itinerary": "Day 1 Sapporo",
+                "supplier": self.supplier.id,
+                "is_flexible": True,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["country"], "Japan")
+        tour = TourPackage.objects.get(pk=response.data["id"])
+        self.assertEqual(tour.country, "Japan")
+
+    def test_list_countries(self):
+        self.client.force_authenticate(self.staff)
+        response = self.client.get("/api/v1/agent/countries/")
+        self.assertEqual(response.status_code, 200)
+        names = [row["name"] for row in response.data["results"]]
+        self.assertIn("Japan", names)
+        self.assertIn("South Korea", names)
 
     def test_list_currencies(self):
         self.client.force_authenticate(self.staff)

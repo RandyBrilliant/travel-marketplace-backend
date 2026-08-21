@@ -14,7 +14,7 @@ from itinerary.serializers import (
     ItineraryCardSerializer,
     ItineraryColumnSerializer,
 )
-from travel.models import Currency, TourDate, TourPackage
+from travel.models import Currency, TourDate, TourImage, TourPackage
 from travel.serializers import CurrencySerializer, TourDateSerializer, TourImageSerializer
 
 from .permissions import IsStaffAgent
@@ -69,6 +69,15 @@ class AgentCurrencyListView(generics.ListAPIView):
     permission_classes = [IsStaffAgent]
     serializer_class = CurrencySerializer
     queryset = Currency.objects.all().order_by("code")
+
+
+class AgentCountryListView(APIView):
+    permission_classes = [IsStaffAgent]
+
+    def get(self, request):
+        from travel.countries import CANONICAL_COUNTRIES
+
+        return Response({"results": [{"name": name} for name in CANONICAL_COUNTRIES]})
 
 
 class AgentTourListCreateView(generics.CreateAPIView):
@@ -133,6 +142,47 @@ class AgentTourImageCreateView(APIView):
         return Response(
             TourImageSerializer(image, context={"request": request}).data,
             status=status.HTTP_201_CREATED,
+        )
+
+
+class AgentTourImageDetailView(APIView):
+    permission_classes = [IsStaffAgent]
+
+    def delete(self, request, pk, image_id):
+        tour = generics.get_object_or_404(TourPackage, pk=pk)
+        image = generics.get_object_or_404(TourImage, pk=image_id, package=tour)
+        confirm_primary = _truthy(
+            request.query_params.get("confirm_primary")
+            or (request.data.get("confirm_primary") if hasattr(request, "data") else False)
+        )
+        if image.is_primary and not confirm_primary:
+            return Response(
+                {
+                    "detail": (
+                        "This image is the tour cover (is_primary=true). "
+                        "Upload/set another cover first, or pass confirm_primary=true."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        was_primary = image.is_primary
+        image_pk = image.id
+        image.delete()
+        if was_primary:
+            next_image = tour.images.order_by("order", "id").first()
+            if next_image and not next_image.is_primary:
+                TourImage.objects.filter(pk=next_image.pk).update(is_primary=True)
+        _log_agent(request, "delete_tour_image", tour_id=tour.id, image_id=image_pk)
+        remaining = TourImageSerializer(
+            tour.images.all(), many=True, context={"request": request}
+        ).data
+        return Response(
+            {
+                "deleted": True,
+                "image_id": image_pk,
+                "tour_id": tour.id,
+                "images": remaining,
+            }
         )
 
 

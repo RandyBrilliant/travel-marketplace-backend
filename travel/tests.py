@@ -5,6 +5,7 @@ from travel.commission import (
     net_commission_per_seat,
     upline_shares,
 )
+from travel.countries import canonicalize_country, matching_country_names
 
 
 class CommissionMathTests(SimpleTestCase):
@@ -16,6 +17,7 @@ class CommissionMathTests(SimpleTestCase):
         self.assertEqual(deduction_per_seat(300_000, has_upline=True), 100_000)
         self.assertEqual(net_commission_per_seat(300_000, has_upline=True), 200_000)
         self.assertEqual(net_commission_per_seat(150_000, has_upline=True), 50_000)
+        self.assertEqual(net_commission_per_seat(500_000, has_upline=True), 400_000)
 
     def test_upline_deducts_half_when_commission_below_100k(self):
         self.assertEqual(deduction_per_seat(80_000, has_upline=True), 40_000)
@@ -55,3 +57,26 @@ class CommissionMathTests(SimpleTestCase):
 
     def test_float_noise_does_not_drop_one_rupiah(self):
         self.assertEqual(net_commission_per_seat(299999.99999999994, has_upline=False), 300_000)
+
+
+class CanonicalCountryTests(SimpleTestCase):
+    def test_city_and_local_names_map_to_filter_country(self):
+        self.assertEqual(canonicalize_country("Hokkaido"), "Japan")
+        self.assertEqual(canonicalize_country("jepang"), "Japan")
+        self.assertEqual(canonicalize_country("Tokyo"), "Japan")
+        self.assertEqual(canonicalize_country("Korea"), "South Korea")
+        self.assertEqual(canonicalize_country("Seoul"), "South Korea")
+        self.assertEqual(canonicalize_country("Beijing"), "China")
+        self.assertEqual(canonicalize_country("Bali"), "Indonesia")
+        self.assertEqual(canonicalize_country("Hokkaido, Japan"), "Japan")
+
+    def test_already_canonical_names_are_unchanged(self):
+        self.assertEqual(canonicalize_country("Japan"), "Japan")
+        self.assertEqual(canonicalize_country("South Korea"), "South Korea")
+        self.assertEqual(canonicalize_country("Papua New Guinea"), "Papua New Guinea")
+
+    def test_japan_filter_includes_hokkaido(self):
+        names = {name.casefold() for name in matching_country_names("Japan")}
+        self.assertIn("japan", names)
+        self.assertIn("jepang", names)
+        self.assertIn("hokkaido", names)
