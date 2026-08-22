@@ -20,6 +20,7 @@ from travel.serializers import CurrencySerializer, TourDateSerializer, TourImage
 from .permissions import IsStaffAgent
 from .serializers import (
     AgentBoardCreateSerializer,
+    AgentBoardListSerializer,
     AgentCardCreateSerializer,
     AgentColumnCreateSerializer,
     AgentPublishSerializer,
@@ -332,10 +333,38 @@ class AgentTourUnpublishView(APIView):
         return Response(AgentTourSerializer(tour, context={"request": request}).data)
 
 
-class AgentBoardListCreateView(generics.CreateAPIView):
+class AgentBoardListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsStaffAgent]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
-    serializer_class = AgentBoardCreateSerializer
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return AgentBoardCreateSerializer
+        return AgentBoardListSerializer
+
+    def get_queryset(self):
+        queryset = ItineraryBoard.objects.select_related(
+            "supplier", "supplier__user", "currency"
+        )
+        query = (self.request.query_params.get("search") or "").strip()
+        if query:
+            queryset = queryset.filter(
+                Q(title__icontains=query)
+                | Q(slug__icontains=query)
+                | Q(supplier_display_name__icontains=query)
+                | Q(supplier__company_name__icontains=query)
+            )
+        board_status = (self.request.query_params.get("status") or "").strip().lower()
+        if board_status == "published":
+            queryset = queryset.filter(is_active=True, is_public=True)
+        elif board_status == "draft":
+            queryset = queryset.filter(Q(is_active=False) | Q(is_public=False))
+        is_active = self.request.query_params.get("is_active")
+        if is_active is not None and str(is_active).strip() != "":
+            queryset = queryset.filter(
+                is_active=str(is_active).strip().lower() in {"1", "true", "yes"}
+            )
+        return queryset.order_by("-updated_at", "-id")
 
     def perform_create(self, serializer):
         board = serializer.save()

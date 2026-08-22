@@ -3,6 +3,7 @@ from rest_framework import serializers
 from account.models import SupplierApprovalStatus, SupplierProfile
 from itinerary.serializers import (
     ItineraryBoardCreateUpdateSerializer,
+    ItineraryBoardListSerializer,
     ItineraryCardCreateUpdateSerializer,
     ItineraryColumnCreateUpdateSerializer,
 )
@@ -93,6 +94,25 @@ class AgentBoardCreateSerializer(ItineraryBoardCreateUpdateSerializer):
         validated_data.pop("is_active", None)
         validated_data.pop("is_public", None)
         return super().update(instance, validated_data)
+
+
+class AgentBoardListSerializer(ItineraryBoardListSerializer):
+    admin_url = serializers.SerializerMethodField()
+    status = serializers.SerializerMethodField()
+
+    class Meta(ItineraryBoardListSerializer.Meta):
+        fields = list(ItineraryBoardListSerializer.Meta.fields) + ["admin_url", "status"]
+
+    def get_admin_url(self, obj):
+        from django.conf import settings
+
+        base = getattr(settings, "FRONTEND_URL", "").rstrip("/")
+        return f"{base}/admin/itinerary-boards/{obj.slug}" if base else ""
+
+    def get_status(self, obj):
+        if obj.is_active and obj.is_public:
+            return "published"
+        return "draft"
 
 
 class AgentPublishSerializer(serializers.Serializer):

@@ -171,6 +171,18 @@ class AgentApiTests(TestCase):
         self.assertFalse(board.is_active)
         self.assertFalse(board.is_public)
         self.assertEqual(board.effective_supplier_name, "Sakura Travel")
+        listed = self.client.get("/api/v1/agent/boards/?search=Japan")
+        self.assertEqual(listed.status_code, 200, listed.data)
+        titles = [row["title"] for row in listed.data["results"]]
+        self.assertIn("Japan 7D", titles)
+        row = next(item for item in listed.data["results"] if item["title"] == "Japan 7D")
+        self.assertEqual(row["status"], "draft")
+        self.assertFalse(row["is_active"])
+        self.assertFalse(row["is_public"])
+        self.assertIn("admin_url", row)
+        drafts = self.client.get("/api/v1/agent/boards/?status=draft")
+        self.assertEqual(drafts.status_code, 200)
+        self.assertTrue(any(item["id"] == board.id for item in drafts.data["results"]))
 
     def test_publish_requires_confirm(self):
         self.client.force_authenticate(self.staff)
