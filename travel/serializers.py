@@ -797,19 +797,13 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
         
         # Get dates from 30 days ago to show recent past dates
         start_date = today - timedelta(days=30)
-        all_dates = obj.dates.filter(
-            departure_date__gte=start_date
-        ).order_by("departure_date")[:20]
-        
         # Show ALL dates (including past, fully booked, and manually booked with 0 seats)
-        # so the UI can display them with appropriate styling
-        dates_to_show = []
-        for date in all_dates:
-            # Show all dates (including those with 0 seats for manually booked tours)
-            dates_to_show.append(date)
-            if len(dates_to_show) >= 15:
-                break
-        
+        # so the UI can display them with appropriate styling. The cap is only a safety
+        # limit; the UI already collapses the list after 5 dates.
+        dates_to_show = obj.dates.filter(
+            departure_date__gte=start_date
+        ).order_by("departure_date")[:100]
+
         return TourDateSerializer(dates_to_show, many=True, context=self.context).data
     
     def get_reseller_commission(self, obj):

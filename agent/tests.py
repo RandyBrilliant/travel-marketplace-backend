@@ -12,7 +12,7 @@ from account.models import (
     UserRole,
 )
 from itinerary.models import ItineraryBoard
-from travel.models import Currency, SeatSlot, SeatSlotStatus, TourPackage
+from travel.models import Currency, SeatSlot, SeatSlotStatus, TourDate, TourPackage
 
 
 def _png():
@@ -513,6 +513,29 @@ class AgentApiTests(TestCase):
         )
         self.assertEqual(denied.status_code, 400)
         self.assertIn("sudah dibooking", str(denied.data))
+
+    def test_delete_tour_date(self):
+        self.client.force_authenticate(self.staff)
+        tour_id, date = self._draft_tour_with_date(total_seats=5)
+        deleted = self.client.delete(f"/api/v1/agent/tours/{tour_id}/dates/{date['id']}/")
+        self.assertEqual(deleted.status_code, 204)
+        self.assertFalse(TourDate.objects.filter(pk=date["id"]).exists())
+        self.assertFalse(SeatSlot.objects.filter(tour_date_id=date["id"]).exists())
+
+    def test_delete_tour_date_rejects_booked_seats(self):
+        self.client.force_authenticate(self.staff)
+        tour_id, date = self._draft_tour_with_date(total_seats=5)
+        slot = SeatSlot.objects.filter(tour_date_id=date["id"]).first()
+        SeatSlot.objects.filter(pk=slot.pk).update(status=SeatSlotStatus.RESERVED)
+        denied = self.client.delete(f"/api/v1/agent/tours/{tour_id}/dates/{date['id']}/")
+        self.assertEqual(denied.status_code, 409)
+        self.assertTrue(TourDate.objects.filter(pk=date["id"]).exists())
+
+    def test_delete_tour_date_not_found_on_other_tour(self):
+        self.client.force_authenticate(self.staff)
+        tour_id, date = self._draft_tour_with_date()
+        missing = self.client.delete(f"/api/v1/agent/tours/{tour_id + 999}/dates/{date['id']}/")
+        self.assertEqual(missing.status_code, 404)
 
     def test_patch_tour_date_not_found_on_other_tour(self):
         self.client.force_authenticate(self.staff)

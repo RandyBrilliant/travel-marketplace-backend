@@ -14,7 +14,7 @@ from itinerary.serializers import (
     ItineraryCardSerializer,
     ItineraryColumnSerializer,
 )
-from travel.models import Currency, TourDate, TourImage, TourPackage
+from travel.models import Currency, SeatSlotStatus, TourDate, TourImage, TourPackage
 from travel.serializers import CurrencySerializer, TourDateSerializer, TourImageSerializer
 
 from .permissions import IsStaffAgent
@@ -292,6 +292,30 @@ class AgentTourDateDetailView(APIView):
         )
         updated = TourDate.objects.prefetch_related("seat_slots").get(pk=tour_date.pk)
         return Response(TourDateSerializer(updated, context={"request": request}).data)
+
+    def delete(self, request, pk, date_id):
+        tour_date = self._get_date(pk, date_id)
+        has_bookings = tour_date.bookings.exists() or tour_date.seat_slots.filter(
+            Q(booking__isnull=False) | ~Q(status=SeatSlotStatus.AVAILABLE)
+        ).exists()
+        if has_bookings:
+            return Response(
+                {
+                    "detail": "Tanggal ini sudah memiliki booking/reservasi dan tidak bisa dihapus. "
+                    "Gunakan sold_out untuk menutup penjualan."
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        departure_date = tour_date.departure_date.isoformat()
+        tour_date.delete()
+        _log_agent(
+            request,
+            "delete_tour_date",
+            tour_id=pk,
+            date_id=date_id,
+            departure_date=departure_date,
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class AgentTourPublishView(APIView):
