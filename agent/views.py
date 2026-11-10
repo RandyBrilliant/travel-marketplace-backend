@@ -24,6 +24,7 @@ from .serializers import (
     AgentCardCreateSerializer,
     AgentColumnCreateSerializer,
     AgentPublishSerializer,
+    AgentSupplierCreateSerializer,
     AgentSupplierSerializer,
     AgentTourCreateSerializer,
     AgentTourImageSerializer,
@@ -47,9 +48,29 @@ def _admin_board_url(board):
     return f"{base}/admin/itinerary-boards/{board.slug}" if base else ""
 
 
-class AgentSupplierLookupView(generics.ListAPIView):
+class AgentSupplierLookupView(generics.ListCreateAPIView):
+    """GET: search approved suppliers. POST: register a new, already-approved supplier."""
+
     permission_classes = [IsStaffAgent]
-    serializer_class = AgentSupplierSerializer
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return AgentSupplierCreateSerializer
+        return AgentSupplierSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        profile = serializer.save()
+        _log_agent(
+            request,
+            "create_supplier",
+            supplier_id=profile.id,
+            company_name=profile.company_name,
+            email=profile.user.email,
+        )
+        output = AgentSupplierSerializer(profile, context={"request": request})
+        return Response(output.data, status=status.HTTP_201_CREATED)
 
     def get_queryset(self):
         queryset = SupplierProfile.objects.filter(

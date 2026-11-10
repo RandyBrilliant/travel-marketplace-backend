@@ -77,6 +77,99 @@ class AgentApiTests(TestCase):
         names = [row["company_name"] for row in response.data["results"]]
         self.assertIn("Bali Paradise", names)
 
+    def test_create_supplier_is_approved_and_searchable(self):
+        self.client.force_authenticate(self.staff)
+        response = self.client.post(
+            "/api/v1/agent/suppliers/",
+            {
+                "email": "  Sakura@Example.com ",
+                "company_name": "Sakura Travel",
+                "contact_person": "Yuki",
+                "contact_phone": "0813",
+                "address": "Tokyo",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["approval_status"], SupplierApprovalStatus.APPROVED)
+        self.assertEqual(response.data["email"], "sakura@example.com")
+        profile = SupplierProfile.objects.get(pk=response.data["id"])
+        self.assertEqual(profile.approved_by, self.staff)
+        self.assertIsNotNone(profile.approved_at)
+        self.assertEqual(profile.user.role, UserRole.SUPPLIER)
+        self.assertTrue(profile.user.is_active)
+        self.assertFalse(profile.user.has_usable_password())
+
+        lookup = self.client.get("/api/v1/agent/suppliers/?search=Sakura")
+        self.assertEqual([r["id"] for r in lookup.data["results"]], [profile.id])
+
+    def test_create_supplier_requires_staff(self):
+        response = self.client.post(
+            "/api/v1/agent/suppliers/",
+            {
+                "email": "x@example.com",
+                "company_name": "X",
+                "contact_person": "X",
+                "contact_phone": "1",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 401)
+        self.client.force_authenticate(self.supplier_user)
+        response = self.client.post(
+            "/api/v1/agent/suppliers/",
+            {
+                "email": "x@example.com",
+                "company_name": "X",
+                "contact_person": "X",
+                "contact_phone": "1",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(SupplierProfile.objects.filter(company_name="X").exists())
+
+    def test_create_supplier_rejects_existing_email(self):
+        self.client.force_authenticate(self.staff)
+        response = self.client.post(
+            "/api/v1/agent/suppliers/",
+            {
+                "email": "BALI@example.com",
+                "company_name": "Another Co",
+                "contact_person": "A",
+                "contact_phone": "1",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(f"supplier_id={self.supplier.id}", str(response.data["error"]["details"]["email"]))
+
+    def test_create_supplier_rejects_duplicate_name_unless_allowed(self):
+        self.client.force_authenticate(self.staff)
+        body = {
+            "email": "other-bali@example.com",
+            "company_name": "bali paradise",
+            "contact_person": "A",
+            "contact_phone": "1",
+        }
+        response = self.client.post("/api/v1/agent/suppliers/", body, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(f"supplier_id={self.supplier.id}", str(response.data["error"]["details"]["company_name"]))
+
+        response = self.client.post(
+            "/api/v1/agent/suppliers/", {**body, "allow_duplicate_name": True}, format="json"
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+
+    def test_create_supplier_missing_fields(self):
+        self.client.force_authenticate(self.staff)
+        response = self.client.post(
+            "/api/v1/agent/suppliers/", {"email": "y@example.com"}, format="json"
+        )
+        self.assertEqual(response.status_code, 400)
+        for field in ("company_name", "contact_person", "contact_phone"):
+            self.assertIn(field, response.data["error"]["details"])
+
     def test_create_tour_is_draft_and_owned(self):
         self.client.force_authenticate(self.staff)
         response = self.client.post(
