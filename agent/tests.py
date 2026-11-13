@@ -1,8 +1,10 @@
 from datetime import timedelta
+from io import BytesIO
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from PIL import Image
 from rest_framework.test import APIClient
 
 from account.models import (
@@ -16,21 +18,18 @@ from travel.models import Currency, SeatSlot, SeatSlotStatus, TourDate, TourPack
 
 
 def _png():
-    return SimpleUploadedFile(
-        "cover.png",
-        (
-            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
-            b"\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00"
-            b"\x00\x0cIDATx\x9cc\xf8\xcf\xc0\x00\x00\x00\x03\x00\x01"
-            b"\x00\x05\xfe\xd4\xef\x00\x00\x00\x00IEND\xaeB`\x82"
-        ),
-        content_type="image/png",
-    )
+    # Generated with Pillow: the previous hand-written bytes had a corrupt
+    # IDAT chunk, so Django's ImageField rejected them.
+    buf = BytesIO()
+    Image.new("RGB", (1, 1), (255, 255, 255)).save(buf, format="PNG")
+    return SimpleUploadedFile("cover.png", buf.getvalue(), content_type="image/png")
 
 
+@override_settings(HERMES_AGENT_API_KEY="test-agent-key")
 class AgentApiTests(TestCase):
     def setUp(self):
         self.client = APIClient()
+        self.client.credentials(HTTP_X_AGENT_KEY="test-agent-key")
         self.staff = CustomUser.objects.create_user(
             email="ops@example.com",
             password="pass12345",
@@ -360,6 +359,12 @@ class AgentApiTests(TestCase):
         self.client.credentials(HTTP_X_AGENT_KEY="secret-agent")
         response = self.client.get("/api/v1/agent/suppliers/")
         self.assertEqual(response.status_code, 200)
+
+    @override_settings(HERMES_AGENT_API_KEY="", DEBUG=False)
+    def test_agent_api_closed_without_configured_key(self):
+        self.client.force_authenticate(self.staff)
+        response = self.client.get("/api/v1/agent/suppliers/")
+        self.assertEqual(response.status_code, 403)
 
     def test_nested_board_column_card(self):
         self.client.force_authenticate(self.staff)

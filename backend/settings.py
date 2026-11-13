@@ -164,7 +164,9 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+# Business runs on WIB. Timestamps are still stored in UTC (USE_TZ=True); this
+# controls what "today", day-grouped reports and Celery crontab times mean.
+TIME_ZONE = 'Asia/Jakarta'
 
 USE_I18N = True
 
@@ -210,9 +212,26 @@ CORS_ALLOW_HEADERS = [
     'pragma',  # Allow pragma header (used by browsers for cache control)
 ]
 
-# Throttle configuration - throttling disabled
+# Throttling: no global throttle; auth and public form endpoints opt in via
+# throttle_scope (per client IP, or per user when logged in). Rates can be
+# overridden with THROTTLE_<SCOPE>_RATE env vars, e.g. THROTTLE_AUTH_LOGIN_RATE=20/min.
+# Counters live in the default cache (Redis).
 REST_FRAMEWORK_THROTTLE_CLASSES = []
-REST_FRAMEWORK_THROTTLE_RATES = {}
+_DEFAULT_THROTTLE_RATES = {
+    'auth_login': '10/min',          # per IP
+    'auth_login_email': '20/hour',   # per target account
+    'auth_refresh': '60/min',        # per IP
+    'auth_register': '10/hour',      # per IP
+    'auth_password_reset': '5/hour', # reset-request emails, per IP
+    'auth_token_check': '30/hour',   # verify-email / reset-confirm, per IP
+    'auth_change_password': '10/hour',
+    'email_send': '5/hour',          # resend verification email, per user
+    'contact': '10/hour',            # contact form, per IP
+}
+REST_FRAMEWORK_THROTTLE_RATES = {
+    scope: os.environ.get(f'THROTTLE_{scope.upper()}_RATE', rate)
+    for scope, rate in _DEFAULT_THROTTLE_RATES.items()
+}
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
@@ -227,6 +246,10 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_THROTTLE_CLASSES': REST_FRAMEWORK_THROTTLE_CLASSES,
     'DEFAULT_THROTTLE_RATES': REST_FRAMEWORK_THROTTLE_RATES,
+    # Requests arrive through nginx, which appends the real client IP to
+    # X-Forwarded-For. Without this every client would share nginx's IP in
+    # the throttle. Set to 2 if another proxy/CDN sits in front of nginx.
+    'NUM_PROXIES': int(os.environ.get('TRUSTED_PROXY_COUNT', '1')),
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
     'PAGE_SIZE_QUERY_PARAM': 'page_size',
@@ -291,8 +314,9 @@ FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
 SUPPORT_EMAIL = os.environ.get('SUPPORT_EMAIL', 'dcgoholiday@gmail.com')
 SUPPORT_PHONE = os.environ.get('SUPPORT_PHONE', '+62811650123')
 
-# Optional second factor for Hermes / agent writes. When set, staff JWT
-# requests must also send matching X-Agent-Key.
+# Required second factor for the Hermes agent API (/api/v1/agent/): staff JWT
+# requests must also send a matching X-Agent-Key. If unset, the agent API is
+# disabled unless DEBUG is on.
 HERMES_AGENT_API_KEY = os.environ.get("HERMES_AGENT_API_KEY", "").strip()
 
 # Celery Configuration
@@ -323,7 +347,15 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'itinerary.tasks.send_itinerary_expiring_soon_emails',
         'schedule': crontab(hour=8, minute=0),  # Run daily at 8 AM
     },
+    'expire-unpaid-bookings': {
+        'task': 'travel.tasks.expire_unpaid_bookings',
+        'schedule': crontab(minute=15),  # Hourly
+    },
 }
+
+# PENDING tour bookings with no payment proof uploaded within this many hours
+# are cancelled and their seats released. 0 disables the expiry.
+BOOKING_PAYMENT_HOLD_HOURS = int(os.environ.get('BOOKING_PAYMENT_HOLD_HOURS', '48'))
 
 # API Documentation (drf-spectacular)
 SPECTACULAR_SETTINGS = {

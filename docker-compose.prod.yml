@@ -102,8 +102,11 @@ services:
   redis:
     image: redis:7-alpine
     container_name: dcnetwork-api-redis
-    # Optimized for 2GB RAM: 80MB max instead of 100MB
-    command: redis-server --appendonly yes --maxmemory 80mb --maxmemory-policy allkeys-lru
+    # Optimized for 2GB RAM: 80MB max instead of 100MB.
+    # volatile-lru evicts only keys with an expiry (cache entries, sessions,
+    # task results). allkeys-lru could also evict the Celery queue, silently
+    # dropping queued emails and jobs.
+    command: redis-server --appendonly yes --maxmemory 80mb --maxmemory-policy volatile-lru
     volumes:
       - redis_data:/data
     restart: unless-stopped

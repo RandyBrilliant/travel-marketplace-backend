@@ -1,30 +1,46 @@
 """
 Utility functions for account management.
 """
-from django.contrib.auth.tokens import default_token_generator
+from django.contrib.auth.tokens import PasswordResetTokenGenerator, default_token_generator
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 import hashlib
 
 
-def generate_verification_token(user):
+class EmailVerificationTokenGenerator(PasswordResetTokenGenerator):
     """
-    Generate a verification token for a user.
-    
-    Used for:
-    - Email verification
-    - Password reset
-    
-    Returns:
-        tuple: (uidb64, token) - Base64 encoded user ID and verification token
-        
-    Example:
-        >>> uidb64, token = generate_verification_token(user)
-        >>> # Use in URL: /verify-email/{uidb64}/{token}/
+    Tokens for email-verification links only.
+
+    A different key_salt means these tokens are rejected by the password reset
+    check (and vice versa), so a verification link cannot be used to take over
+    an account. Including email_verified in the hash makes a link single-use.
     """
-    token = default_token_generator.make_token(user)
-    uidb64 = urlsafe_base64_encode(force_bytes(user.pk))
-    return uidb64, token
+
+    key_salt = "account.utils.EmailVerificationTokenGenerator"
+
+    def _make_hash_value(self, user, timestamp):
+        return f"{user.pk}{user.email}{user.email_verified}{timestamp}"
+
+
+email_verification_token_generator = EmailVerificationTokenGenerator()
+
+# Password reset uses Django's generator: its hash includes the password, so a
+# reset link stops working once the password has been changed.
+password_reset_token_generator = default_token_generator
+
+
+def _uidb64(user):
+    return urlsafe_base64_encode(force_bytes(user.pk))
+
+
+def generate_email_verification_token(user):
+    """Return (uidb64, token) for an email-verification link."""
+    return _uidb64(user), email_verification_token_generator.make_token(user)
+
+
+def generate_password_reset_token(user):
+    """Return (uidb64, token) for a password-reset link."""
+    return _uidb64(user), password_reset_token_generator.make_token(user)
 
 
 def mask_email(email, hash_length=8):

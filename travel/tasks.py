@@ -517,3 +517,45 @@ def send_payment_approved_emails(self, payment_id):
     result = f"Payment approved emails for payment ID {payment_id}: sent={emails_sent}, failed={emails_failed}"
     logger.info(result)
     return result
+
+
+@shared_task
+def expire_unpaid_bookings():
+    """
+    Cancel PENDING bookings that have had no payment proof uploaded within
+    settings.BOOKING_PAYMENT_HOLD_HOURS, releasing their seats.
+
+    Bookings with any payment record (even one still awaiting review) are left
+    alone, so a buyer who has paid is never cancelled by this job.
+    """
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from travel.models import Booking, BookingStatus
+    from travel.services import cancel_booking
+
+    hold_hours = getattr(settings, "BOOKING_PAYMENT_HOLD_HOURS", 0)
+    if not hold_hours:
+        return "Booking expiry disabled"
+
+    cutoff = timezone.now() - timedelta(hours=hold_hours)
+    expired_ids = list(
+        Booking.objects.filter(
+            status=BookingStatus.PENDING,
+            created_at__lt=cutoff,
+            payments__isnull=True,
+        ).values_list("id", flat=True)
+    )
+
+    cancelled = 0
+    for booking_id in expired_ids:
+        try:
+            if cancel_booking(Booking(pk=booking_id)):
+                cancelled += 1
+        except Exception:
+            logger.exception("Failed to expire unpaid booking %s", booking_id)
+
+    result = f"Expired {cancelled} unpaid booking(s) older than {hold_hours}h"
+    logger.info(result)
+    return result

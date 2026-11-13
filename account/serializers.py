@@ -283,6 +283,37 @@ class ResellerProfileSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 
+class ResellerSelfProfileSerializer(ResellerProfileSerializer):
+    """
+    Reseller editing their own profile.
+
+    The sponsor decides how commission is split up the line, so a reseller
+    cannot change it themselves: it is set once, from a referral code, when
+    the profile is created. base_commission is admin-managed. Admins use
+    AdminResellerProfileSerializer, which keeps both writable.
+    """
+
+    sponsor = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta(ResellerProfileSerializer.Meta):
+        read_only_fields = ResellerProfileSerializer.Meta.read_only_fields + [
+            "sponsor",
+            "base_commission",
+        ]
+
+    def validate_sponsor_referral_code(self, value):
+        # Only used when the profile is created; ignored on updates.
+        if self.instance is not None:
+            return value
+        return super().validate_sponsor_referral_code(value)
+
+    def update(self, instance, validated_data):
+        # Ignore any attempt to (re)assign the sponsor after creation.
+        validated_data.pop("sponsor_referral_code", None)
+        validated_data.pop("sponsor", None)
+        return super().update(instance, validated_data)
+
+
 class StaffProfileSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(read_only=True)
 

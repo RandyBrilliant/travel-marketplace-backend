@@ -1,5 +1,6 @@
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
+from backend.caching import cache_per_user
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 from rest_framework.views import APIView
@@ -10,6 +11,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
 from rest_framework.permissions import IsAdminUser, IsAuthenticatedOrReadOnly
+from backend.mixins import CreateReadOnlyMixin
 from account.models import UserRole, SupplierProfile, ResellerProfile, CustomerProfile
 from .models import TourPackage, TourDate, TourImage, ResellerTourCommission, ResellerGroup, Booking, BookingStatus, SeatSlotStatus, PaymentStatus, SeatSlot, WithdrawalRequest, WithdrawalRequestStatus, ResellerCommission, Currency, PromoCode
 from .serializers import (
@@ -33,6 +35,31 @@ from .serializers import (
     PromoValidationSerializer,
 )
 
+
+
+class BookingListQueryMixin:
+    """
+    For booking list responses, load everything BookingListSerializer reads in
+    one query: related reseller/customer/supplier rows, the seat count and the
+    latest payment status. Without this each row cost several extra queries.
+    """
+
+    def filter_queryset(self, queryset):
+        queryset = super().filter_queryset(queryset)
+        if getattr(self, "action", None) != "list":
+            return queryset
+        from django.db.models import Count, OuterRef, Subquery
+        from .models import Payment
+
+        latest_payment_status = (
+            Payment.objects.filter(booking=OuterRef("pk")).order_by("-created_at").values("status")[:1]
+        )
+        return queryset.select_related(
+            "reseller__user", "customer__user", "tour_date__package__supplier"
+        ).annotate(
+            _seats_booked=Count("seat_slots", distinct=True),
+            _latest_payment_status=Subquery(latest_payment_status),
+        )
 
 class IsSupplier(permissions.BasePermission):
     """
@@ -672,15 +699,35 @@ class SupplierTourImageViewSet(viewsets.ModelViewSet):
                 TourImage.objects.filter(pk=next_image.pk).update(is_primary=True)
 
 
+def _truthy(value):
+    return str(value).lower() in ("1", "true", "yes")
+
+
+def _int_param(value):
+    try:
+        return int(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
 class PublicTourPackageListView(APIView):
     """
     Public endpoint for listing tour packages.
-    Can be filtered by supplier and tour_type.
     Accessible to authenticated users (resellers) and public.
     For resellers, only shows tours they have access to based on reseller groups.
+
+    Filters: supplier, tour_type, search, country, month (YYYY-MM; add
+    include_flexible=true to also return flexible tours), is_flexible,
+    min_price / max_price (on base_price), ordering (allow-listed).
+
+    Paging: pass page (and optionally page_size, max 50) to get
+    {"count", "page", "page_size", "results"}; without page the full list is
+    returned as a plain array (kept for existing callers).
     """
     
     permission_classes = [IsAuthenticatedOrReadOnly]
+    ORDERING_FIELDS = {"created_at", "base_price", "name", "days"}
+    MAX_PAGE_SIZE = 50
     
     def get(self, request):
         """List tour packages with optional filtering."""
@@ -726,10 +773,9 @@ class PublicTourPackageListView(APIView):
         queryset = TourPackage.objects.filter(
             is_active=True
         ).select_related(
-            "supplier", "supplier__user"
+            "supplier", "supplier__user", "currency"
         ).prefetch_related(
             "reseller_groups",
-            "reseller_groups__resellers",
             "images",  # used by TourPackageListSerializer.get_main_image_url
         )
         
@@ -742,11 +788,6 @@ class PublicTourPackageListView(APIView):
         tour_type = request.query_params.get("tour_type")
         if tour_type:
             queryset = queryset.filter(tour_type=tour_type)
-        
-        # Filter by category if provided
-        category = request.query_params.get("category")
-        if category:
-            queryset = queryset.filter(category=category)
         
         # Filter by reseller groups - only show tours visible to the authenticated reseller
         # For anonymous/public users or non-reseller users, exclude tours with reseller groups
@@ -811,26 +852,59 @@ class PublicTourPackageListView(APIView):
                 else:
                     last_day = datetime(year, month_num + 1, 1).date()
                 
-                # Filter tours that have dates in this month with available seats
-                queryset = queryset.filter(
+                # Tours with available seats on a departure in this month.
+                # Flexible tours have no fixed dates; include them on request.
+                in_month = models.Q(
                     dates__departure_date__gte=first_day,
                     dates__departure_date__lt=last_day,
-                    dates__seat_slots__status=SeatSlotStatus.AVAILABLE
-                ).distinct()
+                    dates__seat_slots__status=SeatSlotStatus.AVAILABLE,
+                )
+                if _truthy(request.query_params.get("include_flexible")):
+                    in_month |= models.Q(is_flexible=True)
+                queryset = queryset.filter(in_month).distinct()
             except (ValueError, TypeError):
                 # Invalid month format, ignore filter
                 pass
         
-        # Ordering
-        ordering = request.query_params.get("ordering", "-created_at")
-        if ordering:
-            # Filter out is_featured from ordering since field doesn't exist
-            ordering_fields = [f for f in ordering.split(",") if "is_featured" not in f]
-            if ordering_fields:
-                queryset = queryset.order_by(*ordering_fields)
-        
-        serializer = PublicTourPackageListSerializer(queryset, many=True, context={"request": request})
-        response_data = serializer.data
+        is_flexible = request.query_params.get("is_flexible")
+        if is_flexible in ("true", "false", "1", "0"):
+            queryset = queryset.filter(is_flexible=_truthy(is_flexible))
+
+        min_price = _int_param(request.query_params.get("min_price"))
+        if min_price is not None:
+            queryset = queryset.filter(base_price__gte=min_price)
+        max_price = _int_param(request.query_params.get("max_price"))
+        if max_price is not None:
+            queryset = queryset.filter(base_price__lte=max_price)
+
+        # Ordering: only known fields (arbitrary order_by on related columns
+        # leaks hidden data through sort order, and unknown names raise 500s).
+        ordering_fields = []
+        for field in (request.query_params.get("ordering") or "-created_at").split(","):
+            field = field.strip()
+            if field.lstrip("-") in self.ORDERING_FIELDS:
+                ordering_fields.append(field)
+        queryset = queryset.order_by(*(ordering_fields or ["-created_at"]), "-id")
+
+        page = _int_param(request.query_params.get("page"))
+        if page is not None:
+            page = max(page, 1)
+            page_size = _int_param(request.query_params.get("page_size")) or 20
+            page_size = min(max(page_size, 1), self.MAX_PAGE_SIZE)
+            count = queryset.count()
+            start = (page - 1) * page_size
+            serializer = PublicTourPackageListSerializer(
+                queryset[start:start + page_size], many=True, context={"request": request}
+            )
+            response_data = {
+                "count": count,
+                "page": page,
+                "page_size": page_size,
+                "results": serializer.data,
+            }
+        else:
+            serializer = PublicTourPackageListSerializer(queryset, many=True, context={"request": request})
+            response_data = serializer.data
         
         # Cache for 5 minutes (300 seconds)
         cache.set(cache_key, response_data, 300)
@@ -859,22 +933,14 @@ class PublicTourPackageDetailView(APIView):
             tour = TourPackage.objects.filter(
                 is_active=True
             ).select_related(
-                "supplier", "supplier__user"
+                "supplier", "supplier__user", "currency"
             ).prefetch_related(
-                "reseller_groups", "reseller_groups__resellers",
                 models.Prefetch(
                     "images",
                     queryset=TourImage.objects.order_by("-is_primary", "order", "id"),
                 ),
-                models.Prefetch(
-                    "dates",
-                    queryset=TourDate.objects.prefetch_related(
-                        models.Prefetch(
-                            "seat_slots",
-                            queryset=SeatSlot.objects.select_related("booking")
-                        )
-                    ).order_by("departure_date")
-                )
+                # Dates, their seat counts and seats are loaded by
+                # PublicTourPackageDetailSerializer.get_dates in two queries.
             ).get(slug=slug)
         except TourPackage.DoesNotExist:
             raise Http404("Paket tur tidak ditemukan")
@@ -1164,7 +1230,7 @@ class AdminResellerTourCommissionViewSet(viewsets.ModelViewSet):
         return queryset
 
 
-class SupplierBookingViewSet(viewsets.ModelViewSet):
+class SupplierBookingViewSet(BookingListQueryMixin, viewsets.ModelViewSet):
     """
     ViewSet for suppliers to view and manage bookings for their own tours.
     Suppliers can update booking status and payment status.
@@ -1243,6 +1309,7 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
         return BookingSerializer
     
     @action(detail=False, methods=["get"], url_path="dashboard-stats")
+    @cache_per_user(60)
     def dashboard_stats(self, request):
         """
         Get dashboard statistics for supplier.
@@ -1313,6 +1380,7 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
         })
     
     @action(detail=False, methods=["get"], url_path="revenue-chart")
+    @cache_per_user(60)
     def revenue_chart(self, request):
         """
         Get revenue chart data grouped by date for supplier's bookings and itinerary transactions.
@@ -1351,8 +1419,8 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
         # Calculate date range
         end_datetime = timezone.now()
         start_datetime = end_datetime - timedelta(days=days)
-        start_date = start_datetime.date()
-        end_date = end_datetime.date()
+        start_date = timezone.localtime(start_datetime).date()
+        end_date = timezone.localtime(end_datetime).date()
         
         # Create datetime boundaries for filtering (start of start_date, end of end_date)
         from datetime import datetime as dt
@@ -1388,12 +1456,12 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
         
         # Add booking revenue
         for booking in bookings:
-            date_str = booking.created_at.date().isoformat()
+            date_str = timezone.localtime(booking.created_at).date().isoformat()
             revenue_by_date[date_str] += booking.booking_total
         
         # Add itinerary transaction revenue
         for transaction in itinerary_transactions:
-            date_str = transaction.created_at.date().isoformat()
+            date_str = timezone.localtime(transaction.created_at).date().isoformat()
             revenue_by_date[date_str] += transaction.amount
         
         # Create list of all dates in range and fill with revenue data
@@ -1606,10 +1674,12 @@ class SupplierBookingViewSet(viewsets.ModelViewSet):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class ResellerBookingViewSet(viewsets.ModelViewSet):
+class ResellerBookingViewSet(BookingListQueryMixin, CreateReadOnlyMixin, viewsets.ModelViewSet):
     """
     ViewSet for resellers to view and create their own bookings.
     Resellers can create bookings and view their own bookings.
+    They cannot edit or delete a booking (status and amounts are set by the
+    supplier/admin review flow); payment proof goes through the payment action.
     """
     
     permission_classes = [IsReseller]
@@ -1810,10 +1880,12 @@ class ResellerBookingViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
-class CustomerBookingViewSet(viewsets.ModelViewSet):
+class CustomerBookingViewSet(BookingListQueryMixin, CreateReadOnlyMixin, viewsets.ModelViewSet):
     """
     ViewSet for customers to view and create their own bookings.
     Customers can create direct bookings without commission/referral logic.
+    They cannot edit or delete a booking; payment proof goes through the
+    payment action.
     """
     
     permission_classes = [IsCustomer]
@@ -1962,7 +2034,7 @@ class CustomerBookingViewSet(viewsets.ModelViewSet):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class AdminBookingViewSet(viewsets.ModelViewSet):
+class AdminBookingViewSet(BookingListQueryMixin, viewsets.ModelViewSet):
     """
     ViewSet for admin to view and manage bookings.
     Admin can view all bookings, filter by status, reseller, tour date, etc.
@@ -1987,6 +2059,7 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
         ).prefetch_related("seat_slots", "payments")
     
     @action(detail=False, methods=["get"], url_path="dashboard-stats")
+    @cache_per_user(60)
     def dashboard_stats(self, request):
         """
         Get dashboard statistics.
@@ -2097,6 +2170,7 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
         })
     
     @action(detail=False, methods=["get"], url_path="revenue-chart")
+    @cache_per_user(60)
     def revenue_chart(self, request):
         """
         Get revenue chart data grouped by date for all bookings and itinerary transactions.
@@ -2121,8 +2195,8 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
         # Calculate date range
         end_datetime = timezone.now()
         start_datetime = end_datetime - timedelta(days=days)
-        start_date = start_datetime.date()
-        end_date = end_datetime.date()
+        start_date = timezone.localtime(start_datetime).date()
+        end_date = timezone.localtime(end_datetime).date()
         
         # Create datetime boundaries for filtering (start of start_date, end of end_date)
         from datetime import datetime as dt
@@ -2156,12 +2230,12 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
         
         # Add booking revenue
         for booking in bookings:
-            date_str = booking.created_at.date().isoformat()
+            date_str = timezone.localtime(booking.created_at).date().isoformat()
             revenue_by_date[date_str] += booking.booking_total
         
         # Add itinerary transaction revenue
         for transaction in itinerary_transactions:
-            date_str = transaction.created_at.date().isoformat()
+            date_str = timezone.localtime(transaction.created_at).date().isoformat()
             revenue_by_date[date_str] += transaction.amount
         
         # Create list of all dates in range and fill with revenue data
@@ -2292,17 +2366,15 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        booking.status = BookingStatus.CANCELLED
-        booking.save()
-        
-        # Delete commissions associated with this booking
-        # Resellers should not receive commission for cancelled bookings
-        booking.commissions.all().delete()
-        
-        # Release seat slots - make them available again
-        # Only when booking is cancelled, seats become available again
-        booking.seat_slots.update(status=SeatSlotStatus.AVAILABLE, booking=None)
-        
+        from .services import cancel_booking
+
+        if not cancel_booking(booking):
+            return Response(
+                {"detail": "Booking ini sudah tidak berstatus PENDING."},
+                status=status.HTTP_409_CONFLICT
+            )
+        booking.refresh_from_db()
+
         serializer = self.get_serializer(booking)
         return Response(serializer.data)
     

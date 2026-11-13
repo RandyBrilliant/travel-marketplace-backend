@@ -83,6 +83,31 @@ class CustomUser(AbstractUser):
         roles_display = self.get_roles_display()
         return f"{self.email} | ({roles_display})"
 
+    def get_full_name(self):
+        """
+        Display name from the user's profile, preferring the profile that
+        matches their role. first_name/last_name are removed on this model, so
+        Django's default would return "None None". Returns "" when no profile
+        has a name, so `user.get_full_name() or user.email` falls back to email.
+        """
+        candidates = {
+            UserRole.CUSTOMER: ("customer_profile", "full_name"),
+            UserRole.RESELLER: ("reseller_profile", "full_name"),
+            UserRole.STAFF: ("staff_profile", "full_name"),
+            UserRole.SUPPLIER: ("supplier_profile", "company_name"),
+        }
+        order = [candidates[self.role]] if self.role in candidates else []
+        order += [c for c in candidates.values() if c not in order]
+        for related_name, field in order:
+            profile = getattr(self, related_name, None)
+            name = getattr(profile, field, "") if profile else ""
+            if name:
+                return name.strip()
+        return ""
+
+    def get_short_name(self):
+        return self.get_full_name()
+
     @property
     def is_supplier(self) -> bool:
         """

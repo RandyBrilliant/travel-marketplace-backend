@@ -1,6 +1,7 @@
 """
 Custom middleware for API improvements.
 """
+import re
 import time
 import logging
 from django.utils.deprecation import MiddlewareMixin
@@ -26,6 +27,15 @@ class ResponseTimeMiddleware(MiddlewareMixin):
         return response
 
 
+# Email-verification and password-reset links carry a one-time token in the
+# URL path; keep it out of the logs.
+_TOKEN_PATH_RE = re.compile(r"(/(?:verify-email|reset-password)/[^/]+/)[^/]+")
+
+
+def _redact_tokens(path):
+    return _TOKEN_PATH_RE.sub(r"\1[redacted]", path)
+
+
 class APILoggingMiddleware(MiddlewareMixin):
     """
     Middleware to log API requests and responses.
@@ -37,7 +47,7 @@ class APILoggingMiddleware(MiddlewareMixin):
         # Only log API requests
         if request.path.startswith('/api/') or request.path.startswith('/health'):
             request._api_log_start = time.time()
-            request._api_log_path = request.path
+            request._api_log_path = _redact_tokens(request.path)
             request._api_log_method = request.method
         return None
     
@@ -76,7 +86,8 @@ class CacheControlMiddleware(MiddlewareMixin):
     Adds appropriate cache headers based on request type.
     """
     
-    # Endpoints that should be cached
+    # Public tour list (exact paths only; tour detail carries live seat data
+    # and sets its own no-store header).
     CACHEABLE_PATHS = [
         '/api/v1/tours/',
         '/api/tours/',
@@ -90,6 +101,16 @@ class CacheControlMiddleware(MiddlewareMixin):
         '/api/change-password/',
     ]
     
+    @staticmethod
+    def _is_personalised(request):
+        # JWT auth runs inside DRF views, so request.user is not reliable here;
+        # an auth cookie or header means the response may be user-specific.
+        return bool(
+            request.COOKIES.get('access_token')
+            or request.COOKIES.get('refresh_token')
+            or request.headers.get('Authorization')
+        )
+
     def process_response(self, request, response):
         """Add cache control headers."""
         path = request.path
@@ -108,11 +129,17 @@ class CacheControlMiddleware(MiddlewareMixin):
             response['Expires'] = '0'
             return response
         
-        # Cache GET requests to list endpoints
-        if request.method == 'GET' and any(path.startswith(cacheable) for cacheable in self.CACHEABLE_PATHS):
-            # Cache for 5 minutes (300 seconds)
-            response['Cache-Control'] = 'public, max-age=300'
-            response['Vary'] = 'Accept, Accept-Encoding'
+        if request.method == 'GET' and path in self.CACHEABLE_PATHS:
+            if self._is_personalised(request):
+                # Resellers get group-restricted tours and their own commission.
+                response['Cache-Control'] = 'private, no-cache'
+            else:
+                response['Cache-Control'] = 'public, max-age=60'
+            response['Vary'] = 'Accept, Accept-Encoding, Cookie, Authorization'
+            return response
+
+        # Respect a header the view already set (e.g. tour detail's no-store).
+        if response.has_header('Cache-Control'):
             return response
         
         # Default: no cache for other endpoints

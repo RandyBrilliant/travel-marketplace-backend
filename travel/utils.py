@@ -4,7 +4,7 @@ Image optimization utilities for converting images to WebP format.
 import os
 import logging
 from io import BytesIO
-from PIL import Image
+from PIL import Image, ImageOps
 from django.core.files.base import ContentFile
 from django.conf import settings
 
@@ -47,6 +47,10 @@ def optimize_image_to_webp(image_field, max_width=1920, max_height=1920, quality
             image_field.seek(0)
             img = Image.open(image_field)
             image_field.seek(0)
+
+        # Phone photos store rotation in EXIF; apply it before re-encoding,
+        # which drops EXIF (otherwise the image ends up sideways).
+        img = ImageOps.exif_transpose(img)
         
         # Convert RGBA to RGB if necessary (WebP supports transparency, but we'll use RGB for better compatibility)
         if img.mode in ('RGBA', 'LA'):
@@ -75,7 +79,9 @@ def optimize_image_to_webp(image_field, max_width=1920, max_height=1920, quality
         
         # Save to WebP format
         output = BytesIO()
-        img.save(output, format='WebP', quality=quality, method=6)
+        # method=4 is several times faster than 6 for a small size difference;
+        # this runs inside the upload request.
+        img.save(output, format='WebP', quality=quality, method=4)
         output.seek(0)
         
         # Get the original filename and change extension to .webp
@@ -83,19 +89,19 @@ def optimize_image_to_webp(image_field, max_width=1920, max_height=1920, quality
         base_name = os.path.splitext(original_name)[0]
         webp_filename = f"{base_name}.webp"
         
-        # Delete the old file if it exists and is not WebP
-        if file_path and os.path.exists(file_path) and not file_path.lower().endswith('.webp'):
-            try:
-                os.remove(file_path)
-            except (OSError, ValueError):
-                pass  # File might be locked or already deleted
-        
-        # Save the new WebP file
+        # Save the new WebP file first, then remove the original, so a failed
+        # save never leaves the record without an image.
         image_field.save(
             webp_filename,
             ContentFile(output.read()),
             save=False
         )
+
+        if file_path and os.path.exists(file_path) and not file_path.lower().endswith('.webp'):
+            try:
+                os.remove(file_path)
+            except (OSError, ValueError):
+                pass  # File might be locked or already deleted
         
         return True
         

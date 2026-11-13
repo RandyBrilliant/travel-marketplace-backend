@@ -23,6 +23,8 @@ from .models import (
 )
 from .countries import canonicalize_country
 from .utils import optimize_image_to_webp
+from backend.sanitize import sanitize_rich_text
+from backend.uploads import validate_pdf
 from account.models import ResellerProfile, SupplierProfile
 
 logger = logging.getLogger('travel')
@@ -319,6 +321,17 @@ class SeatSlotSerializer(serializers.ModelSerializer):
         return None
 
 
+class PublicSeatSlotSerializer(serializers.ModelSerializer):
+    """Seat map entry without passenger or booking details."""
+
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = SeatSlot
+        fields = ["id", "seat_number", "status", "status_display"]
+        read_only_fields = fields
+
+
 class TourDateSerializer(serializers.ModelSerializer):
     """Serializer for tour dates."""
     
@@ -353,7 +366,7 @@ class TourDateSerializer(serializers.ModelSerializer):
         from datetime import timedelta
         
         if value:
-            today = timezone.now().date()
+            today = timezone.localdate()
             
             if value < today:
                 raise serializers.ValidationError("Tanggal keberangkatan harus di masa depan.")
@@ -518,12 +531,30 @@ class TourDateSerializer(serializers.ModelSerializer):
             slots = [slot for slot in slots if slot.status == SeatSlotStatus.AVAILABLE]
         
         slots = sorted(slots, key=lambda x: (len(x.seat_number), x.seat_number))
-        return SeatSlotSerializer(slots, many=True, context=self.context).data
+        # Passenger details (names, passport images, requests) are only for
+        # staff and the supplier who owns the package; everyone else gets the
+        # seat map without personal data.
+        if self._can_view_passenger_details(obj, request):
+            return SeatSlotSerializer(slots, many=True, context=self.context).data
+        return PublicSeatSlotSerializer(slots, many=True, context=self.context).data
+
+    def _can_view_passenger_details(self, obj, request):
+        user = getattr(request, 'user', None)
+        if not user or not user.is_authenticated:
+            return False
+        if user.is_staff:
+            return True
+        cache = self.context.setdefault('_supplier_profile_id', {})
+        if user.pk not in cache:
+            profile = getattr(user, 'supplier_profile', None)
+            cache[user.pk] = profile.id if profile else None
+        supplier_profile_id = cache[user.pk]
+        return supplier_profile_id is not None and obj.package.supplier_id == supplier_profile_id
     
     def get_is_past(self, obj):
         """Check if the tour date is in the past."""
         from django.utils import timezone
-        today = timezone.now().date()
+        today = timezone.localdate()
         return obj.departure_date < today
 
 
@@ -661,7 +692,21 @@ def get_reseller_commission_for_request(request, tour_package):
         except ResellerProfile.DoesNotExist:
             return None
 
-    gross = tour_package.get_reseller_commission(reseller_profile)
+    # One query per request for this reseller's per-tour overrides, instead of
+    # one per tour (the tour list serializes every tour).
+    overrides = getattr(request, "_reseller_commission_overrides", None)
+    if overrides is None:
+        from .models import ResellerTourCommission
+        overrides = dict(
+            ResellerTourCommission.objects.filter(
+                reseller=reseller_profile, is_active=True
+            ).values_list("tour_package_id", "commission_amount")
+        )
+        request._reseller_commission_overrides = overrides
+    if tour_package.id in overrides:
+        gross = overrides[tour_package.id]
+    else:
+        gross = tour_package.commission if tour_package.commission and tour_package.commission > 0 else None
     if not gross:
         return None
 
@@ -793,16 +838,29 @@ class PublicTourPackageDetailSerializer(serializers.ModelSerializer):
         
         # Note: seat_slots are already prefetched in the view with booking relationship
         # Don't prefetch again here to avoid "lookup was already seen" error
-        today = timezone.now().date()
+        today = timezone.localdate()
         
         # Get dates from 30 days ago to show recent past dates
         start_date = today - timedelta(days=30)
         # Show ALL dates (including past, fully booked, and manually booked with 0 seats)
         # so the UI can display them with appropriate styling. The cap is only a safety
         # limit; the UI already collapses the list after 5 dates.
-        dates_to_show = obj.dates.filter(
-            departure_date__gte=start_date
-        ).order_by("departure_date")[:100]
+        from django.db.models import Count, Prefetch, Q
+        dates_to_show = (
+            obj.dates.filter(departure_date__gte=start_date)
+            .annotate(
+                _remaining_seats=Count(
+                    "seat_slots", filter=~Q(seat_slots__status=SeatSlotStatus.BOOKED)
+                ),
+                _booked_seats=Count(
+                    "seat_slots", filter=Q(seat_slots__status=SeatSlotStatus.BOOKED)
+                ),
+            )
+            .prefetch_related(
+                Prefetch("seat_slots", queryset=SeatSlot.objects.select_related("booking"))
+            )
+            .order_by("departure_date")[:100]
+        )
 
         return TourDateSerializer(dates_to_show, many=True, context=self.context).data
     
@@ -890,6 +948,19 @@ class TourPackageCreateUpdateSerializer(serializers.ModelSerializer):
         if value is None:
             return ""
         return value.strip()
+
+    # Rich-text fields are rendered as HTML on the public and admin tour pages.
+    def validate_itinerary(self, value):
+        return sanitize_rich_text(value)
+
+    def validate_cancellation_policy(self, value):
+        return sanitize_rich_text(value)
+
+    def validate_important_notes(self, value):
+        return sanitize_rich_text(value)
+
+    def validate_itinerary_pdf(self, value):
+        return validate_pdf(value)
 
     def validate_country(self, value):
         """Store the country, not a city/region, so public filters match."""
@@ -1279,6 +1350,8 @@ class BookingListSerializer(serializers.ModelSerializer):
     
     def get_payment_status(self, obj):
         """Get status of the latest payment (for backward compatibility)."""
+        if hasattr(obj, "_latest_payment_status"):
+            return obj._latest_payment_status
         latest_payment = obj.payments.order_by('-created_at').first()
         return latest_payment.status if latest_payment else None
     
@@ -1369,7 +1442,7 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         from datetime import timedelta
         
         if value:
-            today = timezone.now().date()
+            today = timezone.localdate()
             
             if value < today:
                 raise serializers.ValidationError("Tanggal keberangkatan harus di masa depan.")
@@ -1385,12 +1458,12 @@ class BookingCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Booking
+        # total_amount and platform_fee are deliberately not accepted from the
+        # client: the total is computed in validate() from server-side prices.
         fields = [
             "tour_date",
             "package_id",
             "departure_date",
-            "platform_fee",
-            "total_amount",
             "notes",
             "seat_slots",
             "promo_code",
@@ -1525,9 +1598,23 @@ class BookingCreateSerializer(serializers.ModelSerializer):
                     'seat_slots': 'Nomor kursi duplikat tidak diperbolehkan.'
                 })
 
+        # Regular packages: only active packages with a future departure are bookable.
+        if tour_date:
+            from django.utils import timezone
+            if not tour_date.package.is_active:
+                raise serializers.ValidationError({
+                    'tour_date': 'Paket tour ini tidak aktif.'
+                })
+            if tour_date.departure_date < timezone.localdate():
+                raise serializers.ValidationError({
+                    'tour_date': 'Tanggal keberangkatan sudah lewat.'
+                })
+
+        attrs['total_amount'] = self._compute_total_amount(attrs)
+
         # Validate promo code if provided
         promo_code = attrs.get('promo_code', '').strip().upper()  # Normalize to uppercase
-        total_amount = attrs.get('total_amount', 0)
+        total_amount = attrs['total_amount']
         if promo_code:
             from .models import PromoCode
             try:
@@ -1548,9 +1635,46 @@ class BookingCreateSerializer(serializers.ModelSerializer):
 
         return attrs
 
+    @staticmethod
+    def _compute_total_amount(attrs):
+        """
+        Booking total before promo, from server-side prices only:
+        price per passenger x passengers
+        + visa price x passengers who need a visa
+        + tipping price (once per booking).
+        Regular packages use the tour date's price; flexible packages use the
+        package base price (the price the flexible TourDate is created with).
+        """
+        seat_slots = attrs.get('seat_slots', [])
+        tour_date = attrs.get('tour_date')
+        if tour_date:
+            package = tour_date.package
+            price_per_pax = tour_date.price
+        else:
+            package = attrs['_tour_package']
+            price_per_pax = package.base_price
+
+        passengers = len(seat_slots)
+        visa_passengers = sum(1 for slot in seat_slots if slot.get('visa_required'))
+        return (
+            price_per_pax * passengers
+            + package.visa_price * visa_passengers
+            + package.tipping_price
+        )
+
     def create(self, validated_data):
+        """
+        Run the whole booking creation in one transaction, so row locks taken
+        while preparing seats (flexible packages) are held until the seats are
+        assigned, and a failure part-way leaves nothing behind.
+        """
+        from django.db import transaction
+        with transaction.atomic():
+            return self._create_booking(validated_data)
+
+    def _create_booking(self, validated_data):
         """Create booking and assign seat slots with passenger details.
-        
+
         For flexible packages, automatically creates/get TourDate if it doesn't exist.
         """
         from django.db import transaction
@@ -1583,39 +1707,54 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         num_passengers = len(seat_slots_data)
         
         if tour_package and departure_date:
-            # Flexible package: get or create TourDate
-            # Use get_or_create with transaction to handle concurrent bookings
+            # Flexible package: reuse this package's date row for the day (or
+            # create it) and make sure enough seats are *available*, adding
+            # seats if needed. The date row is locked so concurrent bookings
+            # for the same day don't race on seat numbers.
+            from .models import SeatSlot, SeatSlotStatus
             with transaction.atomic():
-                tour_date, created = TourDate.objects.get_or_create(
-                    package=tour_package,
-                    departure_date=departure_date,
-                    has_shopping_stop=False,  # Default for flexible packages
-                    defaults={
-                        'price': tour_package.base_price,
-                        'total_seats': num_passengers,  # Create only the number of seats needed for this booking
-                        'is_high_season': False,
-                    }
+                tour_date = (
+                    TourDate.objects.select_for_update()
+                    .filter(
+                        package=tour_package,
+                        departure_date=departure_date,
+                        has_shopping_stop=False,
+                    )
+                    .order_by('id')
+                    .first()
                 )
-                # If TourDate was just created, it will auto-generate seat slots via save() signal
-                # If it already existed, check if we need to add more seats
-                if not created:
-                    # TourDate already exists - check if we have enough seats
-                    existing_seats_count = tour_date.seat_slots.count()
-                    if existing_seats_count < num_passengers:
-                        # Need to add more seats to accommodate this booking
-                        from .models import SeatSlot, SeatSlotStatus
-                        seats_to_add = num_passengers - existing_seats_count
+                if tour_date is None:
+                    # save() generates `total_seats` AVAILABLE seat slots.
+                    tour_date = TourDate.objects.create(
+                        package=tour_package,
+                        departure_date=departure_date,
+                        has_shopping_stop=False,
+                        price=tour_package.base_price,
+                        total_seats=num_passengers,
+                        is_high_season=False,
+                    )
+                else:
+                    available = tour_date.seat_slots.filter(
+                        status=SeatSlotStatus.AVAILABLE
+                    ).count()
+                    seats_to_add = num_passengers - available
+                    if seats_to_add > 0:
+                        existing_numbers = set(
+                            tour_date.seat_slots.values_list('seat_number', flat=True)
+                        )
                         new_seat_slots = []
-                        for i in range(seats_to_add):
-                            new_seat_slots.append(
-                                SeatSlot(
-                                    tour_date=tour_date,
-                                    seat_number=str(existing_seats_count + i + 1),
-                                    status=SeatSlotStatus.AVAILABLE
+                        next_number = 1
+                        while len(new_seat_slots) < seats_to_add:
+                            if str(next_number) not in existing_numbers:
+                                new_seat_slots.append(
+                                    SeatSlot(
+                                        tour_date=tour_date,
+                                        seat_number=str(next_number),
+                                        status=SeatSlotStatus.AVAILABLE,
+                                    )
                                 )
-                            )
+                            next_number += 1
                         SeatSlot.objects.bulk_create(new_seat_slots)
-                        # Update total_seats to reflect the new count
                         tour_date.total_seats = tour_date.seat_slots.count()
                         tour_date.save(update_fields=['total_seats'])
                 validated_data['tour_date'] = tour_date
@@ -1710,9 +1849,10 @@ class BookingCreateSerializer(serializers.ModelSerializer):
                 from django.db.models import F
                 PromoCode.objects.filter(pk=promo.pk).update(times_used=F('times_used') + 1)
                 # Record per-user usage for per-user limit enforcement
-                if booking.booked_by:
+                request = self.context.get('request')
+                if request and request.user.is_authenticated:
                     from .models import PromoCodeUsage
-                    PromoCodeUsage.objects.create(promo_code=promo, user=booking.booked_by)
+                    PromoCodeUsage.objects.create(promo_code=promo, user=request.user)
 
             # Send creation emails to customer/reseller and supplier
             from travel.tasks import send_booking_creation_emails

@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from backend.uploads import RandomFilename
 from django.core.validators import MinValueValidator
 from django.core.exceptions import ValidationError
 from django.utils import timezone
@@ -628,7 +629,7 @@ class TourDate(models.Model):
         super().clean()
         
         if self.departure_date:
-            today = timezone.now().date()
+            today = timezone.localdate()
             
             # Ensure departure date is in the future
             if self.departure_date < today:
@@ -764,7 +765,12 @@ class TourDate(models.Model):
         Note: Uses a fresh query (not prefetched cache) to ensure accuracy after bookings are created.
         """
         from django.db.models import Q
-        
+
+        # Counts annotated by the query that loaded this row (see
+        # TourDate.objects.with_seat_counts()) are as fresh as the row itself.
+        if hasattr(self, "_remaining_seats"):
+            return self._remaining_seats
+
         # Use a fresh query instead of prefetched cache to ensure we get the latest seat status
         # This is important because seat slots can be updated after the prefetch
         # Use the model from the related manager to avoid circular import
@@ -786,6 +792,9 @@ class TourDate(models.Model):
         
         Note: Uses a fresh query (not prefetched cache) to ensure accuracy after bookings are created.
         """
+        if hasattr(self, "_booked_seats"):
+            return self._booked_seats
+
         # Use a fresh query instead of prefetched cache to ensure we get the latest seat status
         # Use the model from the related manager to avoid circular import
         SeatSlotModel = self.seat_slots.model
@@ -953,7 +962,7 @@ class SeatSlot(models.Model):
     
     # Passport information
     passport = models.ImageField(
-        upload_to="passports/",
+        upload_to=RandomFilename("passports"),
         blank=True,
         null=True,
         help_text=_("Passport image."),
@@ -1218,6 +1227,9 @@ class Booking(models.Model):
     @property
     def seats_booked(self):
         """Return the actual count of seat slots linked to this booking."""
+        # Precomputed by list views (BookingListQueryMixin) to avoid a query per row.
+        if hasattr(self, "_seats_booked"):
+            return self._seats_booked
         return self.seat_slots.count()
     
     @property
@@ -1299,7 +1311,7 @@ class Payment(models.Model):
     )
 
     proof_image = models.ImageField(
-        upload_to="payments/proof/",
+        upload_to=RandomFilename("payments/proof"),
         blank=True,
         null=True,
         help_text=_("Upload of the bank transfer slip or screenshot."),
@@ -1345,7 +1357,7 @@ class Payment(models.Model):
         
         # Validate transfer date is not in the future
         if self.transfer_date:
-            today = timezone.now().date()
+            today = timezone.localdate()
             if self.transfer_date > today:
                 raise ValidationError({
                     'transfer_date': 'Tanggal transfer tidak boleh di masa depan.'

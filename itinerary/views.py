@@ -1,5 +1,6 @@
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
+from backend.caching import cache_per_user
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.exceptions import ValidationError
@@ -8,7 +9,9 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.db import models
 
-from rest_framework.permissions import IsAdminUser, IsAuthenticated, AllowAny, AllowAny
+from rest_framework.permissions import IsAdminUser, IsAuthenticated, AllowAny
+from rest_framework.exceptions import PermissionDenied
+from backend.mixins import CreateReadOnlyMixin
 from .models import (
     ItineraryBoard,
     ItineraryColumn,
@@ -21,6 +24,7 @@ from .models import (
 from .serializers import (
     ItineraryBoardListSerializer,
     ItineraryBoardDetailSerializer,
+    ItineraryBoardPublicSerializer,
     ItineraryBoardCreateUpdateSerializer,
     ItineraryColumnSerializer,
     ItineraryColumnCreateUpdateSerializer,
@@ -53,9 +57,27 @@ class IsSupplier(permissions.BasePermission):
     Permission check for supplier role.
     Checks if user has supplier profile.
     """
-    
+
     def has_permission(self, request, view):
         return request.user and request.user.is_authenticated and request.user.is_supplier
+
+
+class IsApprovedSupplier(permissions.BasePermission):
+    """Supplier profile exists and has been approved by an admin."""
+
+    def has_permission(self, request, view):
+        if not (request.user and request.user.is_authenticated and request.user.is_supplier):
+            return False
+        from account.models import SupplierApprovalStatus
+        profile = getattr(request.user, "supplier_profile", None)
+        return bool(profile and profile.approval_status == SupplierApprovalStatus.APPROVED)
+
+
+def _require_own_board(request, board):
+    """Raise PermissionDenied unless `board` belongs to the requesting supplier."""
+    profile = getattr(request.user, "supplier_profile", None)
+    if board is None or profile is None or board.supplier_id != profile.id:
+        raise PermissionDenied("Board ini bukan milik Anda.")
 
 
 class SupplierItineraryBoardViewSet(viewsets.ModelViewSet):
@@ -68,7 +90,7 @@ class SupplierItineraryBoardViewSet(viewsets.ModelViewSet):
     - Retrieve, update, and delete their own itinerary boards
     """
     
-    permission_classes = [IsSupplier]
+    permission_classes = [IsApprovedSupplier]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ["is_public", "is_active"]
     search_fields = ["title", "description", "slug"]
@@ -114,14 +136,18 @@ class SupplierItineraryBoardViewSet(viewsets.ModelViewSet):
         except SupplierProfile.DoesNotExist:
             raise ValidationError("User must have a supplier profile to create itinerary boards.")
 
+    def perform_update(self, serializer):
+        """Keep the board with its current supplier (not transferable here)."""
+        serializer.save(supplier=serializer.instance.supplier)
+
 
 class SupplierItineraryColumnViewSet(viewsets.ModelViewSet):
     """
     ViewSet for suppliers to manage columns within their boards.
     Suppliers can only manage columns for their own boards.
     """
-    
-    permission_classes = [IsAuthenticated]
+
+    permission_classes = [IsApprovedSupplier]
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['board']
     ordering_fields = ['order', 'created_at']
@@ -156,14 +182,23 @@ class SupplierItineraryColumnViewSet(viewsets.ModelViewSet):
             return ItineraryColumnCreateUpdateSerializer
         return ItineraryColumnSerializer
 
+    def perform_create(self, serializer):
+        _require_own_board(self.request, serializer.validated_data.get('board'))
+        serializer.save()
+
+    def perform_update(self, serializer):
+        if 'board' in serializer.validated_data:
+            _require_own_board(self.request, serializer.validated_data['board'])
+        serializer.save()
+
 
 class SupplierItineraryCardViewSet(viewsets.ModelViewSet):
     """
     ViewSet for suppliers to manage cards within their boards.
     Suppliers can only manage cards for columns in their own boards.
     """
-    
-    permission_classes = [IsAuthenticated]
+
+    permission_classes = [IsApprovedSupplier]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['column', 'date']
     search_fields = ['title', 'description', 'location_name']
@@ -200,13 +235,20 @@ class SupplierItineraryCardViewSet(viewsets.ModelViewSet):
         if self.action in ['create', 'update', 'partial_update']:
             return ItineraryCardCreateUpdateSerializer
         return ItineraryCardSerializer
-    
+
     def perform_create(self, serializer):
-        """Set created_by to current user if not provided."""
-        if 'created_by' not in serializer.validated_data:
-            serializer.save(created_by=self.request.user)
-        else:
-            serializer.save()
+        """Create a card in one of the supplier's own boards, authored by the caller."""
+        column = serializer.validated_data.get('column')
+        _require_own_board(self.request, column.board if column else None)
+        serializer.save(created_by=self.request.user)
+
+    def perform_update(self, serializer):
+        """Cards may only move between columns of the supplier's own boards."""
+        if 'column' in serializer.validated_data:
+            _require_own_board(self.request, serializer.validated_data['column'].board)
+        # created_by is fixed at creation time.
+        serializer.validated_data.pop('created_by', None)
+        serializer.save()
 
 
 class SupplierItineraryCardAttachmentViewSet(viewsets.ModelViewSet):
@@ -214,8 +256,8 @@ class SupplierItineraryCardAttachmentViewSet(viewsets.ModelViewSet):
     ViewSet for suppliers to manage card attachments.
     Suppliers can only manage attachments for cards in their own boards.
     """
-    
-    permission_classes = [IsAuthenticated]
+
+    permission_classes = [IsApprovedSupplier]
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['card']
     ordering_fields = ['created_at']
@@ -238,14 +280,24 @@ class SupplierItineraryCardAttachmentViewSet(viewsets.ModelViewSet):
             return ItineraryCardAttachmentCreateUpdateSerializer
         return ItineraryCardAttachmentSerializer
 
+    def perform_create(self, serializer):
+        card = serializer.validated_data.get('card')
+        _require_own_board(self.request, card.column.board if card else None)
+        serializer.save()
+
+    def perform_update(self, serializer):
+        if 'card' in serializer.validated_data:
+            _require_own_board(self.request, serializer.validated_data['card'].column.board)
+        serializer.save()
+
 
 class SupplierItineraryCardChecklistViewSet(viewsets.ModelViewSet):
     """
     ViewSet for suppliers to manage card checklists.
     Suppliers can only manage checklists for cards in their own boards.
     """
-    
-    permission_classes = [IsAuthenticated]
+
+    permission_classes = [IsApprovedSupplier]
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['card']
     ordering_fields = ['order', 'created_at']
@@ -261,12 +313,22 @@ class SupplierItineraryCardChecklistViewSet(viewsets.ModelViewSet):
             ).select_related('card')
         except SupplierProfile.DoesNotExist:
             return ItineraryCardChecklist.objects.none()
-    
+
     def get_serializer_class(self):
         """Use different serializers for list/detail vs create/update."""
         if self.action in ['create', 'update', 'partial_update']:
             return ItineraryCardChecklistCreateUpdateSerializer
         return ItineraryCardChecklistSerializer
+
+    def perform_create(self, serializer):
+        card = serializer.validated_data.get('card')
+        _require_own_board(self.request, card.column.board if card else None)
+        serializer.save()
+
+    def perform_update(self, serializer):
+        if 'card' in serializer.validated_data:
+            _require_own_board(self.request, serializer.validated_data['card'].column.board)
+        serializer.save()
 
 
 class AdminItineraryBoardViewSet(viewsets.ModelViewSet):
@@ -502,7 +564,7 @@ class ResellerItineraryBoardListView(APIView):
         
         boards = queryset[start:end]
         
-        serializer = ItineraryBoardListSerializer(
+        serializer = ItineraryBoardPublicSerializer(
             boards,
             many=True,
             context={'request': request}
@@ -519,7 +581,9 @@ class ResellerItineraryBoardListView(APIView):
 class ResellerItineraryBoardDetailView(APIView):
     """
     Public view for retrieving a single itinerary board.
-    Anyone (including non-logged in users) can view public board details (read-only).
+    Anyone (including non-logged in users) can view the public teaser of a board
+    (title, description, price, image, video, number of days). The day-by-day
+    content is only returned to buyers by CustomerItineraryBoardDetailView.
     """
     
     permission_classes = [AllowAny]
@@ -536,9 +600,6 @@ class ResellerItineraryBoardDetailView(APIView):
                     'supplier', 'currency'
                 ).prefetch_related(
                     'columns',
-                    'columns__cards',
-                    'columns__cards__attachments',
-                    'columns__cards__checklists',
                 ).get()
             elif slug:
                 board = ItineraryBoard.objects.filter(
@@ -549,16 +610,15 @@ class ResellerItineraryBoardDetailView(APIView):
                     'supplier', 'currency'
                 ).prefetch_related(
                     'columns',
-                    'columns__cards',
-                    'columns__cards__attachments',
-                    'columns__cards__checklists',
                 ).get()
             else:
                 raise Http404("ID board atau slug wajib diisi.")
         except ItineraryBoard.DoesNotExist:
             raise Http404("Board tidak ditemukan atau tidak bersifat publik.")
         
-        serializer = ItineraryBoardDetailSerializer(
+        # Teaser only: paid columns/cards are served by CustomerItineraryBoardDetailView
+        # to buyers with an active transaction.
+        serializer = ItineraryBoardPublicSerializer(
             board,
             context={'request': request}
         )
@@ -642,11 +702,12 @@ class CustomerItineraryBoardDetailView(APIView):
         return Response(serializer.data)
 
 
-class CustomerItineraryTransactionViewSet(viewsets.ModelViewSet):
+class CustomerItineraryTransactionViewSet(CreateReadOnlyMixin, viewsets.ModelViewSet):
     """
     ViewSet for customers to purchase and manage itinerary access.
     Only authenticated customers can create transactions.
-    Customers can view their own transactions.
+    Customers can view their own transactions and upload payment proof.
+    Access is activated only when the payment is approved (see signals).
     """
     
     permission_classes = [IsCustomer]
@@ -684,71 +745,6 @@ class CustomerItineraryTransactionViewSet(viewsets.ModelViewSet):
         # Both customers and resellers can purchase itinerary access
         serializer.save(customer=self.request.user)
     
-    @action(detail=True, methods=["patch"], url_path="activate")
-    def activate_transaction(self, request, pk=None):
-        """
-        Activate a pending itinerary transaction.
-        This grants the customer access to the itinerary for the specified duration.
-        """
-        transaction = self.get_object()
-        
-        if transaction.status != ItineraryTransactionStatus.PENDING:
-            return Response(
-                {"detail": f"Transaction is already {transaction.status}. Cannot activate."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        try:
-            transaction.activate()
-            serializer = self.get_serializer(transaction)
-            return Response(serializer.data)
-        except Exception as e:
-            return Response(
-                {"detail": f"Error activating transaction: {str(e)}"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-    
-    @action(detail=True, methods=["post"], url_path="extend-access")
-    def extend_access(self, request, pk=None):
-        """
-        Extend the access duration for an active itinerary transaction.
-        
-        Request body:
-        {
-            "additional_days": 7
-        }
-        """
-        transaction = self.get_object()
-        additional_days = request.data.get("additional_days")
-        
-        if not additional_days:
-            return Response(
-                {"detail": "additional_days is required."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        try:
-            additional_days = int(additional_days)
-            if additional_days <= 0:
-                return Response(
-                    {"detail": "additional_days must be positive."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            transaction.extend_access(additional_days)
-            serializer = self.get_serializer(transaction)
-            return Response(serializer.data)
-        except ValueError:
-            return Response(
-                {"detail": "additional_days must be an integer."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        except Exception as e:
-            return Response(
-                {"detail": f"Error extending access: {str(e)}"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-    
     @action(detail=True, methods=["patch"], url_path="payment")
     def update_payment(self, request, pk=None):
         """
@@ -775,10 +771,11 @@ class CustomerItineraryTransactionViewSet(viewsets.ModelViewSet):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class ResellerItineraryTransactionViewSet(viewsets.ModelViewSet):
+class ResellerItineraryTransactionViewSet(CreateReadOnlyMixin, viewsets.ModelViewSet):
     """
     ViewSet for resellers to purchase and manage itinerary access.
-    Resellers can create transactions on behalf of their customers.
+    Resellers can create transactions on behalf of their customers and upload
+    payment proof; they cannot edit status or amounts.
     """
     
     permission_classes = [IsReseller]
@@ -901,6 +898,7 @@ class SupplierItineraryTransactionViewSet(viewsets.ModelViewSet):
             )
 
     @action(detail=False, methods=["get"], url_path="dashboard-stats")
+    @cache_per_user(60)
     def dashboard_stats(self, request):
         """
         Get dashboard statistics for supplier's itinerary transactions.
@@ -1079,6 +1077,7 @@ class AdminItineraryTransactionViewSet(viewsets.ModelViewSet):
             )
 
     @action(detail=False, methods=["get"], url_path="dashboard-stats")
+    @cache_per_user(60)
     def dashboard_stats(self, request):
         """
         Get dashboard statistics for all itinerary transactions (admin view).

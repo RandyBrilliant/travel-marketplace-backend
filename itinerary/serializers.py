@@ -204,6 +204,18 @@ class ItineraryBoardListSerializer(serializers.ModelSerializer):
         return None
 
 
+class ItineraryBoardPublicSerializer(ItineraryBoardListSerializer):
+    """
+    Teaser shown to anyone browsing boards (list and detail).
+    Excludes the paid content (columns/cards) and the internal share_token;
+    buyers get the full board from CustomerItineraryBoardDetailView.
+    """
+
+    class Meta(ItineraryBoardListSerializer.Meta):
+        fields = [f for f in ItineraryBoardListSerializer.Meta.fields if f != 'share_token']
+        read_only_fields = fields
+
+
 class ItineraryBoardDetailSerializer(serializers.ModelSerializer):
     """Detailed serializer for board detail views."""
     
@@ -329,7 +341,12 @@ class ItineraryCardCreateUpdateSerializer(serializers.ModelSerializer):
                 validated_data.pop('cover_image', None)
         
         return super().update(instance, validated_data)
-    
+
+    def validate_description(self, value):
+        """Strip unsafe HTML from the rich-text description."""
+        from backend.sanitize import sanitize_rich_text
+        return sanitize_rich_text(value)
+
     class Meta:
         model = ItineraryCard
         fields = [
@@ -370,10 +387,11 @@ class ItineraryCardAttachmentCreateUpdateSerializer(serializers.ModelSerializer)
         read_only_fields = ['id', 'created_at']
     
     def validate_file(self, value):
-        """Validate file is provided."""
+        """Validate file is provided and is an allowed image/document type."""
         if not value:
             raise serializers.ValidationError("File wajib diisi.")
-        return value
+        from backend.uploads import validate_attachment
+        return validate_attachment(value)
     
     def validate(self, attrs):
         """Auto-populate file_type and file_size if file is provided."""
@@ -426,7 +444,9 @@ class ItineraryCardChecklistCreateUpdateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError("Setiap item harus memiliki field 'id'.")
             if 'completed' not in item:
                 item['completed'] = False
-        
+
+        return value
+
 
 class ItineraryTransactionSerializer(serializers.ModelSerializer):
     """Serializer for itinerary transactions."""
@@ -508,7 +528,11 @@ class ItineraryTransactionSerializer(serializers.ModelSerializer):
 
 class ItineraryTransactionCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating itinerary transactions."""
-    
+
+    # Only boards that are on sale can be purchased.
+    board = serializers.PrimaryKeyRelatedField(
+        queryset=ItineraryBoard.objects.filter(is_public=True, is_active=True)
+    )
     promo_code = serializers.CharField(required=False, allow_blank=True, max_length=50)
 
     class Meta:

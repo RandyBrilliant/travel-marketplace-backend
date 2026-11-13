@@ -1035,7 +1035,7 @@ class Command(BaseCommand):
 
     def _create_tour_dates(self, tour, base_price):
         """Create tour dates for a tour package."""
-        today = timezone.now().date()
+        today = timezone.localdate()
         
         # Create 6 tour dates over the next 3 months
         for i in range(6):
@@ -1420,7 +1420,7 @@ class Command(BaseCommand):
             payment = Payment.objects.create(
                 booking=booking,
                 amount=booking.total_amount,
-                transfer_date=timezone.now().date() - timedelta(days=random.randint(1, 7)),
+                transfer_date=timezone.localdate() - timedelta(days=random.randint(1, 7)),
                 status=scenario['payment_status'],
             )
             

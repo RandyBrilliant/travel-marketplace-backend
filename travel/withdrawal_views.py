@@ -3,11 +3,13 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAdminUser
+from django.db import transaction
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
 from account.models import ResellerProfile, UserRole
+from backend.mixins import CreateReadOnlyMixin
 from .models import WithdrawalRequest, WithdrawalRequestStatus
 from .serializers import (
     WithdrawalRequestSerializer,
@@ -30,10 +32,12 @@ class IsReseller(permissions.BasePermission):
         )
 
 
-class ResellerWithdrawalViewSet(viewsets.ModelViewSet):
+class ResellerWithdrawalViewSet(CreateReadOnlyMixin, viewsets.ModelViewSet):
     """
     ViewSet for resellers to create and view their withdrawal requests.
-    Resellers can only see and create their own withdrawal requests.
+    Resellers can only see and create their own withdrawal requests; they
+    cannot edit or delete them (that would bypass the balance check or
+    restore balance after a payout).
     """
     
     permission_classes = [IsReseller]
@@ -65,14 +69,33 @@ class ResellerWithdrawalViewSet(viewsets.ModelViewSet):
         return WithdrawalRequestSerializer
     
     def perform_create(self, serializer):
-        """Set the reseller when creating a withdrawal request."""
-        try:
-            reseller_profile = ResellerProfile.objects.get(user=self.request.user)
+        """
+        Set the reseller when creating a withdrawal request.
+
+        The reseller row is locked while the balance is re-checked and the
+        request is inserted, so concurrent requests cannot both spend the
+        same balance.
+        """
+        with transaction.atomic():
+            try:
+                reseller_profile = ResellerProfile.objects.select_for_update().get(
+                    user=self.request.user
+                )
+            except ResellerProfile.DoesNotExist:
+                raise ValidationError(
+                    {"detail": "Profil reseller tidak ditemukan. Silakan lengkapi pengaturan profil Anda."}
+                )
+
+            amount = serializer.validated_data["amount"]
+            available_balance = reseller_profile.get_available_commission_balance()
+            if amount > available_balance:
+                raise ValidationError({
+                    "amount": [
+                        f"Jumlah penarikan ({amount:,} IDR) melebihi saldo komisi yang tersedia "
+                        f"({available_balance:,} IDR)."
+                    ]
+                })
             serializer.save(reseller=reseller_profile)
-        except ResellerProfile.DoesNotExist:
-            raise ValidationError(
-                {"detail": "Profil reseller tidak ditemukan. Silakan lengkapi pengaturan profil Anda."}
-            )
     
     @action(detail=False, methods=["get"], url_path="balance")
     def get_balance(self, request):

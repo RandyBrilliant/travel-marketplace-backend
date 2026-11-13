@@ -103,8 +103,8 @@ def send_email_verification(self, user_id):
         logger.info(f"Found user: {user.email}")
         
         # Generate verification token using utility function
-        from account.utils import generate_verification_token
-        uidb64, token = generate_verification_token(user)
+        from account.utils import generate_email_verification_token
+        uidb64, token = generate_email_verification_token(user)
         
         verification_url = f"{settings.FRONTEND_URL}/verify-email/{uidb64}/{token}/"
         logger.info(f"Generated verification URL for user {user.email}")

@@ -5,7 +5,12 @@ from rest_framework.permissions import BasePermission
 
 
 class IsStaffAgent(BasePermission):
-    """Staff JWT, plus X-Agent-Key when HERMES_AGENT_API_KEY is configured."""
+    """
+    Staff JWT plus a matching X-Agent-Key header.
+
+    Without HERMES_AGENT_API_KEY configured the agent API is closed, except in
+    DEBUG (local development). A staff password alone is not enough to use it.
+    """
 
     def has_permission(self, request, view):
         user = request.user
@@ -14,7 +19,7 @@ class IsStaffAgent(BasePermission):
 
         expected = getattr(settings, "HERMES_AGENT_API_KEY", "") or ""
         if not expected:
-            return True
+            return bool(settings.DEBUG)
 
         provided = request.headers.get("X-Agent-Key") or ""
         if not provided:

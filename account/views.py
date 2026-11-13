@@ -1,9 +1,10 @@
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework import viewsets, permissions, status, serializers
 from rest_framework.decorators import action
+from backend.caching import cache_per_user
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.db import transaction, IntegrityError
-from django.contrib.auth.tokens import default_token_generator
 from django.utils.encoding import force_str
 from django.utils.http import urlsafe_base64_decode
 from django.utils import timezone
@@ -22,6 +23,7 @@ from account.models import (
 from account.serializers import (
     SupplierProfileSerializer,
     ResellerProfileSerializer,
+    ResellerSelfProfileSerializer,
     StaffProfileSerializer,
     CustomerProfileSerializer,
     AdminSupplierProfileSerializer,
@@ -138,7 +140,7 @@ class ResellerProfileViewSet(BaseOwnProfileViewSet):
     Suppliers can create reseller profiles from their dashboard.
     """
 
-    serializer_class = ResellerProfileSerializer
+    serializer_class = ResellerSelfProfileSerializer
 
     def get_profile_queryset_for_user(self, user):
         if not user.is_authenticated:
@@ -612,8 +614,12 @@ class AdminCustomerProfileViewSet(BaseAdminProfileViewSet):
 
         try:
             with transaction.atomic():
-                # Remove the customer profile before converting
-                customer_profile.delete()
+                # Deleting the customer profile cascades to its bookings
+                # (and their payments), and would leave their seats stuck as
+                # BOOKED. Keep the profile when it has bookings so the history
+                # is preserved; the user simply holds both profiles.
+                if not customer_profile.bookings.exists():
+                    customer_profile.delete()
 
                 # Change user role to RESELLER
                 user.role = UserRole.RESELLER
@@ -676,6 +682,7 @@ class AdminContactMessageViewSet(viewsets.ReadOnlyModelViewSet):
         return super().destroy(request, *args, **kwargs)
 
     @action(detail=False, methods=["get"], url_path="stats")
+    @cache_per_user(60)
     def get_stats(self, request):
         """
         Get statistics about contact messages.
@@ -837,6 +844,8 @@ class ChangePasswordView(APIView):
     Works for all user types (STAFF, SUPPLIER, RESELLER).
     """
     permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth_change_password"
 
     def post(self, request):
         """Change the authenticated user's password."""
@@ -901,6 +910,8 @@ class SendEmailVerificationView(APIView):
     Works for all user types (STAFF, SUPPLIER, RESELLER).
     """
     permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "email_send"
 
     def post(self, request, user_id):
         """Send email verification email to the specified user."""
@@ -940,6 +951,8 @@ class RequestPasswordResetView(APIView):
     No authentication required.
     """
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth_password_reset"
 
     def post(self, request):
         """Send password reset email to the user with the provided email."""
@@ -955,8 +968,8 @@ class RequestPasswordResetView(APIView):
             user = CustomUser.objects.get(email=email.lower().strip())
             
             # Generate password reset token using utility function
-            from account.utils import generate_verification_token
-            uidb64, token = generate_verification_token(user)
+            from account.utils import generate_password_reset_token
+            uidb64, token = generate_password_reset_token(user)
             reset_token = f"{uidb64}/{token}"
             
             # Send password reset email asynchronously
@@ -993,8 +1006,8 @@ class ResetPasswordView(APIView):
             user = CustomUser.objects.get(pk=user_id)
             
             # Generate password reset token using utility function
-            from account.utils import generate_verification_token
-            uidb64, token = generate_verification_token(user)
+            from account.utils import generate_password_reset_token
+            uidb64, token = generate_password_reset_token(user)
             reset_token = f"{uidb64}/{token}"
             
             # Send password reset email asynchronously
@@ -1028,6 +1041,8 @@ class ResetPasswordConfirmView(APIView):
     - Cannot be reused after password reset
     """
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth_token_check"
 
     def post(self, request, uidb64, token):
         """Reset user password using uid and token."""
@@ -1043,7 +1058,8 @@ class ResetPasswordConfirmView(APIView):
 
         # Check if token is valid
         # Django's token includes password hash, so it's automatically invalidated after password change
-        if not default_token_generator.check_token(user, token):
+        from account.utils import password_reset_token_generator
+        if not password_reset_token_generator.check_token(user, token):
             return Response(
                 {'detail': 'Invalid or expired password reset token.'},
                 status=status.HTTP_400_BAD_REQUEST
@@ -1103,6 +1119,8 @@ class VerifyEmailView(APIView):
     No authentication required - uses token-based verification.
     """
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth_token_check"
 
     def post(self, request, uidb64, token):
         """Verify user email using uid and token."""
@@ -1116,8 +1134,9 @@ class VerifyEmailView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Check if token is valid
-        if not default_token_generator.check_token(user, token):
+        # Check if token is valid (verification tokens are not reset tokens)
+        from account.utils import email_verification_token_generator
+        if not email_verification_token_generator.check_token(user, token):
             return Response(
                 {'detail': 'Invalid or expired verification token.'},
                 status=status.HTTP_400_BAD_REQUEST
@@ -1356,7 +1375,8 @@ class RegisterResellerView(APIView):
     Creates a new user with RESELLER role and associated ResellerProfile.
     """
     permission_classes = [permissions.AllowAny]
-    throttle_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth_register"
 
     def post(self, request):
         """
@@ -1559,7 +1579,8 @@ class RegisterSupplierView(APIView):
     """
 
     permission_classes = [permissions.AllowAny]
-    throttle_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth_register"
 
     def post(self, request):
         """
@@ -1731,7 +1752,8 @@ class RegisterCustomerView(APIView):
     Creates a new user with CUSTOMER role and associated CustomerProfile.
     """
     permission_classes = [permissions.AllowAny]
-    throttle_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth_register"
 
     def post(self, request):
         """
@@ -1894,6 +1916,8 @@ class ContactMessageView(APIView):
     No authentication required - anyone can submit a contact message.
     """
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "contact"
 
     def post(self, request):
         """

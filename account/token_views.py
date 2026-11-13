@@ -5,6 +5,8 @@ from django.conf import settings
 import logging
 
 from account.token_serializers import CustomTokenObtainPairSerializer
+from backend.throttles import LoginEmailThrottle
+from rest_framework.throttling import ScopedRateThrottle
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +18,8 @@ class CustomTokenObtainPairView(TokenObtainPairView):
     """
 
     serializer_class = CustomTokenObtainPairSerializer
-    throttle_classes = []
+    throttle_classes = [ScopedRateThrottle, LoginEmailThrottle]
+    throttle_scope = "auth_login"
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -111,7 +114,8 @@ class CustomTokenRefreshView(TokenRefreshView):
     Token refresh view that reads refresh token from cookie and sets new tokens in cookies.
     """
     
-    throttle_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth_refresh"
     
     def post(self, request, *args, **kwargs):
         # Get refresh token from cookie or request body (for backward compatibility)

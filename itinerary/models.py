@@ -1,6 +1,7 @@
 import secrets
 from django.conf import settings
 from django.db import models
+from backend.uploads import RandomFilename
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.utils.text import slugify
@@ -475,7 +476,7 @@ class ItineraryTransaction(models.Model):
         help_text=_("Date when the transfer was made. Cannot be in the future."),
     )
     payment_proof_image = models.ImageField(
-        upload_to="itinerary_payments/proof/",
+        upload_to=RandomFilename("itinerary_payments/proof"),
         blank=True,
         null=True,
         help_text=_("Upload of the bank transfer slip or screenshot."),
@@ -561,7 +562,7 @@ class ItineraryTransaction(models.Model):
         
         # Validate payment transfer date is not in the future
         if self.payment_transfer_date:
-            today = timezone.now().date()
+            today = timezone.localdate()
             if self.payment_transfer_date > today:
                 raise ValidationError({
                     'payment_transfer_date': 'Tanggal transfer tidak boleh di masa depan.'

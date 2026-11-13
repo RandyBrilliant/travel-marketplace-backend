@@ -22,6 +22,7 @@ from datetime import timedelta, datetime, date
 from django.db.models import Sum, Count, Q
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
+from backend.caching import cache_per_user
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status as http_status
 
@@ -79,7 +80,7 @@ def parse_date_range(request, default_days=30):
         except ValueError:
             raise ValueError("Invalid start_date format. Use YYYY-MM-DD")
     else:
-        start_date = (timezone.now() - timedelta(days=default_days)).date()
+        start_date = timezone.localdate() - timedelta(days=default_days)
     
     if end_date_str:
         try:
@@ -87,7 +88,7 @@ def parse_date_range(request, default_days=30):
         except ValueError:
             raise ValueError("Invalid end_date format. Use YYYY-MM-DD")
     else:
-        end_date = timezone.now().date()
+        end_date = timezone.localdate()
     
     if start_date > end_date:
         raise ValueError("start_date must be before end_date")
@@ -95,8 +96,38 @@ def parse_date_range(request, default_days=30):
     return start_date, end_date
 
 
+def _daily_sales_and_commission(bookings):
+    """
+    Per-day sales and commission for a Booking queryset.
+
+    Sales and commission are summed in separate queries: joining bookings to
+    their commission rows in one aggregate repeats each booking's
+    total_amount once per commission row (up to 4 levels), inflating sales.
+    """
+    sales = {
+        row['created_at__date']: row['total']
+        for row in bookings.order_by().values('created_at__date').annotate(total=Sum('total_amount'))
+    }
+    commission = {
+        row['booking__created_at__date']: row['total']
+        for row in ResellerCommission.objects.filter(booking__in=bookings)
+        .order_by()
+        .values('booking__created_at__date')
+        .annotate(total=Sum('amount'))
+    }
+    return [
+        {
+            "period": day.isoformat(),
+            "sales": int(sales.get(day) or 0),
+            "commission": int(commission.get(day) or 0),
+        }
+        for day in sorted(set(sales) | set(commission))
+    ]
+
+
 @api_view(['GET'])
 @permission_classes([IsStaff])
+@cache_per_user(60)
 def sales_report_view(request):
     """
     Get sales and commission report for a specified date range.
@@ -119,25 +150,12 @@ def sales_report_view(request):
     try:
         start_date, end_date = parse_date_range(request)
         
-        # Optimized query: single aggregation query instead of multiple
         bookings = Booking.objects.filter(
             created_at__date__gte=start_date,
             created_at__date__lte=end_date,
             status__in=[BookingStatus.PENDING, BookingStatus.CONFIRMED]
-        ).values('created_at__date').annotate(
-            total_sales=Sum('total_amount'),
-            total_commission=Sum('commissions__amount')
-        ).order_by('created_at__date')
-        
-        # Format response
-        data = [
-            {
-                "period": booking['created_at__date'].isoformat(),
-                "sales": int(booking['total_sales'] or 0),
-                "commission": int(booking['total_commission'] or 0)
-            }
-            for booking in bookings
-        ]
+        )
+        data = _daily_sales_and_commission(bookings)
         
         return Response(data)
     
@@ -155,6 +173,7 @@ def sales_report_view(request):
 
 @api_view(['GET'])
 @permission_classes([IsStaff])
+@cache_per_user(60)
 def pax_report_view(request):
     """
     Get passenger (PAX) statistics and distribution for a date range.
@@ -208,6 +227,7 @@ def pax_report_view(request):
 
 @api_view(['GET'])
 @permission_classes([IsStaff])
+@cache_per_user(60)
 def total_amount_report_view(request):
     """
     Get total revenue report with daily breakdown for a date range.
@@ -277,6 +297,7 @@ def total_amount_report_view(request):
 
 @api_view(['GET'])
 @permission_classes([IsStaff])
+@cache_per_user(60)
 def commission_payout_report_view(request):
     """
     Get commission payout status and breakdown for a date range.
@@ -350,6 +371,7 @@ def commission_payout_report_view(request):
 
 @api_view(['GET'])
 @permission_classes([IsSupplier])
+@cache_per_user(60)
 def supplier_sales_report_view(request):
     """
     Get sales and commission report for supplier's own packages.
@@ -373,19 +395,8 @@ def supplier_sales_report_view(request):
             created_at__date__gte=start_date,
             created_at__date__lte=end_date,
             status__in=[BookingStatus.PENDING, BookingStatus.CONFIRMED]
-        ).values('created_at__date').annotate(
-            total_sales=Sum('total_amount'),
-            total_commission=Sum('commissions__amount')
-        ).order_by('created_at__date')
-        
-        data = [
-            {
-                "period": booking['created_at__date'].isoformat(),
-                "sales": int(booking['total_sales'] or 0),
-                "commission": int(booking['total_commission'] or 0)
-            }
-            for booking in bookings
-        ]
+        )
+        data = _daily_sales_and_commission(bookings)
         
         return Response(data)
     
@@ -409,6 +420,7 @@ def supplier_sales_report_view(request):
 
 @api_view(['GET'])
 @permission_classes([IsStaff])
+@cache_per_user(60)
 def admin_itinerary_transaction_report(request):
     """
     Admin itinerary transaction report endpoint.
@@ -489,6 +501,7 @@ def admin_itinerary_transaction_report(request):
 
 @api_view(['GET'])
 @permission_classes([IsSupplier])
+@cache_per_user(60)
 def supplier_itinerary_transaction_report(request):
     """
     Supplier itinerary transaction report endpoint.
@@ -575,6 +588,7 @@ def supplier_itinerary_transaction_report(request):
 
 @api_view(['GET'])
 @permission_classes([IsSupplier])
+@cache_per_user(60)
 def supplier_pax_report_view(request):
     """
     Get passenger statistics for supplier's own packages.
@@ -629,6 +643,7 @@ def supplier_pax_report_view(request):
 
 @api_view(['GET'])
 @permission_classes([IsSupplier])
+@cache_per_user(60)
 def supplier_total_amount_report_view(request):
     """
     Get total revenue report for supplier's own packages.
@@ -693,6 +708,7 @@ def supplier_total_amount_report_view(request):
 
 @api_view(['GET'])
 @permission_classes([IsSupplier])
+@cache_per_user(60)
 def supplier_commission_report_view(request):
     """
     Get commission payout report for supplier's own payouts.
