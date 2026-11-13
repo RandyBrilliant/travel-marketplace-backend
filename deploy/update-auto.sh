@@ -51,6 +51,9 @@ echo -e "${GREEN}✓ Services stopped${NC}"
 
 echo ""
 echo -e "${BLUE}[3/5] Building new images...${NC}"
+# Free space before building: the build cache is never reused (images are
+# built with --no-cache) and previously grew to ~15 GB on the server.
+docker builder prune -af > /dev/null 2>&1 || true
 docker compose -f docker-compose.prod.yml build --no-cache api celery celery-beat || {
     echo -e "${RED}Error: Failed to build images${NC}"
     exit 1
@@ -77,6 +80,15 @@ docker compose -f docker-compose.prod.yml exec -T api python manage.py collectst
     echo -e "${YELLOW}⚠ Static files collection had warnings${NC}"
 }
 echo -e "${GREEN}✓ Static files collected${NC}"
+
+echo ""
+echo -e "${BLUE}Removing old Docker images and build cache...${NC}"
+# Each deploy builds new images; the replaced ones become untagged and were
+# never removed (~100 of them had filled ~30 GB of the disk). Only untagged
+# images are removed; running and base images are kept.
+docker image prune -f > /dev/null 2>&1 || true
+docker builder prune -af > /dev/null 2>&1 || true
+echo -e "${GREEN}✓ Cleanup done ($(df -h / | awk 'NR==2 {print $4}') free on /)${NC}"
 
 echo ""
 echo -e "${GREEN}=========================================="
